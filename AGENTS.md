@@ -52,8 +52,11 @@ stays out of git.
   third-party dependency — including these — requires the user's explicit approval first. Present
   purpose, license, size/maintenance cost, and whether we could implement it ourselves; wait for
   a clear yes, then record the approval in `docs/dependencies.md`.
-- Do not download code or data from the network unless the user asks for it. Do not modify
-  system-wide configuration, shell configuration or toolchain files.
+- Network research is allowed: web standards (WHATWG, W3C, MDN, WPT, RFCs), real websites and a
+  locally installed reference browser may be consulted for reference and correctness checks.
+  Never copy code from reference implementations, and do not download dependencies, code or test
+  corpora without the user's approval. Do not modify system-wide configuration, shell
+  configuration or toolchain files.
 
 ## Engineering and code discipline
 
@@ -101,6 +104,8 @@ stays out of git.
 
 - Read `docs/` and the existing code before acting. Ask the user when a design direction is
   unclear; never silently make big decisions.
+- When parsing or rendering behavior is unclear, consult the relevant standard and compare with a
+  real browser; use them as references only, never copy reference implementations.
 - Do only what the current task requires — no future features, no scope creep. If the task is
   ambiguous, ask instead of guessing.
 - Local, personal or machine-specific configuration is never copied into the repository; tracked
