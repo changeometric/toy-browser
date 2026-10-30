@@ -32,7 +32,11 @@ int Fail(const char* message) {
 }  // namespace
 
 int main() {
-  const toy::shell::Options options{kWidth, kHeight, "toybrowser", kScreenshotPath};
+  toy::shell::Options options;
+  options.width = kWidth;
+  options.height = kHeight;
+  options.title = "toybrowser";
+  options.screenshot_path = kScreenshotPath;
   if (toy::shell::Run(options) != 0) {
     return Fail("shell::Run failed");
   }

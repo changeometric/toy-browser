@@ -16,18 +16,20 @@ namespace {
 constexpr std::string_view kProgramName = "toybrowser";
 
 void PrintUsage(std::FILE* stream, const char* argv0) {
-  std::fprintf(stream,
-               "Usage: %s [options]\n"
-               "\n"
-               "A toy web browser built from scratch. Page loading arrives in later milestones.\n"
-               "\n"
-               "Options:\n"
-               "  -h, --help         Show this help and exit.\n"
-               "  -v, --version      Show the version and exit.\n"
-               "  --headless         Render without a window (requires --screenshot).\n"
-               "  --screenshot PATH  Write one frame to PATH as a PPM image; implies --headless.\n"
-               "  --size WxH         Window size in pixels (default 800x600).\n",
-               argv0);
+  std::fprintf(
+      stream,
+      "Usage: %s [options]\n"
+      "\n"
+      "A toy web browser built from scratch. Page loading arrives in later milestones.\n"
+      "\n"
+      "Options:\n"
+      "  -h, --help         Show this help and exit.\n"
+      "  -v, --version      Show the version and exit.\n"
+      "  --headless         Render without a window (requires --screenshot or --dump-body).\n"
+      "  --screenshot PATH  Write one frame to PATH as a PPM image; implies --headless.\n"
+      "  --dump-body URL    Fetch URL and write the raw response body to stdout; no window.\n"
+      "  --size WxH         Window size in pixels (default 800x600).\n",
+      argv0);
 }
 
 int FailUsage(const char* argv0, const std::string& message) {
@@ -86,6 +88,17 @@ int main(int argc, char** argv) {
       headless = true;
       continue;
     }
+    if (argument == "--dump-body") {
+      if (i + 1 >= argc) {
+        return FailUsage(argv[0], "--dump-body requires a URL");
+      }
+      const std::string_view url = argv[++i];
+      if (url.empty()) {
+        return FailUsage(argv[0], "--dump-body requires a non-empty URL");
+      }
+      options.dump_body_url = url;
+      continue;
+    }
     if (argument == "--size") {
       if (i + 1 >= argc) {
         return FailUsage(argv[0], "--size requires a value of the form WxH");
@@ -100,8 +113,11 @@ int main(int argc, char** argv) {
     return FailUsage(argv[0], "unknown option '" + std::string(argument) + "'");
   }
 
-  if (headless && options.screenshot_path.empty()) {
-    return FailUsage(argv[0], "--headless requires --screenshot <path>");
+  if (!options.screenshot_path.empty() && !options.dump_body_url.empty()) {
+    return FailUsage(argv[0], "--dump-body cannot be combined with --screenshot");
+  }
+  if (headless && options.screenshot_path.empty() && options.dump_body_url.empty()) {
+    return FailUsage(argv[0], "--headless requires --screenshot <path> or --dump-body <url>");
   }
 
   return toy::shell::Run(options);

@@ -2,8 +2,11 @@
 
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 
+#include "toy/net/http.h"
+#include "toy/net/url.h"
 #include "toy/platform/window.h"
 #include "toy/render/ppm.h"
 #include "toy/render/surface.h"
@@ -21,6 +24,31 @@ constexpr int kDemoBandHeight = 8;
 void PaintPlaceholderPage(render::Surface& surface) {
   surface.Fill(kPageColor);
   surface.FillRect(0, 0, surface.width(), kDemoBandHeight, kDemoBandColor);
+}
+
+int RunDumpBody(const Options& options) {
+  std::string error;
+  const std::optional<net::Url> url = net::ParseUrl(options.dump_body_url, &error);
+  if (!url) {
+    std::fprintf(stderr, "toybrowser: cannot parse URL '%s': %s\n", options.dump_body_url.c_str(),
+                 error.c_str());
+    return 1;
+  }
+
+  net::Response response;
+  if (!net::Fetch(*url, net::FetchOptions{}, &response, &error)) {
+    std::fprintf(stderr, "toybrowser: cannot fetch '%s': %s\n", options.dump_body_url.c_str(),
+                 error.c_str());
+    return 1;
+  }
+
+  // Raw bytes and no trailing newline: the dump reproduces the body exactly.
+  if (std::fwrite(response.body.data(), 1, response.body.size(), stdout) != response.body.size()) {
+    std::fprintf(stderr, "toybrowser: cannot write the response body to stdout\n");
+    return 1;
+  }
+  std::fflush(stdout);
+  return 0;
 }
 
 int RunHeadless(const Options& options) {
@@ -74,6 +102,13 @@ int Run(const Options& options) {
     std::fprintf(stderr, "toybrowser: window size must be positive, got %dx%d\n", options.width,
                  options.height);
     return 2;
+  }
+  if (!options.screenshot_path.empty() && !options.dump_body_url.empty()) {
+    std::fprintf(stderr, "toybrowser: --dump-body cannot be combined with --screenshot\n");
+    return 2;
+  }
+  if (!options.dump_body_url.empty()) {
+    return RunDumpBody(options);
   }
   if (!options.screenshot_path.empty()) {
     return RunHeadless(options);

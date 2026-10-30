@@ -201,3 +201,12 @@ the round when possible. Clean up stale build directories and stray files.
   own build directory.
 - M1: the Lead re-ran fresh GCC and Clang builds with warnings as errors and the full test suite
   after merging parallel work, then made one grouped commit.
+- M2: the Lead must update the shared module lists in root/`tests` CMake before spawning a module
+  owner; the net module was found missing from those lists during kickoff.
+- M2: adding a field to a struct that is aggregate-initialized triggers
+  `-Wmissing-field-initializers` under `-Wextra -Werror`; prefer field-wise setup in callers or
+  brace initialization that names every field.
+- M2: end-to-end CLI behavior can be tested with CMake alone — `file(WRITE)` fixture plus
+  `PASS_REGULAR_EXPRESSION`/`WILL_FAIL` — no test framework or stdout capture needed.
+- M2: a non-2xx HTTP response is a successful transport, so `--dump-body` prints the error page
+  body; navigation semantics arrive with the later milestones.

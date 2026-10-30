@@ -18,13 +18,20 @@ done when its demo command works, new logic has tests, and the docs are still ac
   with no display, and `render.surface`, `render.ppm`, `platform.window_requires_display`,
   `shell.headless_screenshot` all pass under GCC and Clang with warnings as errors.
 
-## M2 — Fetch a URL
+## M2 — Fetch a URL ✅ (done)
 
-- URL parsing (scheme, host, port, path) for `http` and `file`.
-- HTTP/1.1 GET over TCP: status line, headers, `Content-Length` and chunked bodies, basic
-  redirects and timeouts.
-- `--dump-body <url>`.
-- Done when a local page is fetched and dumped, tested against an in-process TCP server. No TLS.
+- URL parsing for absolute `http` and `file` URLs: percent decoding, default ports, no base
+  resolution yet.
+- `net` module: blocking HTTP/1.1 GET over POSIX sockets, one request per connection, connect and
+  read timeouts, `Content-Length` and chunked bodies, redirects (301/302/303/307/308), a 16 MiB
+  body cap; `file://` reads the local file.
+- CLI: `--dump-body <url>` writes the raw body to stdout. Everything is headless; no display needed.
+- Acceptance reached: byte-identical dumps for `file://` and for a loopback HTTP server; error paths
+  exit non-zero; `net.url`, `net.http`, `net.file`, `shell.dump_body_file` and
+  `shell.dump_body_missing_file` pass under GCC and Clang with warnings as errors. No TLS.
+- Known M2 limits: a non-2xx response is still a successful fetch (the status is exposed in the API;
+  error pages and navigation arrive later), and the shell-level end-to-end test covers `file://`
+  while HTTP is covered by the in-process-server tests.
 
 ## M3 — HTML to DOM
 
@@ -80,3 +87,5 @@ starts only after the previous slice is clean and the user agrees on priority.
 - Never block a milestone on a pending dependency approval: ship the headless or
   own-implementation slice, then upgrade when approval arrives.
 - Any milestone can be re-scoped by the user. MVP beats completeness, always.
+- Headless-first: any visible or observable result must also be inspectable without a window (a
+  dump command or a screenshot), so the project can be developed and tested entirely headless.

@@ -2,8 +2,9 @@
 
 A toy web browser built from scratch: C++20, CMake, and no ready-made browser components.
 
-**Status: M1 — window, software surface and headless screenshots.** Page loading arrives in later
-milestones; see the [roadmap](docs/roadmap.md).
+**Status: M2 — URL fetching (`http://` and `file://`) through the headless `--dump-body` command.**
+Page rendering is still the M1 placeholder; HTML parsing starts in M3. See the
+[roadmap](docs/roadmap.md).
 
 ## Build and run
 
@@ -14,10 +15,12 @@ ctest --test-dir build --output-on-failure
 
 ./build/toybrowser                                   # window with the placeholder page
 ./build/toybrowser --headless --screenshot out.ppm   # same frame, no display needed
+./build/toybrowser --dump-body file:///etc/hostname  # fetch a URL, raw bytes to stdout
 ```
 
 The window backend needs libX11 at build time (approved; see [dependencies](docs/dependencies.md)).
-The headless path needs neither a display nor any extra library.
+The headless path needs neither a display nor any extra library, and it is the primary mode for
+testing and debugging: every rendered result can be inspected without opening a window.
 
 Any C++20 compiler and CMake generator that meets the minimum CMake version works; nothing in the
 tree depends on a specific machine's paths, toolchain version or installed package set.
@@ -33,6 +36,26 @@ tree depends on a specific machine's paths, toolchain version or installed packa
 | [conventions.md](docs/conventions.md) | C++, CMake and testing conventions |
 | [open-questions.md](docs/open-questions.md) | Decisions waiting for the user |
 | [AGENTS.md](AGENTS.md) | Rules for AI agents working on the repository |
+
+## Dependencies
+
+Only one third-party library is linked today; the browser engine itself has no ready-made
+components (no HTML parser, CSS engine, JS engine, layout or rendering engine).
+
+| Component | Purpose | License | Status |
+| --- | --- | --- | --- |
+| C++20 standard library + POSIX | baseline (containers, sockets, files) | standard / OS | always |
+| libX11 | window, input, pixel presentation | MIT/X11 | linked since M1 |
+| libpng + zlib | image decoding (M8, if used) | libpng license / zlib license | approved, not linked |
+| freetype | font rasterization (M8, if used) | FreeType License | approved, not linked |
+
+The policy, the approval log and from-scratch alternatives live in
+[dependencies.md](docs/dependencies.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE). All approved dependencies use permissive licenses compatible with it
+(libX11 is MIT/X11; libpng/zlib/freetype have their own permissive licenses).
 
 ## Ground rules
 

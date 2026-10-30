@@ -60,6 +60,8 @@ ctest --test-dir build --output-on-failure
 
 - Out-of-source builds only. Add `-DTOYBROWSER_WERROR=ON` to treat warnings as errors.
 - Build directories are never committed.
+- `CMAKE_EXPORT_COMPILE_COMMANDS` is on, so `build/compile_commands.json` is available for clangd
+  and IDEs; it stays untracked (`build/` is ignored).
 
 ## Logging and diagnostics
 

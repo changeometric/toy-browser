@@ -31,6 +31,9 @@ the gitignored `AGENTS.local.md`.
 - Do not depend on machine-specific environment: no absolute paths, no hardcoded compiler or
   library versions, no assumptions about a particular GPU, window manager, font directory or
   installed package set. Build and test steps must be reproducible on another conforming machine.
+- The browser must run and render headless: every feature must be exercisable, renderable and
+  testable without a window. The window is an optional presenter; headless CLI modes
+  (`--dump-*`, `--screenshot`) are the primary debugging path.
 
 ## Dependency discipline (highest priority)
 

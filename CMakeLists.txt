@@ -11,6 +11,9 @@ project(toybrowser
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# compile_commands.json for clangd and IDEs; generated inside the build directory,
+# which stays untracked.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(TOYBROWSER_BUILD_TESTS "Build the unit tests" ON)
 option(TOYBROWSER_WERROR "Treat compiler warnings as errors" OFF)
@@ -39,7 +42,7 @@ toybrowser_set_warnings(toybrowser)
 
 # Each module owns its CMakeLists.txt and is picked up as soon as the file
 # exists, so parallel work on different modules never has to edit this file.
-foreach(module render platform shell)
+foreach(module render platform net shell)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${module}/CMakeLists.txt")
     add_subdirectory(src/${module})
   endif()

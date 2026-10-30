@@ -37,6 +37,11 @@ Only `shell` sees all modules and wires them together.
 MVP keeps the whole chain synchronous and single-threaded. Every stage takes plain data and
 returns plain data, so each one can be exercised through a `--dump-*` command in tests.
 
+Networking (M2): `net` owns URLs, sockets and HTTP. Fetching is a blocking HTTP/1.1 GET — one
+request per connection, connect and read timeouts, `Content-Length` or chunked bodies, redirects,
+no TLS and no keep-alive — behind `Fetch()`, so it can become non-blocking later without changing
+callers. `net` is the only module allowed to touch sockets; page code never sees them.
+
 ## Data model
 
 - **DOM**: an arena (`std::vector<Node>`) addressed by integer `NodeId`; parent, first/last child,
@@ -75,6 +80,10 @@ can't form ownership cycles. Revisit only if it actually hurts.
 - Presentation: the platform receives a pixel view (pixels, width, height, stride measured in
   pixels per row — the same units as `render::Surface::stride()`) and copies it out. The headless
   backend writes a PPM file instead, which keeps render tests dependency-free.
+- **Headless-first**: every stage runs without a window. Page loading, parsing, layout, painting
+  and screenshots are driven and inspected through CLI modes (`--dump-body`, `--dump-dom`,
+  `--dump-boxes`, `--screenshot`); the window only ever presents pixels that the headless path
+  already produced. Automated tests never require a display.
 - M1's visible result — a solid-color window — uses exactly this path, so later stages only swap
   display lists in.
 

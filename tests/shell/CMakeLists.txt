@@ -3,3 +3,17 @@ target_link_libraries(shell_headless_test PRIVATE toy_shell)
 toybrowser_set_warnings(shell_headless_test)
 
 add_test(NAME shell.headless_screenshot COMMAND shell_headless_test)
+
+# End-to-end --dump-body checks against local files: no network, no display.
+set(shell_dump_body_fixture "${CMAKE_CURRENT_BINARY_DIR}/dump_body_fixture.txt")
+file(WRITE "${shell_dump_body_fixture}" "M2 dump body fixture: shell end-to-end fetch\n")
+
+add_test(NAME shell.dump_body_file
+  COMMAND $<TARGET_FILE:toybrowser> --dump-body "file://${shell_dump_body_fixture}")
+set_tests_properties(shell.dump_body_file PROPERTIES
+  PASS_REGULAR_EXPRESSION "M2 dump body fixture: shell end-to-end fetch")
+
+add_test(NAME shell.dump_body_missing_file
+  COMMAND $<TARGET_FILE:toybrowser> --dump-body
+          "file://${CMAKE_CURRENT_BINARY_DIR}/missing_dump_body_fixture.txt")
+set_tests_properties(shell.dump_body_missing_file PROPERTIES WILL_FAIL TRUE)

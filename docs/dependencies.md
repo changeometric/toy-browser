@@ -3,6 +3,13 @@
 The policy itself is in [AGENTS.md](../AGENTS.md). This file records what is actually allowed and
 what is still being requested.
 
+## Inventory today
+
+**One third-party library is linked: libX11 (MIT/X11)**, used by the X11 window backend. Everything
+else is the C++20 standard library and standard POSIX interfaces. libpng, zlib and freetype are
+approved for later use (M8) but are not linked yet. No HTML parser, CSS engine, JS engine, layout
+engine or browser engine is used — those are written in this repository.
+
 ## Currently approved
 
 Approved by the user on 2026-10-31, when M1 started:
@@ -14,7 +21,7 @@ Approved by the user on 2026-10-31, when M1 started:
 - **libxcb** — allowed as an alternative windowing library; currently unused.
 
 Nothing else is linked. The C++20 standard library and standard OS/POSIX interfaces remain the
-default.
+default. All approved candidates use permissive licenses compatible with the project's MIT license.
 
 ## System interfaces are still dependencies
 
