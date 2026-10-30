@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 
+#include "toy/dom/node.h"
 #include "toy/net/http.h"
 #include "toy/net/url.h"
 #include "toy/platform/window.h"
@@ -45,6 +46,33 @@ int RunDumpBody(const Options& options) {
   // Raw bytes and no trailing newline: the dump reproduces the body exactly.
   if (std::fwrite(response.body.data(), 1, response.body.size(), stdout) != response.body.size()) {
     std::fprintf(stderr, "toybrowser: cannot write the response body to stdout\n");
+    return 1;
+  }
+  std::fflush(stdout);
+  return 0;
+}
+
+int RunDumpDom(const Options& options) {
+  std::string error;
+  const std::optional<net::Url> url = net::ParseUrl(options.dump_dom_url, &error);
+  if (!url) {
+    std::fprintf(stderr, "toybrowser: cannot parse URL '%s': %s\n", options.dump_dom_url.c_str(),
+                 error.c_str());
+    return 1;
+  }
+
+  net::Response response;
+  if (!net::Fetch(*url, net::FetchOptions{}, &response, &error)) {
+    std::fprintf(stderr, "toybrowser: cannot fetch '%s': %s\n", options.dump_dom_url.c_str(),
+                 error.c_str());
+    return 1;
+  }
+
+  // HTML parsing is error-tolerant: malformed input still yields a document.
+  const dom::Document document = dom::ParseDocument(response.body);
+  const std::string dump = dom::DumpDocument(document);
+  if (std::fwrite(dump.data(), 1, dump.size(), stdout) != dump.size()) {
+    std::fprintf(stderr, "toybrowser: cannot write the DOM dump to stdout\n");
     return 1;
   }
   std::fflush(stdout);
@@ -103,9 +131,16 @@ int Run(const Options& options) {
                  options.height);
     return 2;
   }
-  if (!options.screenshot_path.empty() && !options.dump_body_url.empty()) {
-    std::fprintf(stderr, "toybrowser: --dump-body cannot be combined with --screenshot\n");
+  const int headless_modes = static_cast<int>(!options.screenshot_path.empty()) +
+                             static_cast<int>(!options.dump_body_url.empty()) +
+                             static_cast<int>(!options.dump_dom_url.empty());
+  if (headless_modes > 1) {
+    std::fprintf(stderr,
+                 "toybrowser: --screenshot, --dump-body and --dump-dom are mutually exclusive\n");
     return 2;
+  }
+  if (!options.dump_dom_url.empty()) {
+    return RunDumpDom(options);
   }
   if (!options.dump_body_url.empty()) {
     return RunDumpBody(options);

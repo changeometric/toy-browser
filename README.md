@@ -16,6 +16,7 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser                                   # window with the placeholder page
 ./build/toybrowser --headless --screenshot out.ppm   # same frame, no display needed
 ./build/toybrowser --dump-body file:///etc/hostname  # fetch a URL, raw bytes to stdout
+./build/toybrowser --dump-dom  file:///etc/hostname  # fetch and dump the parsed DOM tree
 ```
 
 The window backend needs libX11 at build time (approved; see [dependencies](docs/dependencies.md)).

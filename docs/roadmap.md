@@ -33,12 +33,21 @@ done when its demo command works, new logic has tests, and the docs are still ac
   error pages and navigation arrive later), and the shell-level end-to-end test covers `file://`
   while HTTP is covered by the in-process-server tests.
 
-## M3 — HTML to DOM
+## M3 — HTML to DOM ✅ (done)
 
-- Tokenizer and tree builder for a deliberately small subset, plus basic error tolerance (never
-  crash on malformed input).
-- `--dump-dom`.
-- Done when fixture pages produce expected DOM dumps.
+- `dom` module: self-written tokenizer and stack-based tree builder over an arena DOM, with error
+  tolerance (malformed input never fails), a deterministic dump format, and roughly 40 golden dump
+  cases plus entity tests.
+- `--dump-dom <url>`: fetch through `net`, parse, dump the DOM to stdout; fully headless.
+- Acceptance reached: `dom.parser`, `dom.entities`, `shell.dump_dom_file` and
+  `shell.dump_dom_missing_file` pass under GCC and Clang with warnings as errors; a local HTTP page
+  round-trips fetch → parse → dump.
+- Known M3 limits (deliberate MVP subset): no HTML5 insertion modes (no implied end tags except at
+  EOF, no foster parenting, no adoption agency), doctype only before `<html>`, no implicit head
+  content routing (a `<title>` without an explicit `<head>` lands in body), comments are kept
+  verbatim (so a source comment's spaces show up in the dump), whitespace text nodes are preserved
+  with simple routing, entities are a small named set plus numeric forms (semicolon required,
+  lowercase `x` only), no templates/SVG/MathML namespaces, and input is assumed to be UTF-8.
 
 ## M4 — CSS and computed style
 

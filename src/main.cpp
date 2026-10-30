@@ -25,9 +25,10 @@ void PrintUsage(std::FILE* stream, const char* argv0) {
       "Options:\n"
       "  -h, --help         Show this help and exit.\n"
       "  -v, --version      Show the version and exit.\n"
-      "  --headless         Render without a window (requires --screenshot or --dump-body).\n"
+      "  --headless         No window; requires --screenshot, --dump-body or --dump-dom.\n"
       "  --screenshot PATH  Write one frame to PATH as a PPM image; implies --headless.\n"
       "  --dump-body URL    Fetch URL and write the raw response body to stdout; no window.\n"
+      "  --dump-dom URL     Fetch URL as HTML and write the DOM dump to stdout; no window.\n"
       "  --size WxH         Window size in pixels (default 800x600).\n",
       argv0);
 }
@@ -99,6 +100,17 @@ int main(int argc, char** argv) {
       options.dump_body_url = url;
       continue;
     }
+    if (argument == "--dump-dom") {
+      if (i + 1 >= argc) {
+        return FailUsage(argv[0], "--dump-dom requires a URL");
+      }
+      const std::string_view url = argv[++i];
+      if (url.empty()) {
+        return FailUsage(argv[0], "--dump-dom requires a non-empty URL");
+      }
+      options.dump_dom_url = url;
+      continue;
+    }
     if (argument == "--size") {
       if (i + 1 >= argc) {
         return FailUsage(argv[0], "--size requires a value of the form WxH");
@@ -113,11 +125,16 @@ int main(int argc, char** argv) {
     return FailUsage(argv[0], "unknown option '" + std::string(argument) + "'");
   }
 
-  if (!options.screenshot_path.empty() && !options.dump_body_url.empty()) {
-    return FailUsage(argv[0], "--dump-body cannot be combined with --screenshot");
+  const bool has_screenshot = !options.screenshot_path.empty();
+  const bool has_dump_body = !options.dump_body_url.empty();
+  const bool has_dump_dom = !options.dump_dom_url.empty();
+  const int headless_modes = static_cast<int>(has_screenshot) + static_cast<int>(has_dump_body) +
+                             static_cast<int>(has_dump_dom);
+  if (headless_modes > 1) {
+    return FailUsage(argv[0], "--screenshot, --dump-body and --dump-dom are mutually exclusive");
   }
-  if (headless && options.screenshot_path.empty() && options.dump_body_url.empty()) {
-    return FailUsage(argv[0], "--headless requires --screenshot <path> or --dump-body <url>");
+  if (headless && headless_modes == 0) {
+    return FailUsage(argv[0], "--headless requires --screenshot, --dump-body or --dump-dom");
   }
 
   return toy::shell::Run(options);

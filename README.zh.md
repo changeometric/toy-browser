@@ -2,8 +2,8 @@
 
 一个从零实现的玩具网页浏览器：C++20、CMake，不使用现成的浏览器组件。
 
-**状态：M2 —— 通过 headless 的 `--dump-body` 命令获取 URL（`http://` 与 `file://`）。** 页面渲染仍是
-M1 的占位页；HTML 解析从 M3 开始。详见[路线图](docs/roadmap.md)。英文原版：[README.md](README.md)。
+**状态：M3 —— HTML 已被解析成 arena DOM，可通过 headless 的 `--dump-dom` 命令查看。** 页面渲染仍是
+M1 的占位页；CSS 从 M4 开始。详见[路线图](docs/roadmap.md)。英文原版：[README.md](README.md)。
 
 ## 构建与运行
 
@@ -15,6 +15,7 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser                                   # 打开窗口显示占位页
 ./build/toybrowser --headless --screenshot out.ppm   # 同一帧，无需显示器
 ./build/toybrowser --dump-body file:///etc/hostname  # 抓取 URL，原始字节输出到 stdout
+./build/toybrowser --dump-dom  file:///etc/hostname  # 抓取并输出解析后的 DOM 树
 ```
 
 窗口后端在构建时需要 libX11（已批准，见[依赖说明](docs/dependencies.md)）。headless 路径既不需要

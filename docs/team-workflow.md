@@ -210,3 +210,12 @@ the round when possible. Clean up stale build directories and stray files.
   `PASS_REGULAR_EXPRESSION`/`WILL_FAIL` — no test framework or stdout capture needed.
 - M2: a non-2xx HTTP response is a successful transport, so `--dump-body` prints the error page
   body; navigation semantics arrive with the later milestones.
+- M3: pre-updating the shared CMake module lists before spawning (the M2 lesson) removed the
+  kickoff blocker entirely; the two serial tasks (dom, then shell) needed no other coordination.
+- M3: decisions outside the frozen contract (verbatim comment data, whitespace routing, no implied
+  head routing) were reported by the owner and accepted as documented MVP limits in the roadmap's
+  known-limits list rather than silently changed.
+- M3: robustness checks for parsers (random/malformed inputs, deep nesting, ASan/UBSan) were cheap
+  and worth keeping as a habit for the dom and css modules.
+- M3: a test assertion built on CMake regex was itself verified with `cmake -P` before being
+  trusted; assertions need verification too.

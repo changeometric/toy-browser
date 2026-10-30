@@ -44,6 +44,13 @@ callers. `net` is the only module allowed to touch sockets; page code never sees
 support (HTTP proxy first) is planned behind `FetchOptions` and stays inside `net`; it needs no new
 dependency.
 
+HTML and DOM (M3): `dom` owns the tokenizer, the simplified tree builder and the arena DOM. Parsing
+is error-tolerant and always produces one `html` element with `head` and `body` children; the
+tokenizer covers the supported subset (elements and attributes, comments, doctype, raw-text and
+RCDATA elements, a small entity set) and never fails on malformed input. `DumpDocument()` is the
+deterministic textual form used by `--dump-dom` and the parser tests. Nodes are addressed by integer
+ids (no owning pointers, no cycles); the DOM knows nothing about CSS, layout or scripting.
+
 ## Data model
 
 - **DOM**: an arena (`std::vector<Node>`) addressed by integer `NodeId`; parent, first/last child,
