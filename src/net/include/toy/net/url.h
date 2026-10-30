@@ -24,10 +24,28 @@ struct Url {
 };
 
 // Parses an absolute http:// or file:// URL. Relative URLs and other schemes are
-// rejected because there is no base resolution yet ("no base resolution yet").
+// rejected; to resolve a relative reference against an absolute base URL, callers
+// use ResolveUrl(base, reference) instead.
 // On failure returns std::nullopt and, when `error` is not null, sets it to a
 // human-readable message. On success `error` is cleared.
 std::optional<Url> ParseUrl(std::string_view text, std::string* error);
+
+// Resolves `reference` against the absolute URL `base` and returns the resulting
+// absolute URL (RFC 3986 section 5.2, restricted to the http/file subset).
+// `reference` may be an absolute URL, a scheme-relative URL ("//host/path"), an
+// absolute path ("/a/b"), a relative path (including "." and ".." segments), a
+// query-only reference ("?q"), a fragment-only reference ("#frag") or empty
+// (which resolves to `base` without its fragment). Dot segments are removed from
+// the result. A reference with an unsupported scheme (anything but http or file)
+// is an error.
+//
+// The result is parsed with ParseUrl. File URLs in this MVP cannot carry a query
+// or fragment, so those components are dropped from a file result; http results
+// keep them.
+//
+// On failure returns std::nullopt and, when `error` is not null, sets it to a
+// human-readable message. On success `error` is cleared.
+std::optional<Url> ResolveUrl(const Url& base, std::string_view reference, std::string* error);
 
 // Serializes a URL back to text, percent-encoding path, query and fragment.
 // For every URL accepted by ParseUrl, ParseUrl(SerializeUrl(url)) reproduces

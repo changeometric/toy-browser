@@ -46,7 +46,18 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 
 布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型）；内置等宽位图字体度量位于 `render`，由 `shell` 适配。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。
 
-绘制（M6）：`paint` 按前序遍历盒树，产出扁平的 `render::DisplayList`：每个计算背景非透明的元素盒变成一条 `FillRect`（背景先于子内容），每个文本盒变成一条 `DrawText`，使用继承的颜色与字号。`paint` 从不光栅化，也从不包含 render 的实现头文件。`render` 执行该列表：矩形填充对不透明目标使用冻结的 SrcOver 整数公式；文本使用内置 8x16 ASCII 字形表，按最近邻单元缩放（无抗锯齿）；整数矩形裁剪栈约束每条命令（M6 还不发出裁剪命令；溢出与滚动裁剪在 M7 到来）。`shell` 把 canvas 填白、按 surface 宽度布局页面、构建列表并光栅化；窗口与 `--screenshot` 共享完全相同的这条路径。确定性正是重点：相同输入在 GCC 和 Clang 上产出逐字节相同的 PPM，截图测试依赖这一点。
+绘制（M6）：`paint` 按前序遍历盒树，产出扁平的 `render::DisplayList`：每个计算背景非透明的元素盒变成一条 `FillRect`（背景先于子内容），每个文本盒变成一条 `DrawText`，使用继承的颜色与字号。`paint` 从不光栅化，也从不包含 render 的实现头文件。`render` 执行该列表：矩形填充对不透明目标使用冻结的 SrcOver 整数公式；文本使用内置 8x16 ASCII 字形表，按最近邻单元缩放（无抗锯齿）；整数矩形裁剪栈约束每条命令（M7 会用视口 `PushClip`/`PopClip` 对包裹页面，并把每条命令按滚动偏移平移）。`shell` 把 canvas 填白、按 surface 宽度布局页面、构建列表并光栅化；窗口与 `--screenshot` 共享完全相同的这条路径。确定性正是重点：相同输入在 GCC 和 Clang 上产出逐字节相同的 PPM，截图测试依赖这一点。
+
+导航（M7）：`shell::Browser` 拥有一个浏览器会话：当前页面（最终 URL、DOM、样式树与盒树）、
+导航历史、整数垂直滚动偏移与绘制。历史是一个 URL 向量加一个索引；每次成功加载追加一条
+（后退后再加载会截断前进条目），加载失败则页面、滚动偏移与历史都不变。点击先用滚动偏移换算成
+页面坐标，再对盒树做命中测试（`layout::HitTest` 返回绘制顺序中最后一个包含该点的盒），沿 DOM
+祖先找到最近的带 `href` 属性的元素，用 `net::ResolveUrl` 相对页面最终 URL 解析后加载。只有
+`http`/`file` 引用会导航；只改变 fragment 的引用是 no-op。滚动是垂直的、以整数设备像素表示，
+由 `layout::ContentHeight` 钳制在 `[0, content_height - viewport_height]`；`paint` 用视口裁剪
+包裹页面并按 `-scroll_y` 平移，`render` 执行冻结的裁剪栈。窗口事件循环把点击、滚轮格数与按键
+（Alt+Left/Right 前进后退，方向键/PageUp/PageDown/Home/End 滚动）转发给会话并按需重绘；窗口
+标题跟随第一个 `<title>` 文本，没有时回退到 URL。加载在处理函数内同步执行，保持单线程 MVP 模型。
 
 ## 数据模型
 

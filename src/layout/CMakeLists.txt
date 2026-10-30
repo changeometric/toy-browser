@@ -4,6 +4,7 @@
 add_library(toy_layout STATIC
   box.cpp
   dump.cpp
+  geometry.cpp
   layout.cpp
 )
 

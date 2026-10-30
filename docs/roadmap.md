@@ -3,8 +3,8 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M6 are done; M7 (navigation) is next.** For a snapshot and takeover guide, read
-[handoff.md](handoff.md).
+**Current status: M0–M7 are done; M8 (real fonts and images, needs approval) is next.** For a
+snapshot and takeover guide, read [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
 
@@ -116,10 +116,35 @@ done when its demo command works, new logic has tests, and the docs are still ac
   scrolling and navigation arrive in M7; the rasterizer is bounded by the clip area, including for
   adversarial font sizes.
 
-## M7 — Navigation (next)
+## M7 — Navigation ✅ (done)
 
-- Clickable links, scrolling, back/forward history, window title.
-- Done when a small local multi-page site can be browsed.
+- `shell::Browser`: one headless browser session owning the current page (final URL, DOM, styles,
+  box tree), the navigation history, the vertical scroll offset and painting, so clicks, history,
+  scrolling and titles are testable without a window.
+- `net::ResolveUrl`: RFC 3986 resolution of relative references against the current page's final
+  URL (http/file subset; file results drop the query/fragment this MVP cannot carry).
+- `layout`: `HitTest` (the box painted last that contains a point) and `ContentHeight` (scrollable
+  extent); `paint` wraps the page in a viewport `PushClip`/`PopClip` pair and translates every
+  command by the scroll offset.
+- `platform`: normalized input events (left click in window pixels, wheel notches, mapped keys with
+  modifiers) and `SetTitle`; the X11 backend maps buttons/keysyms and publishes
+  `_NET_WM_NAME`/`WM_NAME`.
+- `shell` event loop: link clicks navigate, the wheel/arrow/PageUp/PageDown/Home/End keys scroll,
+  Alt+Left/Right navigate history, and the window title follows `<title>` (falling back to the
+  URL). `--screenshot` renders one frame through the same session at scroll 0; the `--dump-*` modes
+  are unchanged and headless.
+- A committed three-page fixture site (`tests/fixtures/nav_site/`) is browsable in the window and
+  drives the headless `shell.navigation` test.
+- Acceptance reached: `net.url_resolution`, `layout.hit_test`, the updated `paint.display_list`,
+  `shell.navigation` and every pre-existing test pass under GCC and Clang with warnings as errors
+  (40 tests total); scroll-0 screenshots and all existing renders are byte-identical to M6; a local
+  multi-page site can be browsed in the window (click, back/forward, scroll, title).
+- Known M7 limits: vertical scrolling only (no horizontal scroll, no scrollbars); a wheel notch is
+  a fixed 3 lines (48 px) and scrolling is integer device pixels; navigation reloads the page (no
+  cache), so Back/Forward reset the scroll offset to 0 instead of restoring it; fragment navigation
+  does not scroll to anchors (fragment-only links are no-ops); only `http`/`file` links navigate
+  (unsupported schemes report an error on stderr); a failed load keeps the current page and prints
+  an error on stderr; no hover/active link styling, cursor changes, forms or in-page error pages.
 
 ## M8 — Real fonts and images (needs approval)
 

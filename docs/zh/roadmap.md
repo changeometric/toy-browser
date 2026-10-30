@@ -4,7 +4,8 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M6 已完成；下一步是 M7（导航）。** 快照与接管指南见 [handoff.md](handoff.md)。
+**当前状态：M0–M7 已完成；下一步是 M8（真实字体与图像，需要审批）。** 快照与接管指南见
+[handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
 
@@ -57,10 +58,30 @@
 - 已达成验收：`render.paint`、`paint.display_list`、`shell.screenshot_page` 与位置参数 URL 的 CLI 测试在 GCC 和 Clang 下、警告视为错误时通过（共 37 个测试）；200x100 surface 上的像素端到端测试验证了红色标题/黑色段落的几何；GCC/Clang 产出逐字节相同的 PPM；窗口显示同一页面。
 - M6 已知限制：所有绘制都是整数设备像素，无抗锯齿、无子像素布局（1 CSS px = 1 设备 px）；没有 border、图片或真实 TTF 字体（M8）；canvas 始终由 shell 填白，`html`/`body` 的 `background-color` 只绘制其元素盒（不会传播为 canvas 背景）；绘制顺序是前序，没有层叠上下文/z-index；文本只有 ASCII 位图字形（其他码点渲染 `?`，链接只有颜色没有下划线，因为属性集里没有 `text-decoration`）；溢出只被 surface 裁剪——滚动与导航在 M7；光栅化器的工作量受裁剪区域限制，对抗性字号也不例外。
 
-## M7 — 导航（下一轮）
+## M7 — 导航 ✅（已完成）
 
-- 可点击链接、滚动、前进/后退历史、窗口标题。
-- 当一个小的本地多页站点可以浏览时完成。
+- `shell::Browser`：一个 headless 浏览器会话，持有当前页面（最终 URL、DOM、样式、盒树）、
+  导航历史、垂直滚动偏移与绘制，因此点击、历史、滚动与标题都能不开窗口测试。
+- `net::ResolveUrl`：按 RFC 3986 把相对引用解析到当前页面的最终 URL（http/file 子集；file
+  结果会丢弃本 MVP 无法承载的 query/fragment）。
+- `layout`：`HitTest`（包含某点的最后绘制的盒）与 `ContentHeight`（可滚动范围）；`paint` 用
+  视口 `PushClip`/`PopClip` 对包裹页面，并把每条命令按滚动偏移平移。
+- `platform`：归一化输入事件（窗口像素中的左键点击、滚轮格数、带修饰键的映射按键）与
+  `SetTitle`；X11 后端映射按键/keysym 并发布 `_NET_WM_NAME`/`WM_NAME`。
+- `shell` 事件循环：点击链接导航，滚轮/方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right
+  前进后退，窗口标题跟随 `<title>`（没有时回退到 URL）。`--screenshot` 通过同一个会话在滚动 0
+  处渲染一帧；`--dump-*` 模式不变且 headless。
+- 一个提交的三页 fixture 站点（`tests/fixtures/nav_site/`）可在窗口中浏览，并驱动 headless
+  `shell.navigation` 测试。
+- 已达成验收：`net.url_resolution`、`layout.hit_test`、更新后的 `paint.display_list`、
+  `shell.navigation` 以及所有既有测试在 GCC 与 Clang 下、警告视为错误时通过（共 40 个测试）；
+  滚动 0 的截图与所有既有渲染与 M6 逐字节一致；本地多页站点可在窗口中浏览（点击、前进/后退、
+  滚动、标题）。
+- M7 已知限制：只有垂直滚动（没有水平滚动、没有滚动条）；滚轮一格固定 3 行（48 px），滚动为
+  整数设备像素；导航会重新加载页面（无缓存），因此前进/后退把滚动偏移重置为 0，而不是恢复它；
+  fragment 导航不会滚动到锚点（纯 fragment 链接是 no-op）；只有 `http`/`file` 链接会导航
+  （不支持的 scheme 在 stderr 报错）；加载失败保留当前页面并在 stderr 报错；没有 hover/active
+  链接样式、光标变化、表单或页内错误页。
 
 ## M8 — 真实字体与图像（需要审批）
 

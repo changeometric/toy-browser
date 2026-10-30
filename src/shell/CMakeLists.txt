@@ -1,5 +1,6 @@
 add_library(toy_shell STATIC
   application.cpp
+  browser.cpp
 )
 
 target_include_directories(toy_shell PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

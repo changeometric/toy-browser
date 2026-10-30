@@ -1,21 +1,20 @@
 #include "toy/shell/application.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 
+#include "text_metrics.h"
 #include "toy/dom/node.h"
 #include "toy/layout/box.h"
 #include "toy/net/http.h"
 #include "toy/net/url.h"
-#include "toy/paint/paint.h"
 #include "toy/platform/window.h"
-#include "toy/render/font.h"
-#include "toy/render/paint.h"
 #include "toy/render/ppm.h"
 #include "toy/render/surface.h"
+#include "toy/shell/browser.h"
 #include "toy/style/computed_style.h"
 
 namespace toy::shell {
@@ -30,11 +29,17 @@ constexpr int kDemoBandHeight = 8;
 constexpr int kMaxDimension = 8192;
 constexpr int kMaxPixels = 16'777'216;
 
-// Adapts the built-in bitmap font to layout's measurement callback. layout never
-// depends on render; shell is the only module that sees both and wires them.
-layout::TextMetrics MeasureText(std::string_view text_utf8, float font_size_px) {
-  return layout::TextMetrics{render::MeasureTextWidth(text_utf8, font_size_px),
-                             render::LineHeightPx(font_size_px)};
+// Scrolling units for the window event loop: one text line (16 device px at the
+// default font size), one wheel notch (three lines) and the overlap margin of a
+// PageUp/PageDown jump, which scrolls one viewport minus that margin.
+constexpr int kScrollPixelsPerLine = 16;
+constexpr int kWheelScrollLines = 3;
+constexpr int kWheelScrollPixels = kScrollPixelsPerLine * kWheelScrollLines;
+constexpr int kPageScrollMarginPx = 32;
+
+int PageScrollPixels(int viewport_height) {
+  // A window shorter than the margin still scrolls by at least one pixel.
+  return std::max(1, viewport_height - kPageScrollMarginPx);
 }
 
 // M1 placeholder page: a white page with a blue band at the top. It proves the
@@ -43,40 +48,6 @@ layout::TextMetrics MeasureText(std::string_view text_utf8, float font_size_px) 
 void PaintPlaceholderPage(render::Surface& surface) {
   surface.Fill(kPageColor);
   surface.FillRect(0, 0, surface.width(), kDemoBandHeight, kDemoBandColor);
-}
-
-// Loads and fully resolves one page: URL -> fetch -> DOM -> computed styles.
-// On failure sets *error to a ready-to-print message (the caller prefixes
-// "toybrowser: ") and returns false. HTML and CSS parsing never fail.
-bool LoadPage(std::string_view url_text, dom::Document* document, style::StyleTree* styles,
-              std::string* error) {
-  const std::optional<net::Url> url = net::ParseUrl(url_text, error);
-  if (!url) {
-    *error = "cannot parse URL '" + std::string(url_text) + "': " + *error;
-    return false;
-  }
-
-  net::Response response;
-  if (!net::Fetch(*url, net::FetchOptions{}, &response, error)) {
-    *error = "cannot fetch '" + std::string(url_text) + "': " + *error;
-    return false;
-  }
-
-  *document = dom::ParseDocument(response.body);
-  *styles = style::ComputeStyles(*document);
-  return true;
-}
-
-// Paints a loaded page into `surface`: white page background, layout viewport =
-// surface width, then the display list built from the box tree. Content taller
-// than the surface is clipped by the rasterizer (no scrolling until M7).
-void PaintPage(const dom::Document& document, const style::StyleTree& styles,
-               render::Surface& surface) {
-  surface.Fill(kPageColor);
-  const layout::BoxTree boxes = layout::LayoutDocument(
-      document, styles, layout::LayoutOptions{static_cast<float>(surface.width())}, MeasureText);
-  const render::DisplayList list = paint::BuildDisplayList(document, styles, boxes);
-  render::DrawDisplayList(list, surface);
 }
 
 int RunDumpBody(const Options& options) {
@@ -195,14 +166,15 @@ int RunHeadless(const Options& options) {
     // Backward compatible: no URL keeps the M1 placeholder path unchanged.
     PaintPlaceholderPage(surface);
   } else {
-    dom::Document document;
-    style::StyleTree styles;
+    // One Browser frame at scroll 0, through the same code path as the window;
+    // for scroll 0 it stays byte-identical to the M6 painting.
+    Browser browser(options.width, options.height);
     std::string error;
-    if (!LoadPage(options.page_url, &document, &styles, &error)) {
+    if (!browser.Open(options.page_url, &error)) {
       std::fprintf(stderr, "toybrowser: %s\n", error.c_str());
       return 1;
     }
-    PaintPage(document, styles, surface);
+    browser.Paint(surface);
   }
   if (!render::WritePpm(surface, options.screenshot_path)) {
     std::fprintf(stderr, "toybrowser: cannot write screenshot '%s'\n",
@@ -213,27 +185,38 @@ int RunHeadless(const Options& options) {
 }
 
 int RunWindowed(const Options& options) {
-  // With a page URL, load it before creating the window so a URL or fetch error
-  // fails cleanly, without ever showing an empty window. The loaded page stays
-  // a value for the whole event loop and is repainted on expose and resize.
-  dom::Document document;
-  style::StyleTree styles;
-  const bool has_page = !options.page_url.empty();
-  if (has_page) {
+  // With a page URL, open it through the Browser before creating the window so a
+  // URL or fetch error fails cleanly, without ever showing an empty window.
+  std::unique_ptr<Browser> browser;
+  if (!options.page_url.empty()) {
+    browser = std::make_unique<Browser>(options.width, options.height);
     std::string load_error;
-    if (!LoadPage(options.page_url, &document, &styles, &load_error)) {
+    if (!browser->Open(options.page_url, &load_error)) {
       std::fprintf(stderr, "toybrowser: %s\n", load_error.c_str());
       return 1;
     }
   }
 
   std::string error;
+  const std::string window_title = browser ? browser->title() : options.title;
   const std::unique_ptr<platform::Window> window =
-      platform::Window::Create(options.width, options.height, options.title, &error);
+      platform::Window::Create(options.width, options.height, window_title, &error);
   if (!window) {
     std::fprintf(stderr, "toybrowser: cannot open window: %s\n", error.c_str());
     return 1;
   }
+
+  // Paints the current page (or the M1 placeholder) at the window size.
+  const auto repaint = [&]() {
+    render::Surface surface(window->width(), window->height());
+    if (browser) {
+      browser->Paint(surface);
+    } else {
+      PaintPlaceholderPage(surface);
+    }
+    window->Present(
+        platform::PixelView{surface.pixels(), surface.width(), surface.height(), surface.stride()});
+  };
 
   while (true) {
     platform::Event event;
@@ -245,20 +228,80 @@ int RunWindowed(const Options& options) {
       case platform::EventType::kClose:
         return 0;
       case platform::EventType::kExpose:
-      case platform::EventType::kResize: {
-        // Redraw the whole page at the window's current size.
-        render::Surface surface(window->width(), window->height());
-        if (has_page) {
-          PaintPage(document, styles, surface);
-        } else {
-          PaintPlaceholderPage(surface);
+      case platform::EventType::kResize:
+        // The window may have been resized; re-lay-out before painting.
+        if (browser) {
+          browser->SetViewport(window->width(), window->height());
         }
-        window->Present(platform::PixelView{surface.pixels(), surface.width(), surface.height(),
-                                            surface.stride()});
+        repaint();
+        break;
+      case platform::EventType::kMouseDown: {
+        if (!browser) {
+          break;
+        }
+        std::string click_error;
+        if (browser->Click(event.x, event.y, &click_error)) {
+          window->SetTitle(browser->title());
+          repaint();
+        } else if (!click_error.empty()) {
+          std::fprintf(stderr, "toybrowser: %s\n", click_error.c_str());
+        }
         break;
       }
-      case platform::EventType::kKeyDown:
+      case platform::EventType::kMouseWheel:
+        if (browser && browser->ScrollBy(event.wheel_delta * kWheelScrollPixels)) {
+          repaint();
+        }
         break;
+      case platform::EventType::kKeyDown: {
+        if (!browser) {
+          break;
+        }
+        std::string navigation_error;
+        bool navigated = false;
+        bool scrolled = false;
+        switch (event.key) {
+          case platform::Key::kLeft:
+            if (event.alt) {
+              navigated = browser->Back(&navigation_error);
+            }
+            break;
+          case platform::Key::kRight:
+            if (event.alt) {
+              navigated = browser->Forward(&navigation_error);
+            }
+            break;
+          case platform::Key::kUp:
+            scrolled = browser->ScrollBy(-kScrollPixelsPerLine);
+            break;
+          case platform::Key::kDown:
+            scrolled = browser->ScrollBy(kScrollPixelsPerLine);
+            break;
+          case platform::Key::kPageUp:
+            scrolled = browser->ScrollBy(-PageScrollPixels(window->height()));
+            break;
+          case platform::Key::kPageDown:
+            scrolled = browser->ScrollBy(PageScrollPixels(window->height()));
+            break;
+          case platform::Key::kHome:
+            scrolled = browser->ScrollToTop();
+            break;
+          case platform::Key::kEnd:
+            scrolled = browser->ScrollToBottom();
+            break;
+          case platform::Key::kUnknown:
+            break;
+        }
+        if (navigated) {
+          window->SetTitle(browser->title());
+          repaint();
+        } else if (!navigation_error.empty()) {
+          std::fprintf(stderr, "toybrowser: %s\n", navigation_error.c_str());
+        } else if (scrolled) {
+          repaint();
+        }
+        break;
+      }
     }
   }
 }

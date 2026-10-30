@@ -151,15 +151,22 @@ void TestParseErrors() {
   ExpectParseError("file:///tmp/x#frag", "a file URL with a fragment is rejected");
 }
 
-void TestNoBaseResolutionMessages() {
+void TestParseErrorMessages() {
   std::string error;
   toy::net::ParseUrl("docs/page.html", &error);
-  Check(error.find("no base resolution yet") != std::string::npos,
-        "the relative URL error mentions no base resolution");
+  Check(error.find("relative URL") != std::string::npos,
+        "the relative URL error says the URL must be absolute");
+  Check(error.find("ResolveUrl") != std::string::npos,
+        "the relative URL error points at ResolveUrl");
   error.clear();
   toy::net::ParseUrl("https://example.com/", &error);
-  Check(error.find("no base resolution yet") != std::string::npos,
-        "the unsupported scheme error mentions no base resolution");
+  Check(error.find("unsupported URL scheme") != std::string::npos,
+        "the unsupported scheme error names the problem");
+  Check(error.find("https") != std::string::npos, "the unsupported scheme error names the scheme");
+  error.clear();
+  toy::net::ParseUrl("http:/example.com", &error);
+  Check(error.find("expected 'http://'") != std::string::npos,
+        "the unsupported form error shows the expected http form");
 }
 
 }  // namespace
@@ -169,7 +176,7 @@ int main() {
   TestFileParsing();
   TestSerialization();
   TestParseErrors();
-  TestNoBaseResolutionMessages();
+  TestParseErrorMessages();
   if (g_failures != 0) {
     std::fprintf(stderr, "%d url check(s) failed\n", g_failures);
     return 1;

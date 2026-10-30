@@ -16,12 +16,15 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M4 | CSS parser/selectors, UA + author cascade, computed styles (`--dump-style`) |
 | M5 | `layout` box tree with block/inline/anonymous boxes and line breaking, bitmap-font metrics in `render`, deterministic box dump (`--dump-boxes`) |
 | M6 | `render` display list + software rasterizer + hand-authored 8x16 ASCII glyphs, `paint` box-tree-to-display-list module, window/`--screenshot` painting with an optional positional page URL |
+| M7 | Navigation: headless `shell::Browser` (final URL, history, scroll, title), `net::ResolveUrl`, box hit-testing, scroll-clipped painting, X11 click/wheel/keys + window titles, committed demo site, `shell.navigation` test |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-Not implemented yet: navigation, scrolling and interaction, images, real TTF fonts, JavaScript,
-`https`/TLS, proxies, external stylesheets, borders, anti-aliased text. The window and `--screenshot`
-paint a real page when a URL is given and the M1 placeholder page otherwise; the `--dump-*` modes
-remain the primary debugging path.
+Not implemented yet: images, real TTF fonts (M8), JavaScript (M9), `https`/TLS, proxies, external
+stylesheets, borders, anti-aliased text, horizontal scrolling/scrollbars, hover/active link styling
+and form controls. The window and `--screenshot` paint a real page when a URL is given and the M1
+placeholder page otherwise; with a page URL the window is also browsable (links, wheel/keyboard
+scrolling, Alt+Left/Right history, `<title>`). The `--dump-*` modes remain the primary debugging
+path.
 
 ## Verify the current state (no context needed)
 
@@ -42,44 +45,55 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 37/37 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 40/40 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
 or newer is required; building needs the X11 development headers (approved dependency); only
 windowed mode needs a running display.
 
-## Next round: M7 — navigation (not started)
+```sh
+"$BUILD"/toybrowser --size 400x200 --screenshot /tmp/toybrowser-nav.ppm \
+    "file://$PWD/tests/fixtures/nav_site/index.html" && file /tmp/toybrowser-nav.ppm
+```
 
-- Goal: make the painted page interactive and navigable. Hit-test clicks against the box tree to
-  follow links, add scrolling (a viewport offset plus clip commands in the display list), a
-  back/forward history, and set the window title from `<title>`.
-- Preliminary scope: `shell` owns navigation state (current URL, history, scroll offset) and the
-  window event loop forwards clicks/scrolls/keys; `paint`/`render` gain the clip and offset
-  plumbing already sketched in the architecture; `net` supplies the URL of the clicked page
-  (`href` resolution against the current URL; base-URL resolution and external `<link>` CSS stay
-  later). The `--dump-*` modes must stay headless and unchanged.
-- Still out of scope: images, real TTF fonts (M8), forms, JavaScript (M9), `https`/TLS.
-- Acceptance sketch: a small local multi-page site can be browsed in the window (link click,
-  back/forward, scroll, title), with at least one headless regression test for URL/hit-test/scroll
-  state; all existing tests keep passing; warning-free under both compilers.
-- Navigation decisions (history granularity, scroll unit, how clicks map to boxes) are the M7
-  intake's job — do not guess them in code.
+Window demo (needs a display):
 
-Backlog after M7 (details in [roadmap.md](roadmap.md)): image/font library decisions at M8, proxy
-support, TLS, and test-helper migration.
+```sh
+"$BUILD"/toybrowser --size 400x200 "file://$PWD/tests/fixtures/nav_site/index.html"
+# click "About page", scroll with the wheel/arrows/PageUp/PageDown/Home/End, Alt+Left/Right for
+# history; the window title follows <title>.
+```
+
+## Next round: M8 — real fonts and images (needs approval)
+
+- Goal: real TTF text and `<img>` decoding, either with approved libraries or with our own minimal
+  implementations. The choice is open question 3 in [open-questions.md](open-questions.md) and needs
+  the user's approval before any dependency or decoder work (see [dependencies.md](dependencies.md)).
+- Preliminary scope: `render` gains a font backend (metrics and glyph rasterization replacing or
+  extending the built-in 8x16 bitmap font) and an image decoder plus a `DrawImage` display-list
+  command; `layout` keeps consuming text metrics only; `paint` emits images; `net`/`shell` add the
+  URL/base-fetch path for image sources (external `<link>` CSS stays separate).
+- Still out of scope: JavaScript (M9), forms, `https`/TLS, proxies.
+- Acceptance sketch: a page with real font text and at least one image renders; determinism/pixel
+  tests and all existing tests keep passing under both compilers.
+- Do not start M8 without the user's decision on the font/image strategy.
+
+Backlog after M8 (details in [roadmap.md](roadmap.md)): image/font library decisions, proxy support,
+TLS, and test-helper migration.
 
 ## Map of the repository
 
 - `src/<module>/` — one CMake library target per module (`base` does not exist yet; see
   [architecture.md](architecture.md) for the module map and dependency direction).
 - `src/main.cpp` — CLI parsing only; `shell` orchestrates fetch → parse → style → layout → paint →
-  dump/present.
+  dump/present, and `toy/shell/browser.h` owns one browser session (history, scroll, clicks, title).
 - `src/render/include/toy/render/font.h` — bitmap-font metrics; `layout` consumes them through a
   `shell`-supplied callback and has no `render` dependency. `src/render/include/toy/render/paint.h`
   is the display list + rasterizer; `src/paint/` builds the list from the box tree and never
   rasterizes.
 - `tests/<module>/` — one executable per subject, registered with CTest; new tests use the
-  header-only `tests/support/check.h`.
+  header-only `tests/support/check.h`. `tests/fixtures/nav_site/` is the committed three-page demo
+  and navigation-test site.
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
   questions (this file is the snapshot).
 - Shared task board — provided by the agent runtime (task create/claim/update with revision); if
@@ -108,6 +122,17 @@ support, TLS, and test-helper migration.
   whole surface and rasterizer work is bounded by the clip; the shell fills the canvas white; paint
   order is box-tree pre-order (background, then children); text uses the built-in 8x16 ASCII glyphs
   with nearest-neighbour scaling, no anti-aliasing, `?` for non-ASCII, and opaque text pixels.
+  M7 painting: a non-empty page is wrapped in exactly one `PushClip(0, 0, viewport)`/
+  `PopClip` pair and every command's y is translated by `-scroll_y` (integer device pixels, x
+  unchanged); a scroll-0 render must stay byte-identical to M6.
+- Navigation/session contract (`toy/shell/browser.h`): one history entry per successful load,
+  failed loads change nothing, every successful load resets the scroll offset to 0, a reference
+  that only changes the fragment is a no-op, the title is the first `<title>` text (collapsed,
+  falling back to the serialized final URL), and only `http`/`file` links navigate.
+- Platform input contract (`toy/platform/window.h`): `kMouseDown` is the primary button in window
+  device pixels, `kMouseWheel` carries `wheel_delta` (positive = towards the document end), and
+  `kKeyDown` carries the normalized `Key` plus alt/ctrl/shift; `SetTitle` is best effort and never
+  fails the window.
 - Module boundaries and dependency direction in [architecture.md](architecture.md).
 - `--size` is clamped to 1..8192 per side and at most 16M pixels; bodies are capped by
   `FetchOptions::max_body_bytes` (16 MiB by default); dump indentation is capped at 64 levels.
@@ -153,3 +178,20 @@ support, TLS, and test-helper migration.
   bounded cell math when touching `render::DrawDisplayList`.
 - Scratch files (fixtures, screenshots, notes, downloads) go in the gitignored `.tmp/` directory at
   the repository root, never scattered through the tree.
+- Mouse/keyboard behavior cannot be unit-tested headlessly. The real-window smoke test launches the
+  browser on a display, finds the *client* window with `xwininfo -root -tree` (frames and clients
+  both carry the title; capture the exact-size client), captures it with ImageMagick
+  `import -window <id>`, and injects clicks/wheel/keys with a throwaway `.tmp` XSendEvent helper
+  (libX11 only, never committed). Re-run it after touching the event loop.
+- Click coordinates are window device pixels: add the scroll offset before `layout::HitTest`.
+  Hit-testing returns the last pre-order box, which may be an anonymous or text box, so `shell`
+  walks box parents to a DOM origin and then DOM ancestors to find an `href`.
+- The navigation test hardcodes the fixture's link coordinates taken from a
+  `toybrowser --size 400x200 --dump-boxes` run; changing the fixture or the layout constants means
+  updating those coordinates and the expected content height.
+- `paint` always wraps a non-empty page in one viewport clip pair now; older statements about M6
+  emitting no clip commands are obsolete. The clip does not change scroll-0 pixels.
+- Scroll resets to 0 on every successful load and fragment links are deliberate no-ops (documented
+  M7 limits); do not 'fix' either without a contract change.
+- The window loop rebuilds the layout and display list on expose, resize and scroll. That is
+  correct and deliberately simple for the MVP; only optimize it with evidence.

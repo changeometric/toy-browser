@@ -1,8 +1,10 @@
 // Display-list construction: the box tree becomes an ordered list of background
-// fills and text draws. No rasterization happens here; render executes the list.
+// fills and text draws, clipped to the viewport and scrolled vertically. No
+// rasterization happens here; render executes the list.
 
 #include "toy/paint/paint.h"
 
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -17,14 +19,17 @@ namespace toy::paint {
 namespace {
 
 // CSS px -> device px with the same std::lround the box dump uses, so a painted
-// rectangle always matches the dumped box rectangle.
+// rectangle always matches the dumped box rectangle. The viewport scroll offset
+// is already in device pixels, so it is subtracted after the rounding.
 int ToDevicePixels(float css_px) { return static_cast<int>(std::lround(css_px)); }
+
+int TranslatedY(const layout::Box& box, int scroll_y) { return ToDevicePixels(box.y) - scroll_y; }
 
 // Element boxes paint their computed background unless it is fully transparent
 // (alpha 0). Text never paints a background, and anonymous boxes have no
 // DOM/style origin at all.
 void AppendBackground(const dom::Document& document, const style::StyleTree& styles,
-                      const layout::Box& box, render::DisplayList* list) {
+                      const layout::Box& box, int scroll_y, render::DisplayList* list) {
   if (box.kind != layout::BoxKind::kBlock && box.kind != layout::BoxKind::kInline) {
     return;
   }
@@ -38,28 +43,35 @@ void AppendBackground(const dom::Document& document, const style::StyleTree& sty
   if ((background >> 24) == 0) {
     return;
   }
-  list->FillRect(ToDevicePixels(box.x), ToDevicePixels(box.y), ToDevicePixels(box.width),
+  list->FillRect(ToDevicePixels(box.x), TranslatedY(box, scroll_y), ToDevicePixels(box.width),
                  ToDevicePixels(box.height), background);
 }
 
 // A text box keeps the inherited computed style; its color is forced opaque
 // because style colors carry no alpha channel in M4.
-void AppendText(const style::StyleTree& styles, const layout::Box& box, render::DisplayList* list) {
+void AppendText(const style::StyleTree& styles, const layout::Box& box, int scroll_y,
+                render::DisplayList* list) {
   const style::ComputedStyle& style = styles.Get(box.node);
   const std::uint32_t color = style.color | 0xFF000000u;
   const float font_size_px = style.font_size_px > 0.0f ? style.font_size_px : 0.0f;
-  list->DrawText(box.text, ToDevicePixels(box.x), ToDevicePixels(box.y), font_size_px, color);
+  list->DrawText(box.text, ToDevicePixels(box.x), TranslatedY(box, scroll_y), font_size_px, color);
 }
 
 }  // namespace
 
 render::DisplayList BuildDisplayList(const dom::Document& document, const style::StyleTree& styles,
-                                     const layout::BoxTree& boxes) {
+                                     const layout::BoxTree& boxes, const Viewport& viewport) {
+  assert(viewport.width > 0);
+  assert(viewport.height > 0);
+  assert(viewport.scroll_y >= 0);
   render::DisplayList list;
   const layout::BoxId root = boxes.root();
   if (root == layout::kInvalidBox) {
     return list;
   }
+  // The whole page is clipped to the viewport, so scrolled content cannot paint
+  // outside it; the rasterizer intersects this with its own surface clip.
+  list.PushClip(0, 0, viewport.width, viewport.height);
   // Iterative pre-order walk, like the box dump: deep pages must not overflow
   // the C++ stack.
   std::vector<layout::BoxId> pending;
@@ -72,10 +84,10 @@ render::DisplayList BuildDisplayList(const dom::Document& document, const style:
     switch (box.kind) {
       case layout::BoxKind::kBlock:
       case layout::BoxKind::kInline:
-        AppendBackground(document, styles, box, &list);
+        AppendBackground(document, styles, box, viewport.scroll_y, &list);
         break;
       case layout::BoxKind::kText:
-        AppendText(styles, box, &list);
+        AppendText(styles, box, viewport.scroll_y, &list);
         break;
       case layout::BoxKind::kAnonymousBlock:
         break;
@@ -89,6 +101,7 @@ render::DisplayList BuildDisplayList(const dom::Document& document, const style:
       pending.push_back(children[index]);
     }
   }
+  list.PopClip();
   return list;
 }
 

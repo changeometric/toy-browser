@@ -24,3 +24,8 @@ add_executable(layout_deep_nesting_test deep_nesting_test.cpp)
 toybrowser_set_warnings(layout_deep_nesting_test)
 target_link_libraries(layout_deep_nesting_test PRIVATE toy_layout toy_test_support)
 add_test(NAME layout.deep_nesting COMMAND layout_deep_nesting_test)
+
+add_executable(layout_hit_test hit_test.cpp)
+toybrowser_set_warnings(layout_hit_test)
+target_link_libraries(layout_hit_test PRIVATE toy_layout toy_test_support)
+add_test(NAME layout.hit_test COMMAND layout_hit_test)

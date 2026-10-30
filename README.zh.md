@@ -2,9 +2,10 @@
 
 一个从零实现的玩具网页浏览器：C++20、CMake，不使用现成的浏览器组件。
 
-**状态：M6 —— 真实页面已被绘制。** 窗口与 `--headless --screenshot` 会渲染可选 URL 指定的页面，
-使用由 M5 盒树构建的显示列表；`--dump-boxes` 仍可查看几何信息。导航、滚动与交互从 M7 开始。
-详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
+**状态：M7 —— 页面可导航。** 窗口与 `--headless --screenshot` 渲染可选 URL 指定的页面；
+在窗口中链接可点击、滚轮与键盘可滚动、Alt+Left/Right 在历史中前进后退，窗口标题跟随 `<title>`。
+一个提交的演示站点在 [`tests/fixtures/nav_site/`](tests/fixtures/nav_site/)，`--dump-*` 模式仍是
+主要的 headless 调试路径。详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
 
 **新团队 / 新 agent？** 先读[接管指南](docs/zh/handoff.md)（当前状态与接手方式），再看
 [文档索引](docs/zh/README.md)。
@@ -16,9 +17,10 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-./build/toybrowser file:///path/page.html            # 打开窗口显示真实页面
+./build/toybrowser file:///path/page.html            # 窗口：点击链接、滚轮/键盘滚动、Alt+Left/Right
 ./build/toybrowser                                   # 打开窗口显示占位页
 ./build/toybrowser --headless --screenshot out.ppm file:///path/page.html  # 同一页面，无需显示器
+./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # 提交的演示站点
 ./build/toybrowser --dump-body file:///etc/hostname  # 抓取 URL，原始字节输出到 stdout
 ./build/toybrowser --dump-dom  file:///etc/hostname  # 抓取并输出解析后的 DOM 树
 ./build/toybrowser --dump-style file:///etc/hostname # 抓取、计算样式并输出样式树

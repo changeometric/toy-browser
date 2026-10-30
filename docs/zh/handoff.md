@@ -17,9 +17,10 @@
 | M4 | CSS 解析器/选择器、UA + 作者层叠、计算样式（`--dump-style`） |
 | M5 | `layout` 盒树：块级/行内/匿名盒与换行，`render` 中的位图字体度量，确定性盒 dump（`--dump-boxes`） |
 | M6 | `render` 显示列表 + 软件光栅化器 + 手写 8x16 ASCII 字形，`paint` 盒树转显示列表模块，窗口/`--screenshot` 绘制与可选的位置参数页面 URL |
+| M7 | 导航：headless `shell::Browser`（最终 URL、历史、滚动、标题）、`net::ResolveUrl`、盒命中测试、滚动裁剪绘制、X11 点击/滚轮/按键 + 窗口标题、提交的演示站点、`shell.navigation` 测试 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-尚未实现：导航、滚动与交互、图像、真实 TTF 字体、JavaScript、`https`/TLS、代理、外部样式表、border、抗锯齿文本。窗口与 `--screenshot` 在给出 URL 时绘制真实页面，否则显示 M1 占位页；`--dump-*` 模式仍是主要调试路径。
+尚未实现：图像、真实 TTF 字体（M8）、JavaScript（M9）、`https`/TLS、代理、外部样式表、border、抗锯齿文本、水平滚动/滚动条、hover/active 链接样式与表单控件。窗口与 `--screenshot` 在给出 URL 时绘制真实页面，否则显示 M1 占位页；给出页面 URL 时窗口也可浏览（链接、滚轮/键盘滚动、Alt+Left/Right 历史、`<title>`）。`--dump-*` 模式仍是主要调试路径。
 
 ## 验证当前状态（无需上下文）
 
@@ -40,24 +41,45 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-预期：37/37 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11 开发头文件（已批准的依赖）；只有窗口模式需要运行中的显示服务器。
+预期：40/40 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11 开发头文件（已批准的依赖）；只有窗口模式需要运行中的显示服务器。
 
-## 下一轮：M7 —— 导航（尚未开始）
+```sh
+"$BUILD"/toybrowser --size 400x200 --screenshot /tmp/toybrowser-nav.ppm \
+    "file://$PWD/tests/fixtures/nav_site/index.html" && file /tmp/toybrowser-nav.ppm
+```
 
-- 目标：让绘制出来的页面可交互、可导航。用盒树对点击做命中测试以跟随链接，加入滚动（视口偏移加显示列表中的裁剪命令）、前进/后退历史，并根据 `<title>` 设置窗口标题。
-- 初步范围：`shell` 拥有导航状态（当前 URL、历史、滚动偏移），窗口事件循环转发点击/滚动/按键；`paint`/`render` 补齐架构中已经勾画的裁剪与偏移通路；`net` 提供被点击页面的 URL（`href` 相对当前 URL 解析；base URL 解析与外部 `<link>` CSS 仍留到以后）。`--dump-*` 模式必须保持 headless 且不变。
-- 仍不在范围内：图像、真实 TTF 字体（M8）、表单、JavaScript（M9）、`https`/TLS。
-- 验收草案：一个小的本地多页站点可以在窗口中浏览（点击链接、前进/后退、滚动、标题），至少有一个针对 URL/命中测试/滚动状态的 headless 回归测试；所有现有测试保持通过；两个编译器下无警告。
-- 导航相关决策（历史粒度、滚动单位、点击如何映射到盒）是 M7 intake 的工作——不要在代码里猜。
+窗口演示（需要显示器）：
 
-M7 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：M8 的图像/字体库决策、代理支持、TLS，以及测试辅助代码迁移。
+```sh
+"$BUILD"/toybrowser --size 400x200 "file://$PWD/tests/fixtures/nav_site/index.html"
+# 点击 "About page"，用滚轮/方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right 前进后退；
+# 窗口标题跟随 <title>。
+```
+
+## 下一轮：M8 —— 真实字体与图像（需要审批）
+
+- 目标：真实 TTF 文本与 `<img>` 解码，使用已批准的库或我们自己的最小实现。选择对应
+  [open-questions.md](open-questions.md) 的第 3 个问题，并且任何依赖或解码器工作之前都需要用户
+  批准（见 [dependencies.md](dependencies.md)）。
+- 初步范围：`render` 增加字体后端（用度量与字形光栅化替换或扩展内置 8x16 位图字体）以及图片
+  解码器和 `DrawImage` 显示列表命令；`layout` 仍然只消费文本度量；`paint` 发出图片；`net`/`shell`
+  为图片来源增加 URL/base 抓取路径（外部 `<link>` CSS 另算）。
+- 仍不在范围内：JavaScript（M9）、表单、`https`/TLS、代理。
+- 验收草案：一个带真实字体文本和至少一张图片的页面能渲染；确定性与像素测试以及所有现有测试在
+  两个编译器下继续通过。
+- 没有用户对字体/图片策略的决定，不要开始 M8。
+
+M8 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：图片/字体库决策、代理支持、TLS，以及测试
+辅助代码迁移。
 
 ## 仓库地图
 
 - `src/<module>/` —— 每个模块一个 CMake 库目标（`base` 尚不存在；模块图与依赖方向见 [architecture.md](architecture.md)）。
-- `src/main.cpp` —— 只做 CLI 解析；`shell` 编排 fetch → parse → style → layout → paint → dump/present。
+- `src/main.cpp` —— 只做 CLI 解析；`shell` 编排 fetch → parse → style → layout → paint → dump/present，
+  `toy/shell/browser.h` 拥有一个浏览器会话（历史、滚动、点击、标题）。
 - `src/render/include/toy/render/font.h` —— 位图字体度量；`layout` 通过 `shell` 提供的回调消费它们，自身不依赖 `render`。`src/render/include/toy/render/paint.h` 是显示列表与光栅化器；`src/paint/` 从盒树构建列表且从不光栅化。
 - `tests/<module>/` —— 每个主题一个可执行文件，注册到 CTest；新测试使用 header-only 的 `tests/support/check.h`。
+  `tests/fixtures/nav_site/` 是提交的三页演示与导航测试站点。
 - `docs/` —— 架构、路线图、约定、团队流程、决策、依赖、待决问题（本文件是快照）。
 - 共享任务板 —— 由 agent 运行时提供（任务 create/claim/update，带 revision）；如果运行时没有，则用 `docs/tasks/<milestone>.md`，字段相同。见 [team-workflow.md](team-workflow.md)。
 - `README.md` / `README.zh.md` 与 `docs/zh/` —— 面向用户的入口（英语为权威）。
@@ -69,6 +91,14 @@ M7 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：M8 的图像/字�
 - Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层。
 - 布局语义通过布局测试与 M5 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，仅按 ASCII 空白换行。
 - 绘制语义通过 M6 测试冻结：显示列表命令使用整数设备像素（`FillRect`、`DrawText`、`PushClip`/`PopClip`）；填充对不透明目标使用 SrcOver 公式 `(src * a + dst * (255 - a) + 127) / 255`；初始裁剪是整个 surface，光栅化工作量受裁剪限制；`shell` 把 canvas 填白；绘制顺序是盒树前序（先背景、再子节点）；文本使用内置 8x16 ASCII 字形，最近邻缩放、无抗锯齿、非 ASCII 用 `?`、文本像素不透明。
+  M7 绘制：非空页面恰好被一个 `PushClip(0, 0, viewport)`/`PopClip` 对包裹，每条命令的 y 按
+  `-scroll_y`（整数设备像素，x 不变）平移；滚动 0 的渲染必须与 M6 逐字节一致。
+- 导航/会话契约（`toy/shell/browser.h`）：每次成功加载一条历史，加载失败不改变任何东西，每次
+  成功加载把滚动偏移重置为 0，只改变 fragment 的引用是 no-op，标题是第一个 `<title>` 文本
+  （折叠空白，没有时回退到序列化最终 URL），只有 `http`/`file` 链接会导航。
+- 平台输入契约（`toy/platform/window.h`）：`kMouseDown` 是窗口设备像素中的主键点击，`kMouseWheel`
+  携带 `wheel_delta`（正值表示朝文档末尾滚动），`kKeyDown` 携带归一化的 `Key` 与 alt/ctrl/shift；
+  `SetTitle` 尽力而为，不会让窗口失败。
 - [architecture.md](architecture.md) 中的模块边界与依赖方向。
 - `--size` 每边被钳制在 1..8192，且总像素最多 16M；body 由 `FetchOptions::max_body_bytes` 限制（默认 16 MiB）；dump 缩进最多 64 层。
 - HTML/CSS/JS 支持是刻意不完整的：读 `roadmap.md` 里的 known-limits 条目，而不是假设规范行为。
@@ -94,3 +124,17 @@ M7 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：M8 的图像/字�
 - canvas 由 `shell` 填白；`html`/`body` 的 background-color 只绘制其元素盒（不会传播为 canvas 背景）——这是刻意的 M6 限制，不是 bug。
 - 光栅化器的工作量必须始终受裁剪/surface 区域限制：对抗性字号曾让旧的字形循环挂起或溢出；修改 `render::DrawDisplayList` 时保留有限性守卫、可见范围迭代与有界单元数学。
 - 临时文件（fixture、截图、笔记、下载）放在仓库根目录被 gitignore 的 `.tmp/`，不要散落在树中。
+- 鼠标/键盘行为无法 headless 单测。真实窗口冒烟测试会在显示器上启动浏览器，用
+  `xwininfo -root -tree` 找到*客户端*窗口（窗口管理器边框与客户端都带标题；截取尺寸精确的客户端），
+  用 ImageMagick `import -window <id>` 截图，并用一个 `.tmp` 里的一次性 XSendEvent 小工具注入
+  点击/滚轮/按键（只链 libX11，不提交）。改动事件循环后要重跑。
+- 点击坐标是窗口设备像素：先加上滚动偏移再做 `layout::HitTest`。命中测试返回前序中最后一个盒，
+  它可能是匿名盒或文本盒，所以 `shell` 先沿盒父链找到 DOM 来源，再沿 DOM 祖先找 `href`。
+- 导航测试硬编码 fixture 的链接坐标（来自 `toybrowser --size 400x200 --dump-boxes` 一次运行）；
+  改动 fixture 或布局常量就意味着要更新这些坐标与预期内容高度。
+- `paint` 现在总会用视口裁剪对包裹非空页面；以往“M6 不发出裁剪命令”的说法已过时。裁剪不会改变
+  滚动 0 的像素。
+- 每次成功加载后滚动都重置为 0、纯 fragment 链接是 no-op，这两点是有文档的 M7 限制；未经契约变更
+  不要“修复”它们。
+- 窗口循环在 expose、resize 与滚动时重建布局与显示列表。这是正确且刻意简单的 MVP 实现；只有在有
+  证据时才优化。

@@ -80,11 +80,27 @@ before children), and every text box becomes a `DrawText` with the inherited col
 `paint` never rasterizes and never includes render implementation headers. `render` executes the
 list: rectangle fills use the frozen SrcOver integer formula over an opaque destination, text uses
 the built-in 8x16 ASCII glyph table with nearest-neighbour cell scaling (no anti-aliasing), and an
-integer rectangle clip stack bounds every command (M6 emits no clip commands yet; overflow and
-scroll clipping arrive with M7). `shell` fills the canvas white, lays the page out at the surface
-width, builds the list and rasterizes it; the window and `--screenshot` share exactly this path.
-Determinism is the point: identical inputs produce byte-identical PPMs on GCC and Clang, which the
-screenshot test relies on.
+integer rectangle clip stack bounds every command (M7 wraps the page in a viewport
+`PushClip`/`PopClip` pair and translates every command by the scroll offset). `shell` fills the
+canvas white, lays the page out at the surface width, builds the list and rasterizes it; the window
+and `--screenshot` share exactly this path. Determinism is the point: identical inputs produce
+byte-identical PPMs on GCC and Clang, which the screenshot test relies on.
+
+Navigation (M7): `shell::Browser` owns one browser session: the current page (final URL, DOM, style
+tree and box tree), the navigation history, the integer vertical scroll offset and painting. The
+history is a vector of URLs plus an index; every successful load appends an entry (loading after
+going back truncates the forward entries), and a failed load leaves the page, scroll offset and
+history unchanged. A click is converted to page space with the scroll offset, hit-tested against the
+box tree (`layout::HitTest` returns the last box in paint order containing the point), mapped to the
+nearest DOM ancestor element with an `href` attribute, resolved with `net::ResolveUrl` against the
+page's final URL and loaded. Only `http`/`file` references navigate; a reference that only changes
+the fragment is a no-op. Scrolling is vertical and in integer device pixels, clamped to
+`[0, content_height - viewport_height]` by `layout::ContentHeight`; `paint` wraps the page in a
+viewport clip and translates it by `-scroll_y`, and `render` executes the frozen clip stack. The
+window event loop forwards clicks, wheel notches and keys (Alt+Left/Right for back/forward,
+arrows/PageUp/PageDown/Home/End for scrolling) to the session and repaints on demand; the window
+title follows the first `<title>` text, falling back to the URL. Loading is synchronous inside the
+handler, keeping the single-threaded MVP model.
 
 ## Data model
 

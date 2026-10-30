@@ -3,17 +3,25 @@
 // Plain XPutImage: the window keeps one client-side XImage that Present fills
 // with rows from the caller's PixelView. No XShm, no double buffering and no
 // other X11 extensions yet (see docs/dependencies.md).
+//
+// Input normalization: WaitEvent turns X11 keysyms and buttons into
+// platform::Event values. Only the left button produces kMouseDown; wheel
+// buttons 4 and 5 become kMouseWheel with -1 (up) and +1 (down, towards the end
+// of the document). SetTitle writes _NET_WM_NAME as UTF8_STRING and WM_NAME
+// through XStoreName as a fallback.
 
 #include "toy/platform/window.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/keysym.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -40,10 +48,58 @@ XImage* CreateImage(Display* display, Visual* visual, int depth, int width, int 
   return image;
 }
 
+// Sets both WM_NAME (XStoreName, the classic fallback) and _NET_WM_NAME (the
+// UTF-8 EWMH property modern window managers read). Best effort by contract: a
+// missing atom only skips the EWMH property and a failed Xlib call leaves the
+// title unchanged instead of failing the window.
+void SetWindowTitle(Display* display, ::Window window, std::string_view title_utf8,
+                    Atom net_wm_name, Atom utf8_string) {
+  // XStoreName needs a NUL-terminated string; the copy also holds the exact
+  // UTF-8 bytes published through _NET_WM_NAME.
+  const std::string title_text(title_utf8);
+  XStoreName(display, window, title_text.c_str());
+  if (net_wm_name != None && utf8_string != None) {
+    // XChangeProperty takes an int length; a title that large is absurd, but
+    // clamping keeps the conversion well defined instead of overflowing.
+    const std::size_t byte_count =
+        std::min(title_text.size(), static_cast<std::size_t>(std::numeric_limits<int>::max()));
+    XChangeProperty(display, window, net_wm_name, utf8_string, 8, PropModeReplace,
+                    reinterpret_cast<const unsigned char*>(title_text.data()),
+                    static_cast<int>(byte_count));
+  }
+  XFlush(display);
+}
+
+// X11 keysym -> normalized browser key. The unshifted keysym (index 0) is
+// enough: the navigation keys are never shifted characters. Everything the
+// browser does not use reports kUnknown, including keypad variants.
+Key NormalizeKey(KeySym keysym) {
+  switch (keysym) {
+    case XK_Left:
+      return Key::kLeft;
+    case XK_Right:
+      return Key::kRight;
+    case XK_Up:
+      return Key::kUp;
+    case XK_Down:
+      return Key::kDown;
+    case XK_Page_Up:
+      return Key::kPageUp;
+    case XK_Page_Down:
+      return Key::kPageDown;
+    case XK_Home:
+      return Key::kHome;
+    case XK_End:
+      return Key::kEnd;
+    default:
+      return Key::kUnknown;
+  }
+}
+
 class X11Window final : public Window {
  public:
   X11Window(Display* display, ::Window window, GC gc, XImage* image, Visual* visual, int depth,
-            int width, int height, Atom wm_delete)
+            int width, int height, Atom wm_delete, Atom net_wm_name, Atom utf8_string)
       : display_(display),
         window_(window),
         gc_(gc),
@@ -52,7 +108,9 @@ class X11Window final : public Window {
         depth_(depth),
         width_(width),
         height_(height),
-        wm_delete_(wm_delete) {}
+        wm_delete_(wm_delete),
+        net_wm_name_(net_wm_name),
+        utf8_string_(utf8_string) {}
 
   ~X11Window() override {
     if (image_ != nullptr) {
@@ -98,6 +156,13 @@ class X11Window final : public Window {
     XFlush(display_);
   }
 
+  void SetTitle(std::string_view title_utf8) override {
+    if (closed_) {
+      return;
+    }
+    SetWindowTitle(display_, window_, title_utf8, net_wm_name_, utf8_string_);
+  }
+
   bool WaitEvent(Event* event) override {
     if (closed_ || event == nullptr) {
       return false;
@@ -126,12 +191,37 @@ class X11Window final : public Window {
           event->height = height_;
           return true;
         case KeyPress: {
+          // index 0 is the unshifted keysym; Shift is reported separately.
           const KeySym keysym = XLookupKeysym(&xevent.xkey, 0);
           event->type = EventType::kKeyDown;
           event->width = width_;
           event->height = height_;
-          event->key = static_cast<std::uint32_t>(keysym);
+          event->key = NormalizeKey(keysym);
+          event->alt = (xevent.xkey.state & Mod1Mask) != 0;
+          event->ctrl = (xevent.xkey.state & ControlMask) != 0;
+          event->shift = (xevent.xkey.state & ShiftMask) != 0;
           return true;
+        }
+        case ButtonPress: {
+          // x/y are relative to this window and already in device pixels, with
+          // the top-left origin the Event contract requires.
+          const unsigned int button = xevent.xbutton.button;
+          if (button == Button1) {
+            event->type = EventType::kMouseDown;
+            event->width = width_;
+            event->height = height_;
+            event->x = xevent.xbutton.x;
+            event->y = xevent.xbutton.y;
+            return true;
+          }
+          if (button == Button4 || button == Button5) {
+            event->type = EventType::kMouseWheel;
+            event->width = width_;
+            event->height = height_;
+            event->wheel_delta = button == Button4 ? -1 : 1;
+            return true;
+          }
+          break;  // Other buttons produce no event.
         }
         case ClientMessage:
           if (static_cast<Atom>(xevent.xclient.data.l[0]) == wm_delete_) {
@@ -161,6 +251,8 @@ class X11Window final : public Window {
   int width_ = 0;
   int height_ = 0;
   Atom wm_delete_ = None;
+  Atom net_wm_name_ = None;
+  Atom utf8_string_ = None;
   bool closed_ = false;
 };
 
@@ -200,7 +292,7 @@ std::unique_ptr<Window> Window::Create(int width, int height, std::string_view t
 
   XSetWindowAttributes attributes{};
   attributes.background_pixel = BlackPixel(display, screen);
-  attributes.event_mask = ExposureMask | StructureNotifyMask | KeyPressMask;
+  attributes.event_mask = ExposureMask | StructureNotifyMask | KeyPressMask | ButtonPressMask;
   const ::Window window =
       XCreateWindow(display, RootWindow(display, screen), 0, 0, static_cast<unsigned int>(width),
                     static_cast<unsigned int>(height), 0, depth, InputOutput, visual,
@@ -209,14 +301,17 @@ std::unique_ptr<Window> Window::Create(int width, int height, std::string_view t
     return fail("cannot create an X11 window");
   }
 
-  const std::string title_text(title);
-  XStoreName(display, window, title_text.c_str());
-
   Atom wm_delete = XInternAtom(display, "WM_DELETE_WINDOW", False);
   if (wm_delete == None || XSetWMProtocols(display, window, &wm_delete, 1) == 0) {
     XDestroyWindow(display, window);
     return fail("cannot register the WM_DELETE_WINDOW protocol");
   }
+
+  // Title atoms are optional: SetWindowTitle falls back to XStoreName alone if
+  // interning fails, so a title failure never fails window creation.
+  const Atom net_wm_name = XInternAtom(display, "_NET_WM_NAME", False);
+  const Atom utf8_string = XInternAtom(display, "UTF8_STRING", False);
+  SetWindowTitle(display, window, title, net_wm_name, utf8_string);
 
   XMapWindow(display, window);
 
@@ -234,8 +329,8 @@ std::unique_ptr<Window> Window::Create(int width, int height, std::string_view t
   }
 
   XFlush(display);
-  return std::unique_ptr<Window>(
-      new X11Window(display, window, gc, image, visual, depth, width, height, wm_delete));
+  return std::unique_ptr<Window>(new X11Window(display, window, gc, image, visual, depth, width,
+                                               height, wm_delete, net_wm_name, utf8_string));
 }
 
 }  // namespace toy::platform

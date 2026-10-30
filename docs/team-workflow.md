@@ -280,3 +280,22 @@ the round when possible. Clean up stale build directories and stray files.
 - M6: window mode was smoke-tested without extra tooling by launching the browser, finding its
   specific client window in `xwininfo -root -tree`, and capturing it with ImageMagick `import`
   (no `xdotool` needed on this machine); capture only the client window, not the root.
+- M7: freezing all five public headers up front (net/layout/paint/platform/shell) let three modules
+  plus the shell session be written in parallel against explicit contracts; the cost is that the
+  default full build is broken in `toy_shell` until the shell wave lands, so every kickoff prompt
+  must say "build only your own targets, the full build is expected to fail". That sentence removed
+  the only likely source of wasted debugging.
+- M7: one headless `shell::Browser` session class made links, history, scrolling and titles testable
+  without a display, and the window loop became a thin presenter; routing `--screenshot` through the
+  same class means the two presentation paths cannot drift apart.
+- M7: a pre-round `git worktree` of the previous commit is a cheap byte-identical regression gate
+  when painting changes: after adding viewport clip commands, all dumps and scroll-0 screenshots
+  were `cmp`-identical to the baseline.
+- M7: platform input cannot be unit-tested headlessly, so the platform owner wrote a throwaway X11
+  smoke program (title readback, button/keysym mapping) in `.tmp/`; the Lead's real-window smoke
+  then only had to prove the shell wiring.
+- M7: the real-window smoke needs the *client* window, not the window-manager frame (both carry the
+  title); find it with `xwininfo -root -tree`, capture with `import -window`, and inject input with
+  a small XSendEvent helper linked only against libX11 — no `xdotool` and no new dependency.
+- M7: hardcoding the fixture's link coordinates from a `--dump-boxes` run (as in M6) kept the
+  navigation test headless and fast; the fixture and coordinates must move together.

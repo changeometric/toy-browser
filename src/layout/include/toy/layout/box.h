@@ -72,6 +72,21 @@ class BoxTree {
 BoxTree LayoutDocument(const dom::Document& document, const style::StyleTree& styles,
                        const LayoutOptions& options, const MeasureText& measure);
 
+// Returns the box painted last in box-tree pre-order whose border-box rectangle
+// contains the point, or kInvalidBox when no box does. Coordinates are CSS px in
+// page space (absolute layout coordinates; the caller adds any scroll offset).
+// Rectangles are half-open: a box contains a point when
+// box.x <= x < box.x + box.width and box.y <= y < box.y + box.height; boxes with
+// a non-positive width or height never contain a point. The result may be any box
+// kind (including anonymous boxes without a DOM origin); callers walk up to find
+// what they need. Deterministic and side-effect free.
+BoxId HitTest(const BoxTree& boxes, float x, float y);
+
+// Scrollable content height of the page: the maximum of box.y + box.height over
+// all boxes, clamped to >= 0 (CSS px); 0 for an empty tree. The scrollable range
+// for a viewport of height H is [0, max(0, ContentHeight(boxes) - H)].
+float ContentHeight(const BoxTree& boxes);
+
 // Deterministic text dump of the box tree, one line per box in pre-order, with
 // two spaces of indent per depth (capped at 64). Used by --dump-boxes and the
 // layout tests. An empty tree dumps as "".

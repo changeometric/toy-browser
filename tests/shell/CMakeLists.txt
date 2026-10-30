@@ -4,6 +4,14 @@ toybrowser_set_warnings(shell_headless_test)
 
 add_test(NAME shell.headless_screenshot COMMAND shell_headless_test)
 
+# M7 headless navigation: drives toy::shell::Browser against the committed
+# multi-page fixture site (file:// only; no display, no network).
+add_executable(shell_navigation_test navigation_test.cpp)
+target_link_libraries(shell_navigation_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(shell_navigation_test)
+add_test(NAME shell.navigation
+  COMMAND shell_navigation_test "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/nav_site")
+
 # End-to-end --dump-body checks against local files: no network, no display.
 set(shell_dump_body_fixture "${CMAKE_CURRENT_BINARY_DIR}/dump_body_fixture.txt")
 file(WRITE "${shell_dump_body_fixture}" "M2 dump body fixture: shell end-to-end fetch\n")
