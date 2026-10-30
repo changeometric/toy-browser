@@ -47,7 +47,7 @@ done when its demo command works, new logic has tests, and the docs are still ac
   content routing (a `<title>` without an explicit `<head>` lands in body), comments are kept
   verbatim (so a source comment's spaces show up in the dump), whitespace text nodes are preserved
   with simple routing, entities are a small named set plus numeric forms (semicolon required,
-  lowercase `x` only), no templates/SVG/MathML namespaces, and input is assumed to be UTF-8.
+  lowercase `x` only), no `<template>`, SVG or MathML namespaces, and input is assumed to be UTF-8.
 
 ## M4 — CSS and computed style
 
@@ -99,6 +99,9 @@ starts only after the previous slice is clean and the user agrees on priority.
   clearly useful.
 - **TLS / `https://`** — deferred by the user on 2026-10-31; OpenSSL is not approved. Reaching
   sites such as Google needs `https`, and proxy support alone is not enough for them.
+- **Test helper consolidation** — the per-file `Check`/`g_failures` test harness is duplicated in
+  every test executable. Introduce a header-only `tests/support/check.h` when the next test file is
+  added (M4); no framework dependency.
 
 ## Rules
 

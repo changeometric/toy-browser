@@ -591,7 +591,7 @@ bool FetchHttpOnce(const Url& url, const FetchOptions& options, Response* out, s
   return ParseResponse(raw, options.max_body_bytes, out, error);
 }
 
-bool FetchFile(const Url& url, Response* out, std::string* error) {
+bool FetchFile(const Url& url, const FetchOptions& options, Response* out, std::string* error) {
   const std::string& path = url.path;
   if (path.empty() || path.front() != '/') {
     SetError(error, "file URL path must be absolute");
@@ -619,6 +619,17 @@ bool FetchFile(const Url& url, Response* out, std::string* error) {
   }
   if (!std::filesystem::is_regular_file(status)) {
     SetError(error, "not a regular file: " + path);
+    return false;
+  }
+  std::error_code size_error;
+  const std::uintmax_t file_size = std::filesystem::file_size(path, size_error);
+  if (size_error) {
+    SetError(error, "cannot read the size of file '" + path + "': " + size_error.message());
+    return false;
+  }
+  if (file_size > static_cast<std::uintmax_t>(options.max_body_bytes)) {
+    SetError(error, "file is larger than the " + std::to_string(options.max_body_bytes) +
+                        "-byte limit: " + path);
     return false;
   }
   std::ifstream file(path, std::ios::binary);
@@ -655,7 +666,7 @@ bool Fetch(const Url& url, const FetchOptions& options, Response* out, std::stri
     return false;
   }
   if (url.scheme == "file") {
-    return FetchFile(url, out, error);
+    return FetchFile(url, options, out, error);
   }
   if (url.scheme != "http") {
     SetError(error, "unsupported URL scheme '" + url.scheme + "'");

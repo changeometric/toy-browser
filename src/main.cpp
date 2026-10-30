@@ -1,7 +1,8 @@
 // The toy browser's command-line entry point.
 //
-// Parses the options, then hands them to toy::shell::Run. Page loading arrives
-// in later milestones (see docs/roadmap.md).
+// Parses the options, then hands them to toy::shell::Run. Fetching works through
+// --dump-body and --dump-dom; the window still shows the M1 placeholder page
+// until real page rendering lands (see docs/roadmap.md).
 
 #include <charconv>
 #include <cstdio>
@@ -20,7 +21,8 @@ void PrintUsage(std::FILE* stream, const char* argv0) {
       stream,
       "Usage: %s [options]\n"
       "\n"
-      "A toy web browser built from scratch. Page loading arrives in later milestones.\n"
+      "A toy web browser built from scratch. Fetching works via --dump-body and --dump-dom;\n"
+      "the window still shows a placeholder page until rendering lands.\n"
       "\n"
       "Options:\n"
       "  -h, --help         Show this help and exit.\n"
@@ -29,7 +31,9 @@ void PrintUsage(std::FILE* stream, const char* argv0) {
       "  --screenshot PATH  Write one frame to PATH as a PPM image; implies --headless.\n"
       "  --dump-body URL    Fetch URL and write the raw response body to stdout; no window.\n"
       "  --dump-dom URL     Fetch URL as HTML and write the DOM dump to stdout; no window.\n"
-      "  --size WxH         Window size in pixels (default 800x600).\n",
+      "  --size WxH         Window size in pixels (default 800x600; limits below).\n"
+      "\n"
+      "Window size limits: 1..8192 per side, 16777216 pixels in total.\n",
       argv0);
 }
 

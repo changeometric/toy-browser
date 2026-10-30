@@ -143,6 +143,37 @@ void TestDirectory() {
   Check(error.find("directory") != std::string::npos, "the directory error mentions a directory");
 }
 
+void TestBodyLimit() {
+  const std::filesystem::path path = std::filesystem::current_path() / "net_file_test_limit.txt";
+  const std::string content = "0123456789abcdef";
+  Check(WriteFile(path, content), "the size-limit test file is written");
+  toy::net::Url url;
+  if (!ParseUrlOrFail(FileUrlFor(path), &url)) {
+    RemoveFile(path);
+    return;
+  }
+
+  toy::net::FetchOptions small_options;
+  small_options.max_body_bytes = 8;
+  toy::net::Response response;
+  std::string error;
+  Check(!toy::net::Fetch(url, small_options, &response, &error),
+        "a file larger than max_body_bytes is an error");
+  Check(!error.empty(), "the file size limit error is set");
+  Check(error.find("limit") != std::string::npos, "the file size limit error mentions the limit");
+
+  toy::net::FetchOptions large_options;
+  large_options.max_body_bytes = 1024;
+  toy::net::Response accepted;
+  std::string accepted_error;
+  Check(toy::net::Fetch(url, large_options, &accepted, &accepted_error),
+        "a file within max_body_bytes still succeeds");
+  Check(accepted.body == content, "the accepted file body is returned");
+
+  RemoveFile(path);
+  Check(!std::filesystem::exists(path), "the size-limit test file is removed");
+}
+
 }  // namespace
 
 int main() {
@@ -150,6 +181,7 @@ int main() {
   TestPercentEncodedSpace();
   TestMissingFile();
   TestDirectory();
+  TestBodyLimit();
   if (g_failures != 0) {
     std::fprintf(stderr, "%d file check(s) failed\n", g_failures);
     return 1;

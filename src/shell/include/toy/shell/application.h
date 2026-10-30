@@ -25,7 +25,8 @@ struct Options {
 // Runs the browser.
 //
 // Returns 0 on success, 1 on a runtime error (cannot open a window, cannot write
-// the screenshot) and 2 on a usage error (invalid options).
+// the screenshot) and 2 on a usage error (invalid options, including a window
+// size outside the supported range).
 int Run(const Options& options);
 
 }  // namespace toy::shell

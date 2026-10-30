@@ -128,6 +128,8 @@ module it does not own. Only wiring and shared-file fixes are the Lead's.
 
 - Update the documents the round changed: roadmap status, README status, architecture or
   conventions when behavior changed, dependency approvals, open questions, lessons.
+- English first: update `README.md` before `README.zh.md` and make their status lines match in the
+  same round.
 - Make one grouped commit per round with an English message that names the milestone.
 - Close the tasks; keep them on the board as the round's audit trail.
 - Report to the user: what shipped, verification evidence, what changed in the docs, remaining
@@ -163,8 +165,8 @@ the round when possible. Clean up stale build directories and stray files.
 - Evidence over claims: every completion report includes the commands run and their output.
 - Isolated build directories; never build inside the source tree or a sibling's build dir.
 - Deterministic tests: no display, network, fonts, locale or clock dependencies in unit tests.
-- Repository files in English; user-facing conversation in Chinese; personal and machine-specific
-  preferences stay in the gitignored `AGENTS.local.md`.
+- Repository files in English; user-facing conversation follows the user's own language
+  preference; personal and machine-specific details stay out of the repository.
 - No implementer commits, installs or downloads; dependency changes need user approval first.
 - Keep history readable: one grouped commit per round, not a stream of fragments.
 - Docs are updated while working, not reconstructed at the end.
@@ -175,6 +177,8 @@ the round when possible. Clean up stale build directories and stray files.
 - Contract questions: state the ambiguity, propose a default, note the affected members.
 - Completion reports: files changed, verification evidence, uncertainties, risks.
 - No polling loops; wait for events instead of repeatedly asking.
+- Team-internal messages may use whatever language is most efficient (English recommended for
+  precision); conversation with the user follows the user's own language preference.
 - User decisions are escalated, never invented.
 
 ## 12. Anti-patterns
@@ -219,3 +223,10 @@ the round when possible. Clean up stale build directories and stray files.
   and worth keeping as a habit for the dom and css modules.
 - M3: a test assertion built on CMake regex was itself verified with `cmake -P` before being
   trusted; assertions need verification too.
+- M3: the English `README.md` status drifted behind `README.zh.md` because a scripted text
+  replacement silently did nothing. Verify automated doc edits (grep the new text after replacing)
+  and check README/README.zh parity before delivery.
+- Review round after M3 (two read-only reviewers with fresh context, code and docs, one round):
+  found one real bug (`--size` unbounded), two contract/robustness gaps (`file://` ignored the
+  body-size cap, dump indentation was quadratic) and several stale docs. A cheap review every 2-3
+  milestones is worth it; keep reviewers read-only and route fixes to module owners.

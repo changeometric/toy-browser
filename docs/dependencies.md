@@ -15,7 +15,7 @@ engine or browser engine is used — those are written in this repository.
 Approved by the user on 2026-10-31, when M1 started:
 
 - **libX11** — windowing, input and pixel presentation on Linux, used from M1. License: MIT/X11.
-  Linked through CMake's `find_package(X11)`; no vendoring.
+  Linked through CMake's `find_package(X11)`; no vendoring. Introduced in commit `0572b8b` (M1).
 - **libpng + zlib** — allowed for image decoding, intended for M8. Not linked yet.
 - **freetype** — allowed for font rasterization and metrics, intended for M8. Not linked yet.
 - **libxcb** — allowed as an alternative windowing library; currently unused.
@@ -59,6 +59,7 @@ Only libX11 is linked today. Any other row needs the process below to be complet
 
 - No absolute paths, no hardcoded library versions or package locations in code or CMake.
 - Libraries are discovered only through CMake find modules or pkg-config, and only after approval.
-- Optional features must degrade gracefully: the build and tests pass without any optional
-  dependency, and the headless path stays dependency-free.
+- Optional features must degrade gracefully: the tests pass without optional dependencies.
+  Headless runs need no display, but the current binary still links libX11 because the window
+  backend is always built.
 - Do not assume what fonts, window manager, GPU or packages a machine has.

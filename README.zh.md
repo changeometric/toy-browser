@@ -3,7 +3,7 @@
 一个从零实现的玩具网页浏览器：C++20、CMake，不使用现成的浏览器组件。
 
 **状态：M3 —— HTML 已被解析成 arena DOM，可通过 headless 的 `--dump-dom` 命令查看。** 页面渲染仍是
-M1 的占位页；CSS 从 M4 开始。详见[路线图](docs/roadmap.md)。英文原版：[README.md](README.md)。
+M1 的占位页；CSS 从 M4 开始。详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
 
 ## 构建与运行
 
@@ -18,20 +18,27 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --dump-dom  file:///etc/hostname  # 抓取并输出解析后的 DOM 树
 ```
 
-窗口后端在构建时需要 libX11（已批准，见[依赖说明](docs/dependencies.md)）。headless 路径既不需要
-显示器，也不需要额外库，是测试和调试的主要模式：所有渲染结果都能不开窗口检查。
+窗口后端链接 libX11（已批准，见[依赖说明](docs/zh/dependencies.md)），因此即使只用 headless 模式，
+构建时仍然需要 X11 开发头文件。headless 运行不需要显示器，是测试和调试的主要模式：所有渲染结果
+都能不开窗口检查。
+
+任何满足最低 CMake 版本的 C++20 编译器与 CMake generator 都能构建；仓库不依赖某台机器的路径、
+工具链版本或已安装的包集合。
 
 ## 文档
 
 | 文档 | 内容 |
 | --- | --- |
-| [architecture.md](docs/architecture.md) | 模块划分、数据流、数据模型、渲染与线程模型 |
-| [roadmap.md](docs/roadmap.md) | 里程碑，每个都是最小垂直切片 |
-| [dependencies.md](docs/dependencies.md) | 第三方依赖策略与审批记录 |
-| [conventions.md](docs/conventions.md) | C++、CMake 与测试约定 |
-| [team-workflow.md](docs/team-workflow.md) | 轮次制团队流程：角色、阶段、质量门与经验 |
-| [open-questions.md](docs/open-questions.md) | 等待用户决策的问题 |
+| [architecture.md](docs/zh/architecture.md) | 模块划分、数据流、数据模型、渲染与线程模型 |
+| [roadmap.md](docs/zh/roadmap.md) | 里程碑，每个都是最小垂直切片 |
+| [dependencies.md](docs/zh/dependencies.md) | 第三方依赖策略与审批记录 |
+| [conventions.md](docs/zh/conventions.md) | C++、CMake 与测试约定 |
+| [team-workflow.md](docs/zh/team-workflow.md) | 轮次制团队流程：角色、阶段、质量门与经验 |
+| [open-questions.md](docs/zh/open-questions.md) | 等待用户决策的问题 |
 | [AGENTS.md](AGENTS.md) | AI agent 工作规则 |
+
+表格中的设计文档均有中文翻译（索引见 [docs/zh/README.md](docs/zh/README.md)）；英文原版位于 `docs/`
+下同名文件，是唯一权威版本。
 
 ## 依赖
 
@@ -45,7 +52,7 @@ ctest --test-dir build --output-on-failure
 | libpng + zlib | 图片解码（M8，如使用） | libpng 许可证 / zlib 许可证 | 已批准，未链接 |
 | freetype | 字体光栅化（M8，如使用） | FreeType 许可证 | 已批准，未链接 |
 
-依赖策略、审批记录与自写替代方案见 [dependencies.md](docs/dependencies.md)。
+依赖策略、审批记录与自写替代方案见 [dependencies.md](docs/zh/dependencies.md)。
 
 ## 许可证
 

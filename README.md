@@ -2,9 +2,9 @@
 
 A toy web browser built from scratch: C++20, CMake, and no ready-made browser components.
 
-**Status: M2 — URL fetching (`http://` and `file://`) through the headless `--dump-body` command.**
-Page rendering is still the M1 placeholder; HTML parsing starts in M3. See the
-[roadmap](docs/roadmap.md).
+**Status: M3 — HTML is parsed into an arena DOM and can be inspected with the headless
+`--dump-dom` command.** Page rendering is still the M1 placeholder; CSS starts in M4. See the
+[roadmap](docs/roadmap.md). 中文版：[README.zh.md](README.zh.md).
 
 ## Build and run
 
@@ -19,9 +19,10 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --dump-dom  file:///etc/hostname  # fetch and dump the parsed DOM tree
 ```
 
-The window backend needs libX11 at build time (approved; see [dependencies](docs/dependencies.md)).
-The headless path needs neither a display nor any extra library, and it is the primary mode for
-testing and debugging: every rendered result can be inspected without opening a window.
+The window backend links libX11 (approved; see [dependencies](docs/dependencies.md)), so the X11
+development headers are a build-time requirement even when only headless modes are used. Headless
+runs need no display and are the primary mode for testing and debugging: every rendered result can
+be inspected without opening a window.
 
 Any C++20 compiler and CMake generator that meets the minimum CMake version works; nothing in the
 tree depends on a specific machine's paths, toolchain version or installed package set.

@@ -6,8 +6,10 @@ architecture, roadmaps and decision records live in `docs/`. Do not duplicate th
 this file short and stable.
 
 This file describes the project, not any particular machine or person: it must stay free of
-machine-specific environment details, toolchain versions and personal preferences. Those belong in
-the gitignored `AGENTS.local.md`.
+machine-specific environment details, toolchain versions and personal preferences. Such local
+configuration is never recorded in tracked files. Per-user local instructions may optionally be
+supplied in an untracked `AGENTS.local.md` at the repository root; its content is personal and
+stays out of git.
 
 ## Project nature
 
@@ -30,6 +32,8 @@ the gitignored `AGENTS.local.md`.
   commit messages. The only allowed exceptions are `README.zh.md`, `docs/zh/**` and, once they
   exist, browser UI localization data (e.g. `assets/i18n/**`). Update the English version first,
   then the translations; English is always the source of truth.
+- Never record personal information about the user in tracked files. Personal preferences,
+  interaction language and machine details are local configuration and stay out of the repository.
 - Do not depend on machine-specific environment: no absolute paths, no hardcoded compiler or
   library versions, no assumptions about a particular GPU, window manager, font directory or
   installed package set. Build and test steps must be reproducible on another conforming machine.
@@ -81,6 +85,10 @@ the gitignored `AGENTS.local.md`.
 - Every new feature or requirement follows the round playbook in `docs/team-workflow.md`
   (intake -> contracts -> kickoff -> parallel work -> integration -> delivery -> retro). Team norms
   and lessons live there too; keep only rules that every agent must follow in this file.
+- Team-internal communication (task board, messages between members, reports to the Lead) may use
+  whatever language is most efficient; English is recommended for technical precision. Only
+  conversation with the user follows the user's own language preference, which is not stored in the
+  repository.
 
 ## Git discipline
 
@@ -95,9 +103,8 @@ the gitignored `AGENTS.local.md`.
   unclear; never silently make big decisions.
 - Do only what the current task requires — no future features, no scope creep. If the task is
   ambiguous, ask instead of guessing.
-- `AGENTS.local.md` (gitignored) holds local instructions: interaction language and any
-  machine-specific or personal preferences. Pass task-relevant parts to teammates; committed
-  files always stay English.
+- Local, personal or machine-specific configuration is never copied into the repository; tracked
+  files always stay English. Pass only task-relevant technical context to teammates.
 - New working rules go into this file; design, module maps and roadmaps go into `docs/`.
 - Record new lessons and requirements continuously, as they appear — not only at the end of a
   task. Rules go here, design and status into `docs/`, process lessons into

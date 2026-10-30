@@ -4,7 +4,8 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
 
 ## Language and formatting
 
-- C++20, standard library only. No compiler extensions.
+- C++20. No compiler extensions; no third-party libraries (the standard library and approved OS
+  interfaces only).
 - Formatting is defined by the committed `.clang-format` (Google-based, 100 columns). Format files
   you touch; never reformat unrelated code.
 - Files: `snake_case.h`, `snake_case.cpp`, `#pragma once` instead of include guards.
@@ -19,17 +20,17 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
 
 ## Documentation language
 
-- Repository files are English. Explicit exceptions, currently Chinese only: `README.zh.md`,
-  `docs/zh/**`, and — once introduced — browser UI localization data (e.g. `assets/i18n/**`).
-- Update the English document first, then the translations. Translations may be batched and
-  written in one pass after the English text settles, but English remains the source of truth.
-- Translations never carry information that the English version lacks; if they diverge, fix the
-  translation and, when in doubt, the English text wins.
-- Code, comments, identifiers and commit messages are always English.
+- The authoritative rule lives in [AGENTS.md](../AGENTS.md): `README.zh.md`, `docs/zh/**` and
+  future i18n data may be non-English; everything else, including code, comments and commit
+  messages, is English. Update English first and treat it as the source of truth.
+- Team-internal communication (task board, member messages, reports to the Lead) may use any
+  efficient language; English is recommended. User-facing conversation follows the user's own
+  language preference, which is not stored in the repository.
 
 ## Errors
 
-- Recoverable failures return `toy::Result<T>`-style values with a module-specific error enum.
+- Recoverable failures return `std::optional<T>` or `bool` plus a human-readable
+  `std::string* error` (details in `docs/architecture.md`); no exceptions for control flow.
 - No exceptions across module boundaries; do not use exceptions for ordinary control flow.
 - Internal invariants use `assert` in debug builds; programmer errors should fail loudly.
 

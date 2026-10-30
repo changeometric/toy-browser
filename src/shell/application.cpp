@@ -19,6 +19,11 @@ constexpr render::Argb kPageColor = 0xFFFFFFFFu;
 constexpr render::Argb kDemoBandColor = 0xFF3B6EA5u;
 constexpr int kDemoBandHeight = 8;
 
+// Keep one frame inside a sane memory budget: at 4 bytes per pixel the total
+// cap is 64 MiB. Run enforces both limits for every mode, before any allocation.
+constexpr int kMaxDimension = 8192;
+constexpr int kMaxPixels = 16'777'216;
+
 // M1 placeholder page: a white page with a blue band at the top. It proves the
 // whole pixel path (surface -> presentation) works; real page content arrives
 // with the later milestones.
@@ -126,9 +131,13 @@ int RunWindowed(const Options& options) {
 }  // namespace
 
 int Run(const Options& options) {
-  if (options.width <= 0 || options.height <= 0) {
-    std::fprintf(stderr, "toybrowser: window size must be positive, got %dx%d\n", options.width,
-                 options.height);
+  if (options.width < 1 || options.height < 1 || options.width > kMaxDimension ||
+      options.height > kMaxDimension ||
+      static_cast<long long>(options.width) * options.height > kMaxPixels) {
+    std::fprintf(stderr,
+                 "toybrowser: window size %dx%d is out of range (each side 1..%d, at most %d "
+                 "pixels in total)\n",
+                 options.width, options.height, kMaxDimension, kMaxPixels);
     return 2;
   }
   const int headless_modes = static_cast<int>(!options.screenshot_path.empty()) +

@@ -1,5 +1,10 @@
 // Deterministic DOM dump: one line per node, two spaces of indent per level.
 // Used by --dump-dom and by the parser tests, which compare the exact text.
+//
+// Indentation is capped at kMaxIndentDepth levels. Without the cap a deeply
+// nested document would produce a quadratic dump (10k nested elements would
+// mean ~100 MB of spaces), which makes --dump-dom unusable on adversarial
+// input. Normal pages stay far below the cap, so their dump is unchanged.
 
 #include <cstddef>
 #include <string>
@@ -11,6 +16,10 @@
 
 namespace toy::dom {
 namespace {
+
+// Maximum tree depth that contributes indentation. Deeper nodes keep the same
+// indent, so the dump stays linear in the number of nodes.
+constexpr std::size_t kMaxIndentDepth = 64;
 
 char HexDigit(unsigned int value) {
   return value < 10 ? static_cast<char>('0' + value) : static_cast<char>('A' + (value - 10));
@@ -110,7 +119,9 @@ std::string DumpDocument(const Document& doc) {
     pending.pop_back();
     const Node& node = doc.Get(current.id);
     if (!(node.type == NodeType::kText && node.data.empty())) {
-      dump.append(current.depth * 2, ' ');
+      const std::size_t indent_depth =
+          current.depth < kMaxIndentDepth ? current.depth : kMaxIndentDepth;
+      dump.append(indent_depth * 2, ' ');
       dump.append(NodeLine(node));
       dump.push_back('\n');
     }

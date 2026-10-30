@@ -32,3 +32,9 @@ add_test(NAME shell.dump_dom_missing_file
   COMMAND $<TARGET_FILE:toybrowser> --dump-dom
           "file://${CMAKE_CURRENT_BINARY_DIR}/missing_dump_dom_fixture.html")
 set_tests_properties(shell.dump_dom_missing_file PROPERTIES WILL_FAIL TRUE)
+
+# Regression test: out-of-range window sizes must be rejected, never abort.
+add_executable(shell_size_limit_test size_limit_test.cpp)
+target_link_libraries(shell_size_limit_test PRIVATE toy_shell)
+toybrowser_set_warnings(shell_size_limit_test)
+add_test(NAME shell.size_limit COMMAND shell_size_limit_test)

@@ -34,7 +34,8 @@ struct FetchOptions {
   int read_timeout_ms = 10000;
   // Number of redirects to follow before failing.
   int max_redirects = 5;
-  // Upper bound on the decoded body size; a larger response is an error.
+  // Upper bound on the decoded body size, for both HTTP and file bodies;
+  // larger content is an error.
   std::size_t max_body_bytes = 16u * 1024 * 1024;
 };
 
@@ -42,6 +43,7 @@ struct FetchOptions {
 // - http: blocking HTTP/1.1 GET over TCP, one request per connection, following
 //   301/302/303/307/308 redirects (absolute or root-relative Location only).
 // - file: reads the file at the decoded absolute path; the response status is 200.
+//   Files larger than FetchOptions::max_body_bytes are rejected before reading.
 // Returns true on success and false on failure. On failure `error` (when not null)
 // is a human-readable message and `out` is left untouched; on success `error` is
 // cleared. Ordinary I/O and parsing failures never escape as exceptions.

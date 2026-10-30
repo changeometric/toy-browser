@@ -7,7 +7,7 @@ speculative — abstractions are added when a real slice needs them.
 
 | Module | Responsibility | May depend on | First needed |
 | --- | --- | --- | --- |
-| `base` | Small utilities: `Result`, geometry, logging, UTF-8 helpers | — | M1 |
+| `base` | Small shared utilities (geometry, logging, UTF-8), only when a need appears | — | when first needed |
 | `platform` | Window, input events, event loop, presenting pixel surfaces | `base` | M1 |
 | `render` | Display list, software rasterizer, bitmap font, image decoding | `base` | M1 |
 | `net` | URL parsing, sockets, HTTP/1.1 fetch | `base` | M2 |
@@ -20,7 +20,9 @@ speculative — abstractions are added when a real slice needs them.
 
 Dependencies point downward only; no cycles. `render` knows nothing about HTML/CSS (it consumes
 display lists); `platform` knows nothing about page content (it blits pixels and reports input).
-Only `shell` sees all modules and wires them together.
+Only `shell` sees all modules and wires them together. `base` does not exist yet: M1-M3 modules use
+only the standard library and standard POSIX interfaces, and the module appears when a shared
+utility is actually needed.
 
 ## One page load, end to end
 
@@ -93,13 +95,15 @@ can't form ownership cycles. Revisit only if it actually hurts.
   and screenshots are driven and inspected through CLI modes (`--dump-body`, `--dump-dom`,
   `--dump-boxes`, `--screenshot`); the window only ever presents pixels that the headless path
   already produced. Automated tests never require a display.
-- M1's visible result — a solid-color window — uses exactly this path, so later stages only swap
-  display lists in.
+- M1's visible result — a white page with a blue band in a window — uses exactly this path, so
+  later stages only swap display lists in.
 
 ## Errors and ownership
 
-- Recoverable failures return `toy::Result<T>`-style values with a module-specific error enum
-  (fetch failed, file missing, malformed input recovered from, ...).
+- Recoverable failures today use simple, explicit results: `std::optional<T>` (URL parsing) or
+  `bool` plus a `std::string* error` human-readable message (fetching, window creation). Callers
+  check the result directly and never rely on exceptions. A `Result<T>` type with module error
+  enums is introduced only if the simple pattern starts to hurt.
 - No exceptions across module boundaries and no exceptions for ordinary control flow; internal
   invariants fail with `assert` in debug builds.
 - Ownership: `std::unique_ptr` and values own; references/raw pointers are non-owning; arena ids
@@ -133,8 +137,8 @@ can't form ownership cycles. Revisit only if it actually hurts.
 
 - CLI flags: `--dump-body`, `--dump-dom`, `--dump-style`, `--dump-boxes`, `--screenshot <file>`,
   `--headless`.
-- Tests are plain C++ executables registered with CTest; a tiny assertion helper in
-  `tests/support/` appears when the second test file does. No test framework dependency.
+- Tests are plain C++ executables registered with CTest; each test file carries its own small
+  assertion helpers. No test framework dependency.
 - Parser/layout golden files are text dumps compared line by line; images are compared with a
   small tolerance once paint exists.
 - Tests are deterministic and never need a network, display, installed font or particular locale.

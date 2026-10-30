@@ -1,6 +1,7 @@
 // Tests for the HTML tokenizer + tree builder: inline (html, expected dump)
 // pairs compared as exact strings.
 
+#include <cstddef>
 #include <cstdio>
 #include <string>
 
@@ -470,6 +471,52 @@ void TestCaseTable() {
   }
 }
 
+// Regression for the review round: deeply nested input must not make the dump
+// grow quadratically. Indentation is capped at 64 levels, so 10,000 nested
+// elements produce roughly 1.3 MB instead of hundreds of megabytes.
+void TestDeepNestingDump() {
+  std::string html;
+  html.reserve(10000 * 5);
+  for (int level = 0; level < 10000; ++level) {
+    html.append("<div>");
+  }
+  const auto document = toy::dom::ParseDocument(html);
+  Check(document.size() > 10000, "a deeply nested document is parsed");
+  const std::string dump = toy::dom::DumpDocument(document);
+  Check(!dump.empty(), "a deeply nested document still dumps");
+  Check(dump.back() == '\n', "a deeply nested dump ends with one newline");
+  Check(dump.size() < 2U * 1024U * 1024U, "deep nesting stays far below a few megabytes");
+
+  // The cap holds for the deepest line as well: at most 64 * 2 leading spaces.
+  std::size_t max_indent = 0;
+  std::size_t line_start = 0;
+  while (line_start < dump.size()) {
+    std::size_t indent = 0;
+    while (line_start + indent < dump.size() && dump[line_start + indent] == ' ') {
+      ++indent;
+    }
+    max_indent = indent > max_indent ? indent : max_indent;
+    const std::size_t line_end = dump.find('\n', line_start);
+    if (line_end == std::string::npos) {
+      break;
+    }
+    line_start = line_end + 1;
+  }
+  Check(max_indent <= 128, "dump indentation is capped at 64 levels");
+  Check(max_indent == 128, "a 10,000 level tree reaches the indentation cap");
+
+  // Shallow trees are far below the cap and keep their exact dump.
+  ExpectDump("<div><p>shallow</p></div>", R"dom(#document
+  <html>
+    <head>
+    <body>
+      <div>
+        <p>
+          "shallow"
+)dom",
+             "shallow dumps are unchanged by the indentation cap");
+}
+
 void TestDocumentArena() {
   using toy::dom::kInvalidNode;
   using toy::dom::NodeType;
@@ -494,6 +541,7 @@ void TestDocumentArena() {
 int main() {
   TestCaseTable();
   TestDocumentArena();
+  TestDeepNestingDump();
   if (g_failures != 0) {
     std::fprintf(stderr, "dom parser test: %d failure(s)\n", g_failures);
     return 1;
