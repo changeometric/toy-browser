@@ -37,6 +37,18 @@ add_executable(toybrowser src/main.cpp)
 target_compile_definitions(toybrowser PRIVATE TOYBROWSER_VERSION="${PROJECT_VERSION}")
 toybrowser_set_warnings(toybrowser)
 
+# Each module owns its CMakeLists.txt and is picked up as soon as the file
+# exists, so parallel work on different modules never has to edit this file.
+foreach(module render platform shell)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${module}/CMakeLists.txt")
+    add_subdirectory(src/${module})
+  endif()
+endforeach()
+
+if(TARGET toy_shell)
+  target_link_libraries(toybrowser PRIVATE toy_shell)
+endif()
+
 if(TOYBROWSER_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)

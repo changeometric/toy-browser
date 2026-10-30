@@ -1,0 +1,5 @@
+add_executable(shell_headless_test headless_test.cpp)
+target_link_libraries(shell_headless_test PRIVATE toy_shell)
+toybrowser_set_warnings(shell_headless_test)
+
+add_test(NAME shell.headless_screenshot COMMAND shell_headless_test)

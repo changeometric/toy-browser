@@ -5,28 +5,37 @@ what is still being requested.
 
 ## Currently approved
 
-- **None.** Only the C++20 standard library and standard OS/POSIX interfaces are in use.
+Approved by the user on 2026-10-31, when M1 started:
+
+- **libX11** — windowing, input and pixel presentation on Linux, used from M1. License: MIT/X11.
+  Linked through CMake's `find_package(X11)`; no vendoring.
+- **libpng + zlib** — allowed for image decoding, intended for M8. Not linked yet.
+- **freetype** — allowed for font rasterization and metrics, intended for M8. Not linked yet.
+- **libxcb** — allowed as an alternative windowing library; currently unused.
+
+Nothing else is linked. The C++20 standard library and standard OS/POSIX interfaces remain the
+default.
 
 ## System interfaces are still dependencies
 
 Anything that talks to the display server (an X11 client library, for example) counts as a
-third-party dependency for this project and needs approval. Until then, the headless backend —
-rendering into memory and writing a PPM file — keeps the whole pipeline testable without a display.
+third-party dependency for this project and needs approval. libX11 is now approved for the window;
+the headless backend — rendering into memory and writing a PPM file — keeps the whole pipeline
+testable without a display.
 
-## Pending candidates
+## Dependency candidates
 
 | Candidate | Purpose | From-scratch alternative | Rough cost | Status |
 | --- | --- | --- | --- | --- |
-| libX11 | Window, input, presenting pixels | Implement the X11 wire protocol ourselves | Medium; protocol quirks, XShm fallback | **Awaiting approval** (needed for M1's window) |
-| libxcb | Same as above, more modern API | Same | Medium | **Awaiting approval** (alternative to libX11) |
-| freetype | TTF glyph rasterization and metrics | Own subset TTF loader (cmap/glyf/hmtx, no hinting) | Medium | **Not now** — bitmap font first, decide at M8 |
-| libpng + zlib | PNG decoding | Own inflate + PNG filters/decoder | ~600–900 lines, very educational | **Not now** — decide at M8 |
-| OpenSSL | TLS, i.e. `https://` | Not realistic from scratch | High | **Deferred** — HTTP/file only until decided |
+| libX11 | Window, input, presenting pixels | Implement the X11 wire protocol ourselves | Medium; protocol quirks, XShm fallback | **Approved, in use from M1** (plain `XPutImage` first; XShm later if needed) |
+| libxcb | Same as above, more modern API | Same | Medium | **Approved, unused** (alternative to libX11) |
+| freetype | TTF glyph rasterization and metrics | Own subset TTF loader (cmap/glyf/hmtx, no hinting) | Medium | **Approved for M8, not linked yet** — bitmap font first |
+| libpng + zlib | PNG decoding | Own inflate + PNG filters/decoder | ~600–900 lines, very educational | **Approved for M8, not linked yet** |
+| OpenSSL | TLS, i.e. `https://` | Not realistic from scratch | High | **Deferred, not approved** — HTTP/file only until decided |
 | stb_truetype / stb_image | Drop-in single-header implementations | Own implementations | Low | **Not approved** — conflicts with the project's spirit |
 | harfbuzz / fontconfig / icu | Complex shaping, font discovery, Unicode data | Basic shaping and ASCII/Latin first | High | **Not planned** |
 
-Nothing in this table is linked or `find_package`d yet. Adding any row to the build requires the
-process below to be completed first.
+Only libX11 is linked today. Any other row needs the process below to be completed first.
 
 ## Approval process
 

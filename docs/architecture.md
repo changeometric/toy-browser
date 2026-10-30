@@ -72,8 +72,9 @@ can't form ownership cycles. Revisit only if it actually hurts.
 - Clipping is a simple rectangle stack pushed by display list commands.
 - Text starts with a small built-in bitmap font (own glyph data, ASCII) so no font library is
   needed; real TTF text comes later, after approval.
-- Presentation: the platform receives pixels + width/height/stride and copies them out. The
-  headless backend writes a PPM file instead, which keeps render tests dependency-free.
+- Presentation: the platform receives a pixel view (pixels, width, height, stride measured in
+  pixels per row — the same units as `render::Surface::stride()`) and copies it out. The headless
+  backend writes a PPM file instead, which keeps render tests dependency-free.
 - M1's visible result — a solid-color window — uses exactly this path, so later stages only swap
   display lists in.
 

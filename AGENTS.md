@@ -61,6 +61,21 @@ the gitignored `AGENTS.local.md`.
   bypass layers. Renderer code must not gain knowledge of HTML/CSS; the platform layer must not
   gain knowledge of page content.
 
+## Team work
+
+- Only the Lead creates tasks, spawns members and fixes interface contracts. Teammates claim one
+  shared task, work only inside its write scope, and ask the Lead when the contract is unclear.
+- The Lead owns shared files (root `CMakeLists.txt`, `tests/CMakeLists.txt`, `docs/`), reviews
+  every change, runs the final build and tests, and makes commits. Teammates never commit.
+- Teammates keep their own build directory, keep their module self-contained, and report changed
+  files, verification output and open questions when done.
+- Interface contracts must state units, ownership and error behavior explicitly. An ambiguous
+  contract is a Lead bug, not a teammate bug: raise it immediately.
+- Parallel work requires disjoint write scopes. If two tasks must touch the same file, the Lead
+  serializes them. Blocked work is reported, never silently worked around by widening scope.
+- Team norms and lessons live in `docs/team-workflow.md`; keep only rules that every agent must
+  follow in this file.
+
 ## Git discipline
 
 - Group related changes into one commit. Do not split small or similar edits into many tiny
@@ -78,3 +93,6 @@ the gitignored `AGENTS.local.md`.
   machine-specific or personal preferences. Pass task-relevant parts to teammates; committed
   files always stay English.
 - New working rules go into this file; design, module maps and roadmaps go into `docs/`.
+- Record new lessons and requirements continuously, as they appear — not only at the end of a
+  task. Rules go here, design and status into `docs/`, process lessons into
+  `docs/team-workflow.md`. Knowledge that only lives in a chat is lost.

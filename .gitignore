@@ -8,6 +8,9 @@ CMakeUserPresets.json
 
 # Local render and test artifacts
 *.ppm
+*.o
+*.a
+*.so
 
 # Editor and tool state
 .vscode/

@@ -3,19 +3,20 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-## M0 — Design and skeleton (current)
+## M0 — Design and skeleton ✅ (done)
 
 - Documentation, buildable CMake skeleton, stub executable, toolchain smoke test.
 - Done when `cmake --build` and `ctest` pass and the user has accepted the docs.
 
-## M1 — Window, event loop, first pixels
+## M1 — Window, event loop, first pixels ✅ (done)
 
-- `platform`: a window backend (window, close/resize, input events) that presents an ARGB surface.
-- `render`: `Surface`, solid rectangle fill, PPM writer. Headless mode: `--screenshot`.
-- Done when a solid-color page area appears in a window, the same content can be dumped headless
-  without a display, and the headless path is covered by a test.
-- The X11 client library needs approval first (see `dependencies.md` and `open-questions.md`); the
-  dependency-free headless backend goes first regardless.
+- `render`: `Surface`, solid rectangle fill, PPM writer.
+- `platform`: X11 window backend (open/close, resize, expose, key events, present an ARGB surface),
+  graceful failure without a display.
+- `shell` + CLI: placeholder page, window event loop, `--headless --screenshot`, `--size`.
+- Acceptance reached: window shows the placeholder page, the same frame can be dumped headless
+  with no display, and `render.surface`, `render.ppm`, `platform.window_requires_display`,
+  `shell.headless_screenshot` all pass under GCC and Clang with warnings as errors.
 
 ## M2 — Fetch a URL
 

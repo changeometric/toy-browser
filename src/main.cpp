@@ -1,47 +1,108 @@
-// The toy browser's entry point.
+// The toy browser's command-line entry point.
 //
-// The project is at milestone M0: this executable only reports its build
-// identity and the planned command-line shape. Rendering, networking and page
-// loading arrive in later milestones (see docs/roadmap.md).
+// Parses the options, then hands them to toy::shell::Run. Page loading arrives
+// in later milestones (see docs/roadmap.md).
 
+#include <charconv>
 #include <cstdio>
+#include <string>
 #include <string_view>
+#include <system_error>
+
+#include "toy/shell/application.h"
 
 namespace {
 
 constexpr std::string_view kProgramName = "toybrowser";
 
-void PrintUsage(const char* argv0) {
-  std::printf(
-      "Usage: %s [options]\n"
-      "\n"
-      "A toy web browser built from scratch (milestone M0: no page loading yet).\n"
-      "\n"
-      "Options:\n"
-      "  -h, --help     Show this help and exit.\n"
-      "  -v, --version  Show the version and exit.\n",
-      argv0);
+void PrintUsage(std::FILE* stream, const char* argv0) {
+  std::fprintf(stream,
+               "Usage: %s [options]\n"
+               "\n"
+               "A toy web browser built from scratch. Page loading arrives in later milestones.\n"
+               "\n"
+               "Options:\n"
+               "  -h, --help         Show this help and exit.\n"
+               "  -v, --version      Show the version and exit.\n"
+               "  --headless         Render without a window (requires --screenshot).\n"
+               "  --screenshot PATH  Write one frame to PATH as a PPM image; implies --headless.\n"
+               "  --size WxH         Window size in pixels (default 800x600).\n",
+               argv0);
+}
+
+int FailUsage(const char* argv0, const std::string& message) {
+  std::fprintf(stderr, "%s: %s\n\n", kProgramName.data(), message.c_str());
+  PrintUsage(stderr, argv0);
+  return 2;
+}
+
+bool ParsePositiveInt(std::string_view text, int* value) {
+  if (text.empty()) {
+    return false;
+  }
+  int parsed = 0;
+  const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), parsed);
+  if (error != std::errc() || end != text.data() + text.size() || parsed <= 0) {
+    return false;
+  }
+  *value = parsed;
+  return true;
+}
+
+bool ParseSize(std::string_view text, int* width, int* height) {
+  const std::size_t separator = text.find('x');
+  if (separator == std::string_view::npos) {
+    return false;
+  }
+  return ParsePositiveInt(text.substr(0, separator), width) &&
+         ParsePositiveInt(text.substr(separator + 1), height);
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
+  toy::shell::Options options;
+  bool headless = false;
+
   for (int i = 1; i < argc; ++i) {
     const std::string_view argument = argv[i];
     if (argument == "-h" || argument == "--help") {
-      PrintUsage(argv[0]);
+      PrintUsage(stdout, argv[0]);
       return 0;
     }
     if (argument == "-v" || argument == "--version") {
       std::printf("%s %s\n", kProgramName.data(), TOYBROWSER_VERSION);
       return 0;
     }
-    std::fprintf(stderr, "%s: unknown option '%s'\n\n", kProgramName.data(), argv[i]);
-    PrintUsage(argv[0]);
-    return 2;
+    if (argument == "--headless") {
+      headless = true;
+      continue;
+    }
+    if (argument == "--screenshot") {
+      if (i + 1 >= argc) {
+        return FailUsage(argv[0], "--screenshot requires a file path");
+      }
+      options.screenshot_path = argv[++i];
+      headless = true;
+      continue;
+    }
+    if (argument == "--size") {
+      if (i + 1 >= argc) {
+        return FailUsage(argv[0], "--size requires a value of the form WxH");
+      }
+      const std::string_view size = argv[++i];
+      if (!ParseSize(size, &options.width, &options.height)) {
+        return FailUsage(argv[0], "invalid window size '" + std::string(size) +
+                                      "' (expected WxH with positive integers)");
+      }
+      continue;
+    }
+    return FailUsage(argv[0], "unknown option '" + std::string(argument) + "'");
   }
 
-  std::printf("%s %s: milestone M0 (design and skeleton), no page loading yet.\n",
-              kProgramName.data(), TOYBROWSER_VERSION);
-  return 0;
+  if (headless && options.screenshot_path.empty()) {
+    return FailUsage(argv[0], "--headless requires --screenshot <path>");
+  }
+
+  return toy::shell::Run(options);
 }

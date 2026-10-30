@@ -35,6 +35,11 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
   `toy_shell`.
 - Never depend on a higher layer. New source files are listed explicitly in CMake — no globbing.
 - Every first-party target gets `toybrowser_set_warnings()`.
+- A module owns its own `CMakeLists.txt`: the root file and `tests/CMakeLists.txt` include
+  `src/<module>` / `tests/<module>` as soon as that directory has a `CMakeLists.txt`. This lets
+  several modules be written in parallel without editing shared build files.
+- Shared build files (root `CMakeLists.txt`, `tests/CMakeLists.txt`) and `docs/` are owned by the
+  Lead while parallel work is in flight; module owners do not edit them.
 
 ## Tests
 
