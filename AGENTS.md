@@ -69,6 +69,9 @@ stays out of git.
 - Before finishing a task: configure and build; run `ctest` if tests exist. If verification is
   impossible in this environment, say so explicitly.
 - Small, reversible changes. No drive-by refactors, reformatting or dependency upgrades.
+- Local scratch files (throwaway fixtures, test output, notes, approved downloads) go in the
+  gitignored `.tmp/` directory at the repository root. Never commit them and never scatter them
+  through the rest of the tree.
 - Do not swallow errors or leave silently failing paths. Unimplemented code must be marked and
   reported, not hidden behind TODOs.
 - Follow the module boundaries in `docs/architecture.md`; do not introduce dependency cycles or

@@ -12,6 +12,10 @@ CMakeUserPresets.json
 *.a
 *.so
 
+# Local scratch space: untracked notes, downloads, fixtures and test output.
+# The directory is created on demand and must stay untracked.
+/.tmp/
+
 # Editor and tool state
 .vscode/
 .idea/
