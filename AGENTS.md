@@ -27,7 +27,9 @@ the gitignored `AGENTS.local.md`.
 - Code must compile warning-free with GCC and Clang. Never silence warnings with `-w` or blanket
   pragmas.
 - Every file committed to git is written in English, including code comments, docs, filenames and
-  commit messages.
+  commit messages. The only allowed exceptions are `README.zh.md`, `docs/zh/**` and, once they
+  exist, browser UI localization data (e.g. `assets/i18n/**`). Update the English version first,
+  then the translations; English is always the source of truth.
 - Do not depend on machine-specific environment: no absolute paths, no hardcoded compiler or
   library versions, no assumptions about a particular GPU, window manager, font directory or
   installed package set. Build and test steps must be reproducible on another conforming machine.

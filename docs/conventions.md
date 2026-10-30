@@ -17,6 +17,16 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
 - Include order: the header for this translation unit, C headers, C++ headers, project headers.
 - Small files and small functions. One clear responsibility per file.
 
+## Documentation language
+
+- Repository files are English. Explicit exceptions, currently Chinese only: `README.zh.md`,
+  `docs/zh/**`, and — once introduced — browser UI localization data (e.g. `assets/i18n/**`).
+- Update the English document first, then the translations. Translations may be batched and
+  written in one pass after the English text settles, but English remains the source of truth.
+- Translations never carry information that the English version lacks; if they diverge, fix the
+  translation and, when in doubt, the English text wins.
+- Code, comments, identifiers and commit messages are always English.
+
 ## Errors
 
 - Recoverable failures return `toy::Result<T>`-style values with a module-specific error enum.
