@@ -53,6 +53,13 @@ RCDATA elements, a small entity set) and never fails on malformed input. `DumpDo
 deterministic textual form used by `--dump-dom` and the parser tests. Nodes are addressed by integer
 ids (no owning pointers, no cycles); the DOM knows nothing about CSS, layout or scripting.
 
+Style (M4): `css` parses stylesheets and declaration lists into plain structures and knows nothing
+about the DOM. `style` matches those selectors against the DOM, applies the UA/author/inline
+cascade (specificity, `!important`, inheritance) and produces a `ComputedStyle` per element; the
+embedded UA stylesheet is itself CSS parsed by our parser. `DumpStyleTree()` is the deterministic
+text form behind `--dump-style` and the style tests. Layout will consume the style tree only, never
+the raw CSS.
+
 ## Data model
 
 - **DOM**: an arena (`std::vector<Node>`) addressed by integer `NodeId`; parent, first/last child,
@@ -142,6 +149,21 @@ can't form ownership cycles. Revisit only if it actually hurts.
 - Parser/layout golden files are text dumps compared line by line; images are compared with a
   small tolerance once paint exists.
 - Tests are deterministic and never need a network, display, installed font or particular locale.
+
+## Reference material
+
+Behavior is checked against the standards first and a real browser second; both are references
+only — their code is never copied:
+
+- HTML Living Standard: <https://html.spec.whatwg.org/multipage/>
+- DOM Standard: <https://dom.spec.whatwg.org/>
+- URL Standard: <https://url.spec.whatwg.org/>
+- CSS Syntax Level 3: <https://www.w3.org/TR/css-syntax-3/>
+- Selectors Level 3: <https://www.w3.org/TR/selectors-3/>
+- CSS Cascading and Inheritance Level 4: <https://www.w3.org/TR/css-cascade-4/>
+- CSS Values and Units Level 3: <https://www.w3.org/TR/css-values-3/>
+- HTTP Semantics (RFC 9110) and HTTP/1.1 (RFC 9112)
+- Web Platform Tests: <https://github.com/web-platform-tests/wpt>
 
 ## Deliberately out of scope
 

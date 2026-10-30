@@ -39,6 +39,8 @@ MVP 保持整条链路同步、单线程。每个阶段接收普通数据并返�
 
 HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM。解析是容错的，且总是产生一个带 `head` 和 `body` 子节点的 `html` 元素；tokenizer 覆盖支持的子集（元素与属性、注释、doctype、raw-text 与 RCDATA 元素、少量实体），遇到畸形输入也永不失败。`DumpDocument()` 是确定性的文本形式，供 `--dump-dom` 与解析器测试使用。节点用整数 id 寻址（没有持有指针、没有环）；DOM 完全不了解 CSS、布局或脚本。
 
+样式（M4）：`css` 把样式表与声明列表解析成普通结构，完全不了解 DOM。`style` 在 DOM 上匹配这些选择器，应用 UA/作者/行内层叠——依据 specificity（优先级）、`!important` 与继承——并为每个元素生成一个 `ComputedStyle`；内置的 UA 样式表本身就是由我们的解析器解析的 CSS。`DumpStyleTree()` 是 `--dump-style` 与样式测试背后的确定性文本形式。布局只会消费样式树，永远不会消费原始 CSS。
+
 ## 数据模型
 
 - **DOM**：一个用整数 `NodeId` 寻址的 arena（`std::vector<Node>`）；父节点、首/末子节点、前/后兄弟链接都是 id。属性存在每个节点的小 vector 里。没有父/子指针环，没有 `shared_ptr`。
@@ -102,6 +104,20 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 - 测试是注册到 CTest 的普通 C++ 可执行文件；每个测试文件自带少量断言辅助函数。没有测试框架依赖。
 - 解析器/布局的 golden 文件是逐行比较的文本 dump；一旦有绘制，图像用小的容差比较。
 - 测试是确定性的，从不需要网络、显示器、已安装字体或特定 locale。
+
+## 参考资料
+
+行为首先对照标准、其次对照真实浏览器来检查；两者都只是参考——绝不复制它们的代码：
+
+- HTML Living Standard：<https://html.spec.whatwg.org/multipage/>
+- DOM Standard：<https://dom.spec.whatwg.org/>
+- URL Standard：<https://url.spec.whatwg.org/>
+- CSS Syntax Level 3：<https://www.w3.org/TR/css-syntax-3/>
+- Selectors Level 3：<https://www.w3.org/TR/selectors-3/>
+- CSS Cascading and Inheritance Level 4：<https://www.w3.org/TR/css-cascade-4/>
+- CSS Values and Units Level 3：<https://www.w3.org/TR/css-values-3/>
+- HTTP Semantics（RFC 9110）与 HTTP/1.1（RFC 9112）
+- Web Platform Tests：<https://github.com/web-platform-tests/wpt>
 
 ## 刻意排除的范围
 

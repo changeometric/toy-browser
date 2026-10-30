@@ -38,3 +38,18 @@ add_executable(shell_size_limit_test size_limit_test.cpp)
 target_link_libraries(shell_size_limit_test PRIVATE toy_shell)
 toybrowser_set_warnings(shell_size_limit_test)
 add_test(NAME shell.size_limit COMMAND shell_size_limit_test)
+
+# End-to-end --dump-style check: parses an inline <style> fixture; no network, no display.
+set(shell_dump_style_fixture "${CMAKE_CURRENT_BINARY_DIR}/dump_style_fixture.html")
+file(WRITE "${shell_dump_style_fixture}"
+     "<!doctype html><html><head><style>p { color: #ff0000; margin: 4px 8px } h1 { display: block; font-size: 32px }</style></head><body><h1>Title</h1><p>hi</p></body></html>\n")
+
+add_test(NAME shell.dump_style_file
+  COMMAND $<TARGET_FILE:toybrowser> --dump-style "file://${shell_dump_style_fixture}")
+set_tests_properties(shell.dump_style_file PROPERTIES
+  PASS_REGULAR_EXPRESSION "<p> display=block color=#ff0000.*margin-top=4px")
+
+add_test(NAME shell.dump_style_missing_file
+  COMMAND $<TARGET_FILE:toybrowser> --dump-style
+          "file://${CMAKE_CURRENT_BINARY_DIR}/missing_dump_style_fixture.html")
+set_tests_properties(shell.dump_style_missing_file PROPERTIES WILL_FAIL TRUE)

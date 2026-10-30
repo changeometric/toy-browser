@@ -42,7 +42,7 @@ toybrowser_set_warnings(toybrowser)
 
 # Each module owns its CMakeLists.txt and is picked up as soon as the file
 # exists, so parallel work on different modules never has to edit this file.
-foreach(module render platform net dom shell)
+foreach(module render platform net dom css style shell)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${module}/CMakeLists.txt")
     add_subdirectory(src/${module})
   endif()

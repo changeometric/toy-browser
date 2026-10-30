@@ -2,8 +2,8 @@
 
 A toy web browser built from scratch: C++20, CMake, and no ready-made browser components.
 
-**Status: M3 — HTML is parsed into an arena DOM and can be inspected with the headless
-`--dump-dom` command.** Page rendering is still the M1 placeholder; CSS starts in M4. See the
+**Status: M4 — CSS is parsed, cascaded and exposed through the headless `--dump-style` command.**
+Page rendering is still the M1 placeholder; layout starts in M5. See the
 [roadmap](docs/roadmap.md). 中文版：[README.zh.md](README.zh.md).
 
 ## Build and run
@@ -17,6 +17,7 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --headless --screenshot out.ppm   # same frame, no display needed
 ./build/toybrowser --dump-body file:///etc/hostname  # fetch a URL, raw bytes to stdout
 ./build/toybrowser --dump-dom  file:///etc/hostname  # fetch and dump the parsed DOM tree
+./build/toybrowser --dump-style file:///etc/hostname # fetch, style, dump computed styles
 ```
 
 The window backend links libX11 (approved; see [dependencies](docs/dependencies.md)), so the X11

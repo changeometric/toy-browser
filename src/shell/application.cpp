@@ -11,6 +11,7 @@
 #include "toy/platform/window.h"
 #include "toy/render/ppm.h"
 #include "toy/render/surface.h"
+#include "toy/style/computed_style.h"
 
 namespace toy::shell {
 namespace {
@@ -84,6 +85,34 @@ int RunDumpDom(const Options& options) {
   return 0;
 }
 
+int RunDumpStyle(const Options& options) {
+  std::string error;
+  const std::optional<net::Url> url = net::ParseUrl(options.dump_style_url, &error);
+  if (!url) {
+    std::fprintf(stderr, "toybrowser: cannot parse URL '%s': %s\n", options.dump_style_url.c_str(),
+                 error.c_str());
+    return 1;
+  }
+
+  net::Response response;
+  if (!net::Fetch(*url, net::FetchOptions{}, &response, &error)) {
+    std::fprintf(stderr, "toybrowser: cannot fetch '%s': %s\n", options.dump_style_url.c_str(),
+                 error.c_str());
+    return 1;
+  }
+
+  // HTML and CSS parsing are error-tolerant: malformed input still yields a tree.
+  const dom::Document document = dom::ParseDocument(response.body);
+  const style::StyleTree styles = style::ComputeStyles(document);
+  const std::string dump = style::DumpStyleTree(document, styles);
+  if (std::fwrite(dump.data(), 1, dump.size(), stdout) != dump.size()) {
+    std::fprintf(stderr, "toybrowser: cannot write the style dump to stdout\n");
+    return 1;
+  }
+  std::fflush(stdout);
+  return 0;
+}
+
 int RunHeadless(const Options& options) {
   render::Surface surface(options.width, options.height);
   PaintPlaceholderPage(surface);
@@ -142,11 +171,16 @@ int Run(const Options& options) {
   }
   const int headless_modes = static_cast<int>(!options.screenshot_path.empty()) +
                              static_cast<int>(!options.dump_body_url.empty()) +
-                             static_cast<int>(!options.dump_dom_url.empty());
+                             static_cast<int>(!options.dump_dom_url.empty()) +
+                             static_cast<int>(!options.dump_style_url.empty());
   if (headless_modes > 1) {
     std::fprintf(stderr,
-                 "toybrowser: --screenshot, --dump-body and --dump-dom are mutually exclusive\n");
+                 "toybrowser: --screenshot, --dump-body, --dump-dom and --dump-style are mutually "
+                 "exclusive\n");
     return 2;
+  }
+  if (!options.dump_style_url.empty()) {
+    return RunDumpStyle(options);
   }
   if (!options.dump_dom_url.empty()) {
     return RunDumpDom(options);

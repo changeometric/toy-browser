@@ -20,6 +20,10 @@ struct Options {
   // When non-empty, fetch this URL, parse it as HTML and write the DOM dump to
   // stdout. Parsing never fails; only URL and fetch errors are reported.
   std::string dump_dom_url;
+  // When non-empty, fetch this URL, parse it as HTML, compute styles and write
+  // the computed style tree to stdout. Parsing never fails; only URL and fetch
+  // errors are reported.
+  std::string dump_style_url;
 };
 
 // Runs the browser.

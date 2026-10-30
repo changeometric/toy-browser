@@ -49,12 +49,23 @@ done when its demo command works, new logic has tests, and the docs are still ac
   with simple routing, entities are a small named set plus numeric forms (semicolon required,
   lowercase `x` only), no `<template>`, SVG or MathML namespaces, and input is assumed to be UTF-8.
 
-## M4 — CSS and computed style
+## M4 — CSS and computed style ✅ (done)
 
-- Tokenizer/parser for rules, declarations and simple selectors; UA + author cascade; inheritance
-  for inherited properties.
-- `--dump-style`.
-- Done when fixtures resolve to expected computed values.
+- `css` module: own tokenizer/parser for rules, declarations and simple selectors (type, class, id,
+  universal, descendant/child combinators, comma groups), skipping at-rules and unsupported
+  syntax, tolerant of malformed input.
+- `style` module: embedded UA stylesheet parsed by our own CSS parser, selector matching,
+  UA/author/inline cascade with specificity and `!important`, inheritance, and the supported
+  property set (display, color, background-color, font-size px/em, font-weight, font-style,
+  margin/padding longhands and 1-4 value shorthands, width/height auto or px/em).
+- `--dump-style <url>`: deterministic per-element computed-style tree on stdout, fully headless.
+- Acceptance reached: `css.parser`, `style.cascade`, `style.dump`, `shell.dump_style_file` and
+  `shell.dump_style_missing_file` pass under GCC and Clang with warnings as errors (20 tests
+  total).
+- Known M4 limits: no external `<link>` stylesheets (needs URL resolution and fetching; later), no
+  at-rule contents, no pseudo-classes/elements, no attribute selectors, no `rgb()`/`hsl()`/`calc()`,
+  `inherit`/`initial` keywords or CSS variables, no `%`/`pt`/`rem` units, no `margin: auto`, and
+  named colors use the standard values (e.g. green = #008000).
 
 ## M5 — Layout
 
@@ -101,7 +112,7 @@ starts only after the previous slice is clean and the user agrees on priority.
   sites such as Google needs `https`, and proxy support alone is not enough for them.
 - **Test helper consolidation** — the per-file `Check`/`g_failures` test harness is duplicated in
   every test executable. Introduce a header-only `tests/support/check.h` when the next test file is
-  added (M4); no framework dependency.
+  added (M5); no framework dependency.
 
 ## Rules
 

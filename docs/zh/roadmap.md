@@ -31,11 +31,13 @@
 - 已达成验收：`dom.parser`、`dom.entities`、`shell.dump_dom_file` 和 `shell.dump_dom_missing_file` 在 GCC 和 Clang 下、警告视为错误时通过；一个本地 HTTP 页面完成 抓取 → 解析 → dump 的往返。
 - M3 已知限制（刻意的最小 MVP 子集）：没有 HTML5 插入模式（除 EOF 外没有隐含结束标签、没有 foster parenting、没有 adoption agency），doctype 只能出现在 `<html>` 之前，没有隐式 head 内容路由（没有显式 `<head>` 的 `<title>` 会落到 body 中），注释逐字保留（因此源码注释中的空格会出现在 dump 里），空白文本节点以简单路由保留，实体是一小组命名实体加数字形式（要求分号，仅小写 `x`），没有 `<template>`、SVG 或 MathML 命名空间，且输入假定为 UTF-8。
 
-## M4 — CSS 与计算样式
+## M4 — CSS 与计算样式 ✅（已完成）
 
-- 规则、声明和简单选择器的 tokenizer/解析器；UA + 作者层叠；可继承属性的继承。
-- `--dump-style`。
-- 当 fixtures 解析出预期的计算值时完成。
+- `css` 模块：自写的规则、声明和简单选择器 tokenizer/解析器（类型、class、id、通配、后代/子代组合器、逗号分组），跳过 at-rule 与不支持的语法，能容忍畸形输入。
+- `style` 模块：由我们自己的 CSS 解析器解析内置 UA 样式表、选择器匹配、按 specificity（优先级）与 `!important` 做 UA/作者/行内层叠、继承，以及支持的属性集（display、color、background-color、font-size 的 px/em、font-weight、font-style、margin/padding 长写属性与 1-4 值简写、width/height 的 auto 或 px/em）。
+- `--dump-style <url>`：把逐元素的确定性计算样式树输出到 stdout，完全 headless。
+- 已达成验收：`css.parser`、`style.cascade`、`style.dump`、`shell.dump_style_file` 和 `shell.dump_style_missing_file` 在 GCC 和 Clang 下、警告视为错误时通过（共 20 个测试）。
+- M4 已知限制：没有外部 `<link>` 样式表（需要 URL 解析与抓取；以后再做），没有 at-rule 内容，没有伪类/伪元素，没有属性选择器，没有 `rgb()`/`hsl()`/`calc()`、`inherit`/`initial` 关键字或 CSS 变量，没有 `%`/`pt`/`rem` 单位，没有 `margin: auto`，命名颜色使用标准值（例如 green = #008000）。
 
 ## M5 — 布局
 
@@ -71,7 +73,7 @@
 
 - **代理支持（M2.1）**——通过 HTTP 代理抓取 `http://` URL：`FetchOptions` 中的代理设置、`--proxy host:port` CLI 标志与 `http_proxy` 环境变量回退；发往代理的请求使用 absolute-form 请求目标。测试使用进程内的假代理。用户于 2026-10-31 推迟：只有当真实站点测试需要它，或它成本低且明显有用时才实现。
 - **TLS / `https://`**——用户于 2026-10-31 推迟；OpenSSL 未获批准。访问 Google 之类的站点需要 `https`，仅靠代理支持不够。
-- **测试辅助代码合并**——每个文件里的 `Check`/`g_failures` 测试支架在每个测试可执行文件中重复。在添加下一个测试文件（M4）时引入 header-only 的 `tests/support/check.h`；不引入框架依赖。
+- **测试辅助代码合并**——每个文件里的 `Check`/`g_failures` 测试支架在每个测试可执行文件中重复。在添加下一个测试文件（M5）时引入 header-only 的 `tests/support/check.h`；不引入框架依赖。
 
 ## 规则
 

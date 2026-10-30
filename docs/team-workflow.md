@@ -230,3 +230,10 @@ the round when possible. Clean up stale build directories and stray files.
   found one real bug (`--size` unbounded), two contract/robustness gaps (`file://` ignored the
   body-size cap, dump indentation was quadratic) and several stale docs. A cheap review every 2-3
   milestones is worth it; keep reviewers read-only and route fixes to module owners.
+- M4: publishing the css public header first let the style module be written truly in parallel
+  against the contract; the only coordination was "retry configure until the css target exists".
+- M4: the same dump-indentation problem reappeared in the new style dump, so the owner applied the
+  existing cap pattern immediately; when fixing a class of bug, check the other dumps too.
+- M4: teammate self-reports flagged contract gaps (inline `!important`, named-color values,
+  unbounded style dump indentation) that were accepted or fixed by the Lead; keep that reporting
+  habit — it is cheaper than a review round.
