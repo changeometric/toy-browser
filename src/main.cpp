@@ -1,9 +1,9 @@
 // The toy browser's command-line entry point.
 //
-// Parses the options, then hands them to toy::shell::Run. Fetching and box layout
-// work through --dump-body, --dump-dom, --dump-style and --dump-boxes; the window
-// still shows the M1 placeholder page until real page rendering lands (see
-// docs/roadmap.md).
+// Parses the options, then hands them to toy::shell::Run. Fetching and layout
+// work through --dump-body, --dump-dom, --dump-style and --dump-boxes; the
+// window and --screenshot render the page given by the optional positional URL,
+// or the M1 placeholder page when no URL is given (see docs/roadmap.md).
 
 #include <charconv>
 #include <cstdio>
@@ -20,11 +20,11 @@ constexpr std::string_view kProgramName = "toybrowser";
 void PrintUsage(std::FILE* stream, const char* argv0) {
   std::fprintf(
       stream,
-      "Usage: %s [options]\n"
+      "Usage: %s [options] [url]\n"
       "\n"
-      "A toy web browser built from scratch. Fetching and box layout work via --dump-body,\n"
-      "--dump-dom, --dump-style and --dump-boxes; the window still shows a placeholder page\n"
-      "until rendering lands.\n"
+      "A toy web browser built from scratch. Fetching, layout and painting work via\n"
+      "--dump-body, --dump-dom, --dump-style, --dump-boxes and --screenshot; the window and\n"
+      "--screenshot render a real page when a URL is given, and the placeholder page otherwise.\n"
       "\n"
       "Options:\n"
       "  -h, --help         Show this help and exit.\n"
@@ -36,6 +36,11 @@ void PrintUsage(std::FILE* stream, const char* argv0) {
       "  --dump-style URL   Fetch URL and write its computed style tree to stdout; no window.\n"
       "  --dump-boxes URL   Fetch URL and write its laid-out box tree to stdout; no window.\n"
       "  --size WxH         Window size in pixels (default 800x600; limits below).\n"
+      "\n"
+      "Optional URL:\n"
+      "  url                Page URL for window mode and --screenshot; without it the\n"
+      "                     placeholder page is shown. The --dump-* modes take the URL as\n"
+      "                     their flag argument instead.\n"
       "\n"
       "Window size limits: 1..8192 per side, 16777216 pixels in total.\n",
       argv0);
@@ -74,6 +79,7 @@ bool ParseSize(std::string_view text, int* width, int* height) {
 int main(int argc, char** argv) {
   toy::shell::Options options;
   bool headless = false;
+  bool has_page_url = false;
 
   for (int i = 1; i < argc; ++i) {
     const std::string_view argument = argv[i];
@@ -152,7 +158,18 @@ int main(int argc, char** argv) {
       }
       continue;
     }
-    return FailUsage(argv[0], "unknown option '" + std::string(argument) + "'");
+    if (!argument.empty() && argument.front() == '-') {
+      return FailUsage(argv[0], "unknown option '" + std::string(argument) + "'");
+    }
+    // The only remaining positional argument is the optional page URL.
+    if (has_page_url) {
+      return FailUsage(argv[0], "at most one page URL may be given");
+    }
+    has_page_url = true;
+    if (argument.empty()) {
+      return FailUsage(argv[0], "the page URL must not be empty");
+    }
+    options.page_url = std::string(argument);
   }
 
   const bool has_screenshot = !options.screenshot_path.empty();
@@ -172,6 +189,13 @@ int main(int argc, char** argv) {
     return FailUsage(argv[0],
                      "--headless requires --screenshot, --dump-body, --dump-dom, --dump-style or "
                      "--dump-boxes");
+  }
+  // The dump modes take their URL as the flag's own argument, so a positional URL
+  // would be a second, ambiguous page source.
+  if (has_page_url && (has_dump_body || has_dump_dom || has_dump_style || has_dump_boxes)) {
+    return FailUsage(argv[0],
+                     "a page URL cannot be combined with a --dump-* mode; pass the URL to the "
+                     "flag instead");
   }
 
   return toy::shell::Run(options);

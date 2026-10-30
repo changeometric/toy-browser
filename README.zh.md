@@ -2,9 +2,9 @@
 
 一个从零实现的玩具网页浏览器：C++20、CMake，不使用现成的浏览器组件。
 
-**状态：M5 —— 样式树已被布局成带几何信息的盒树，并可通过 headless 的 `--dump-boxes` 命令查看。**
-页面绘制仍是 M1 的占位页；真正的页面渲染从 M6 开始。详见[路线图](docs/zh/roadmap.md)。
-英文原版：[README.md](README.md)。
+**状态：M6 —— 真实页面已被绘制。** 窗口与 `--headless --screenshot` 会渲染可选 URL 指定的页面，
+使用由 M5 盒树构建的显示列表；`--dump-boxes` 仍可查看几何信息。导航、滚动与交互从 M7 开始。
+详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
 
 **新团队 / 新 agent？** 先读[接管指南](docs/zh/handoff.md)（当前状态与接手方式），再看
 [文档索引](docs/zh/README.md)。
@@ -16,8 +16,9 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 
+./build/toybrowser file:///path/page.html            # 打开窗口显示真实页面
 ./build/toybrowser                                   # 打开窗口显示占位页
-./build/toybrowser --headless --screenshot out.ppm   # 同一帧，无需显示器
+./build/toybrowser --headless --screenshot out.ppm file:///path/page.html  # 同一页面，无需显示器
 ./build/toybrowser --dump-body file:///etc/hostname  # 抓取 URL，原始字节输出到 stdout
 ./build/toybrowser --dump-dom  file:///etc/hostname  # 抓取并输出解析后的 DOM 树
 ./build/toybrowser --dump-style file:///etc/hostname # 抓取、计算样式并输出样式树

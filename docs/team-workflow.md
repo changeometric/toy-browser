@@ -265,3 +265,18 @@ the round when possible. Clean up stale build directories and stray files.
 - M5: deep-nesting safety was designed in from the start (iterative layout, no DOM recursion, capped
   dump, 10k-div regression test) instead of being discovered by a review round; the full 31-test
   suite runs in under a second.
+- M6: the header-checkpoint pattern worked a third time — publishing `render::DisplayList` early let
+  the `paint` module and then the shell/CLI slice proceed in parallel against a frozen contract.
+- M6: Lead review of the rasterizer found a real robustness bug (huge CSS `font-size` made glyph
+  iteration unbounded and overflowed the source-mapping arithmetic). It went back to the module
+  owner as a small follow-up task with a reproduction; pre-fix vs post-fix screenshots proved normal
+  output unchanged. Treat renderers as adversarial-input code from the start.
+- M6: a deterministic renderer gives a very cheap acceptance gate — `cmp` two compilers' PPMs, plus
+  converting one screenshot to PNG and looking at it, caught nothing but would have caught glyph or
+  paint-order mistakes that assertions alone can miss.
+- M6: the shell owner derived the pixel-test geometry from the frozen `--dump-boxes` output before
+  writing assertions, so the end-to-end test failed only on the not-yet-implemented rasterizer, not
+  on layout disagreements.
+- M6: window mode was smoke-tested without extra tooling by launching the browser, finding its
+  specific client window in `xwininfo -root -tree`, and capturing it with ImageMagick `import`
+  (no `xdotool` needed on this machine); capture only the client window, not the root.

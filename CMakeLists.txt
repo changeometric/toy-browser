@@ -43,7 +43,7 @@ toybrowser_set_warnings(toybrowser)
 # Explicit module list: deterministic and easy to audit. The Lead adds a module
 # name here (and in tests/CMakeLists.txt) once when the module is introduced;
 # directories without a CMakeLists.txt are skipped, so names may be added early.
-foreach(module render platform net dom css style layout shell)
+foreach(module render platform net dom css style layout paint shell)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${module}/CMakeLists.txt")
     add_subdirectory(src/${module})
   endif()

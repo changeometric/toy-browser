@@ -15,11 +15,13 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M3 | HTML tokenizer/tree builder, arena DOM, deterministic dump (`--dump-dom`) |
 | M4 | CSS parser/selectors, UA + author cascade, computed styles (`--dump-style`) |
 | M5 | `layout` box tree with block/inline/anonymous boxes and line breaking, bitmap-font metrics in `render`, deterministic box dump (`--dump-boxes`) |
+| M6 | `render` display list + software rasterizer + hand-authored 8x16 ASCII glyphs, `paint` box-tree-to-display-list module, window/`--screenshot` painting with an optional positional page URL |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-Not implemented yet: painting, real text/glyphs on screen, images, JavaScript, `https`/TLS,
-proxies, external stylesheets, interaction and navigation. Window mode still shows the M1
-placeholder page; everything useful today goes through headless CLI modes.
+Not implemented yet: navigation, scrolling and interaction, images, real TTF fonts, JavaScript,
+`https`/TLS, proxies, external stylesheets, borders, anti-aliased text. The window and `--screenshot`
+paint a real page when a URL is given and the M1 placeholder page otherwise; the `--dump-*` modes
+remain the primary debugging path.
 
 ## Verify the current state (no context needed)
 
@@ -36,39 +38,46 @@ ctest --test-dir "$BUILD" --output-on-failure
 "$BUILD"/toybrowser --dump-style  "file://$PWD/README.md" | head
 "$BUILD"/toybrowser --dump-boxes  "file://$PWD/README.md" | head
 "$BUILD"/toybrowser --headless --screenshot /tmp/toybrowser.ppm && file /tmp/toybrowser.ppm
+"$BUILD"/toybrowser --size 640x400 --screenshot /tmp/toybrowser-page.ppm \
+    "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 31/31 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
-Clang; dumps print deterministic trees; the screenshot writes a binary PPM. All headless modes
-need no display. CMake 3.20 or newer is required; building needs the X11 development headers
-(approved dependency); only windowed mode needs a running display.
+Expected: 37/37 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
+real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
+or newer is required; building needs the X11 development headers (approved dependency); only
+windowed mode needs a running display.
 
-## Next round: M6 — paint (not started)
+## Next round: M7 — navigation (not started)
 
-- Goal: turn the box tree into pixels. Build a display list from the box tree, rasterize filled
-  rectangles and bitmap-font text into a `Surface`, apply simple rectangular clipping, and wire the
-  result into both the window and `--screenshot` (with a golden screenshot test).
-- Preliminary scope: `render` gains the display list, `FillRect`/`DrawText` commands and the 8x16
-  ASCII glyph bitmaps that the M5 font metrics already describe; `shell` builds the list from the
-  box tree and presents it; colors come from the computed style.
-- Still out of scope: borders (not in the M4 property set), images, real TTF fonts, scrolling and
-  navigation (M7), JavaScript.
-- Acceptance sketch: a local fixture page with headings and paragraphs renders in the window and
-  matches a golden screenshot; every existing `--dump-*` mode and test keeps working headless;
-  warning-free under both compilers.
-- Paint must consume the box tree only: `render` still knows nothing about HTML/CSS.
+- Goal: make the painted page interactive and navigable. Hit-test clicks against the box tree to
+  follow links, add scrolling (a viewport offset plus clip commands in the display list), a
+  back/forward history, and set the window title from `<title>`.
+- Preliminary scope: `shell` owns navigation state (current URL, history, scroll offset) and the
+  window event loop forwards clicks/scrolls/keys; `paint`/`render` gain the clip and offset
+  plumbing already sketched in the architecture; `net` supplies the URL of the clicked page
+  (`href` resolution against the current URL; base-URL resolution and external `<link>` CSS stay
+  later). The `--dump-*` modes must stay headless and unchanged.
+- Still out of scope: images, real TTF fonts (M8), forms, JavaScript (M9), `https`/TLS.
+- Acceptance sketch: a small local multi-page site can be browsed in the window (link click,
+  back/forward, scroll, title), with at least one headless regression test for URL/hit-test/scroll
+  state; all existing tests keep passing; warning-free under both compilers.
+- Navigation decisions (history granularity, scroll unit, how clicks map to boxes) are the M7
+  intake's job — do not guess them in code.
 
-Backlog after M6 (details in [roadmap.md](roadmap.md)): image/font library decisions at M8, proxy
+Backlog after M7 (details in [roadmap.md](roadmap.md)): image/font library decisions at M8, proxy
 support, TLS, and test-helper migration.
 
 ## Map of the repository
 
 - `src/<module>/` — one CMake library target per module (`base` does not exist yet; see
   [architecture.md](architecture.md) for the module map and dependency direction).
-- `src/main.cpp` — CLI parsing only; `shell` orchestrates fetch → parse → style → layout →
+- `src/main.cpp` — CLI parsing only; `shell` orchestrates fetch → parse → style → layout → paint →
   dump/present.
 - `src/render/include/toy/render/font.h` — bitmap-font metrics; `layout` consumes them through a
-  `shell`-supplied callback and has no `render` dependency.
+  `shell`-supplied callback and has no `render` dependency. `src/render/include/toy/render/paint.h`
+  is the display list + rasterizer; `src/paint/` builds the list from the box tree and never
+  rasterizes.
 - `tests/<module>/` — one executable per subject, registered with CTest; new tests use the
   header-only `tests/support/check.h`.
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
@@ -77,10 +86,14 @@ support, TLS, and test-helper migration.
   the runtime has none, use `docs/tasks/<milestone>.md` with the same fields. See
   [team-workflow.md](team-workflow.md).
 - `README.md` / `README.zh.md` and `docs/zh/` — user-facing entry points (English authoritative).
+- `.tmp/` — gitignored scratch space for local notes, fixtures, downloads and test output.
 
 ## Frozen contracts (do not change casually)
 
-- CLI modes, flags and exit codes: `0` success, `1` runtime error, `2` usage error.
+- CLI modes, flags and exit codes: `0` success, `1` runtime error, `2` usage error. The optional
+  positional page URL (`toybrowser [options] [url]`) is used only by window mode and
+  `--screenshot`; at most one URL, it must not be combined with a `--dump-*` mode, and no URL keeps
+  the M1 placeholder page.
 - Dump formats (DOM, style, boxes): deterministic, line-oriented, asserted by tests; any change
   needs tests and docs in the same round. The box dump is pre-order lines of
   `<tag> block|inline`, `anonymous block` or `text "..."` followed by `x= y= width= height=`, all
@@ -88,7 +101,13 @@ support, TLS, and test-helper migration.
   levels.
 - Layout semantics frozen through the layout tests and the M5 known limits: viewport width from
   `--size`, no margin collapsing, top-aligned lines, word-level text boxes, ASCII-only line
-  breaking, no painting.
+  breaking.
+- Painting semantics frozen through the M6 tests: display-list commands are integer device pixels
+  (`FillRect`, `DrawText`, `PushClip`/`PopClip`); fills use the SrcOver formula
+  `(src * a + dst * (255 - a) + 127) / 255` over an opaque destination; the initial clip is the
+  whole surface and rasterizer work is bounded by the clip; the shell fills the canvas white; paint
+  order is box-tree pre-order (background, then children); text uses the built-in 8x16 ASCII glyphs
+  with nearest-neighbour scaling, no anti-aliasing, `?` for non-ASCII, and opaque text pixels.
 - Module boundaries and dependency direction in [architecture.md](architecture.md).
 - `--size` is clamped to 1..8192 per side and at most 16M pixels; bodies are capped by
   `FetchOptions::max_body_bytes` (16 MiB by default); dump indentation is capped at 64 levels.
@@ -122,3 +141,15 @@ support, TLS, and test-helper migration.
 - `--dump-boxes` uses `--size`'s width as the viewport and ignores the height; heights come from
   the content. `layout` must never include a `render` header — text metrics only arrive through the
   callback.
+- Rendering is integer-pixel and anti-aliasing-free on purpose: changing rounding, glyph scaling or
+  paint order will change golden pixel tests. GCC and Clang must produce byte-identical PPMs —
+  `cmp` two builds' screenshots as a cheap determinism gate.
+- Paint is documented as "background, then children" in pre-order; there are no stacking contexts
+  yet, so do not add alpha/overlap semantics without a contract change.
+- The canvas is filled white by the shell; `html`/`body` background-color paints its element box
+  only (no background propagation to the canvas) — a deliberate M6 limit, not a bug.
+- Rasterizer work must stay bounded by the clip/surface area: adversarial font sizes used to hang
+  or overflow the old glyph loop; keep the finite-size guard, the visible-range iteration and the
+  bounded cell math when touching `render::DrawDisplayList`.
+- Scratch files (fixtures, screenshots, notes, downloads) go in the gitignored `.tmp/` directory at
+  the repository root, never scattered through the tree.

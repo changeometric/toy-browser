@@ -14,3 +14,8 @@ add_executable(render_font_test font_test.cpp)
 toybrowser_set_warnings(render_font_test)
 target_link_libraries(render_font_test PRIVATE toy_render toy_test_support)
 add_test(NAME render.font_metrics COMMAND render_font_test)
+
+add_executable(render_paint_test paint_test.cpp)
+toybrowser_set_warnings(render_paint_test)
+target_link_libraries(render_paint_test PRIVATE toy_render toy_test_support)
+add_test(NAME render.paint COMMAND render_paint_test)

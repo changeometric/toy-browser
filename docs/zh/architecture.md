@@ -10,16 +10,17 @@
 | --- | --- | --- | --- |
 | `base` | 小型共享工具（几何、日志、UTF-8），只在出现需要时才存在 | — | 首次需要时 |
 | `platform` | 窗口、输入事件、事件循环、呈现像素表面 | `base` | M1 |
-| `render` | 显示列表、软件光栅化器、位图字体、图像解码 | `base` | M1 |
+| `render` | 显示列表、软件光栅化器、内置位图字体（度量与字形）、图像解码 | `base` | M1 |
 | `net` | URL 解析、socket、HTTP/1.1 抓取 | `base` | M2 |
 | `dom` | HTML tokenizer（词法分析器）、树构建器、DOM arena（区域分配器） | `base` | M3 |
 | `css` | CSS tokenizer、规则/声明解析器、选择器 | `base` | M4 |
 | `style` | 层叠与计算样式、默认样式表 | `dom`、`css` | M4 |
 | `layout` | 盒树、块级/行内布局、换行 | `dom`、`style`、来自 `shell` 的文本度量回调 | M5 |
+| `paint` | 从盒树构建显示列表（元素背景与文本） | `dom`、`style`、`layout`、`render` | M6 |
 | `js` | 小型 JavaScript 引擎与 DOM 绑定（可选，最后） | `dom`、`base` | M9 |
 | `shell` | 导航、流水线编排、窗口外壳 | 所有模块 | M1 |
 
-依赖只向下指向；没有环。`render` 完全不了解 HTML/CSS（它消费显示列表）；`platform` 不了解页面内容（它 blit 像素并上报输入）。只有 `shell` 能看到所有模块并把它们接在一起。`base` 尚不存在：M1–M5 的模块只用标准库与标准 POSIX 接口，只有当共享工具确实需要时该模块才出现。
+依赖只向下指向；没有环。`render` 完全不了解 HTML/CSS（它消费显示列表）；`paint` 认识 DOM/样式/布局数据但从不光栅化；`platform` 不了解页面内容（它 blit 像素并上报输入）。只有 `shell` 能看到所有模块并把它们接在一起。`base` 尚不存在：M1–M6 的模块只用标准库与标准 POSIX 接口，只有当共享工具确实需要时该模块才出现。
 
 新模块注册在根与 `tests` `CMakeLists.txt` 的显式列表中；Lead 添加一次名字。`--dump-*` 模式与退出码（0 成功，1 运行时错误，2 用法错误）是冻结接口。
 
@@ -32,7 +33,7 @@
 5. `css` 解析样式表（先支持 `<style>` 和 `style=` 属性；外部 CSS 以后再加）。
 6. `style` 把层叠解析成样式树。
 7. `layout` 把样式树变成带几何信息的盒树。
-8. `render` 构建显示列表并光栅化成 `Surface`。
+8. `paint` 从盒树构建扁平显示列表，`render` 把它光栅化成 `Surface`。
 9. `platform` 呈现该表面（窗口 blit，或在 headless 模式下输出 PPM dump）。
 
 MVP 保持整条链路同步、单线程。每个阶段接收普通数据并返回普通数据，因此每个阶段都能在测试中通过 `--dump-*` 命令单独驱动。
@@ -45,12 +46,14 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 
 布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型）；内置等宽位图字体度量位于 `render`，由 `shell` 适配。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。
 
+绘制（M6）：`paint` 按前序遍历盒树，产出扁平的 `render::DisplayList`：每个计算背景非透明的元素盒变成一条 `FillRect`（背景先于子内容），每个文本盒变成一条 `DrawText`，使用继承的颜色与字号。`paint` 从不光栅化，也从不包含 render 的实现头文件。`render` 执行该列表：矩形填充对不透明目标使用冻结的 SrcOver 整数公式；文本使用内置 8x16 ASCII 字形表，按最近邻单元缩放（无抗锯齿）；整数矩形裁剪栈约束每条命令（M6 还不发出裁剪命令；溢出与滚动裁剪在 M7 到来）。`shell` 把 canvas 填白、按 surface 宽度布局页面、构建列表并光栅化；窗口与 `--screenshot` 共享完全相同的这条路径。确定性正是重点：相同输入在 GCC 和 Clang 上产出逐字节相同的 PPM，截图测试依赖这一点。
+
 ## 数据模型
 
 - **DOM**：一个用整数 `NodeId` 寻址的 arena（`std::vector<Node>`）；父节点、首/末子节点、前/后兄弟链接都是 id。属性存在每个节点的小 vector 里。没有父/子指针环，没有 `shared_ptr`。
 - **样式树**：按 DOM id 索引的计算值组成的并行结构。
 - **盒树**：用整数 `BoxId` 寻址的布局 arena（与 DOM 同构）；每个盒引用其 DOM 来源（元素或文本节点 id），并持有一个以 CSS 像素表示的绝对 border-box 矩形。文本盒保存放置在该行上的那个单词。匿名盒没有 DOM 来源。
-- **显示列表**：命令的扁平 `std::vector`（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）。
+- **显示列表**：命令的扁平 `std::vector`（今天的 `FillRect`、`DrawText`、`PushClip`/`PopClip`；图像到来时加 `DrawImage`）。命令使用整数设备像素。
 - **单位**：样式/布局中 CSS 像素用 `float`；光栅化器中设备像素用 `int`。MVP 假设 1 CSS px = 1 设备 px（无缩放，无 DPI 缩放）。
 
 选择 arena + id，是因为这些树平凡可析构、在测试中容易 dump，而且不可能形成所有权环。只有当它确实带来痛苦时才重新考虑。
@@ -67,11 +70,13 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 
 - 只做软件光栅化；没有 GPU，没有渲染线程。
 - Surface：32 位 ARGB、straight alpha（非预乘 alpha）、SrcOver 混合、左上角原点。
-- 裁剪是由显示列表命令压入的简单矩形栈。
-- 文本从一个小型内置位图字体开始（自有字形数据，ASCII），因此不需要字体库；真实 TTF 文本在审批之后再加。
+- 裁剪是由显示列表命令压入的整数矩形栈；初始裁剪是整个 surface，光栅化器的工作量受裁剪区域限制（因此对抗性输入如超大字号也不会让绘制无界）。
+- `shell` 在绘制前把 canvas 填白；元素的 `background-color` 绘制为该元素的盒（M6 不会把 `html`/`body` 背景传播到 canvas）。
+- 文本使用小型内置位图字体，字形为手写的 8x16 ASCII 点阵，因此不需要字体库；字形单元按计算字号做最近邻缩放，没有抗锯齿。非 ASCII 码点暂时渲染 `?` 字形；真实 TTF 文本在审批之后再加。
+- 绘制顺序是盒树前序：一个盒先画自己的背景，再画子节点；还没有层叠上下文或 z-index，因此重叠的盒按文档顺序绘制。
 - 呈现：平台接收一个像素视图（像素、宽度、高度、stride 以每行像素数为单位——与 `render::Surface::stride()` 相同的单位）并把它复制出去。headless 后端改为写一个 PPM 文件，这让渲染测试不依赖任何东西。
-- **headless 优先**：每个阶段都不开窗口运行。页面加载、解析、布局、绘制和截图都通过 CLI 模式（`--dump-body`、`--dump-dom`、`--dump-boxes`、`--screenshot`）驱动和检查；窗口只呈现 headless 路径已经产生的像素。自动化测试从不需要显示器。
-- M1 的可见结果——窗口里带蓝色横条的白色页面——正是走这条路径，因此后续阶段只是替换显示列表。
+- **headless 优先**：每个阶段都不开窗口运行。页面加载、解析、布局、绘制和截图都通过 CLI 模式（`--dump-body`、`--dump-dom`、`--dump-style`、`--dump-boxes`、`--screenshot [url]`）驱动和检查；窗口只呈现 headless 路径已经产生的像素。自动化测试从不需要显示器。
+- M1 的占位页（白色页面加蓝色横条）在没有 URL 时仍是回退路径，因此没有页面也能验证像素通路；真实页面走 M6 的绘制路径。
 
 ## 错误与所有权
 
@@ -104,9 +109,9 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 
 ## 测试挂点（随需要它们的阶段一起加入）
 
-- CLI 标志：`--dump-body`、`--dump-dom`、`--dump-style`、`--dump-boxes`、`--screenshot <file>`、`--headless`。
-- 测试是注册到 CTest 的普通 C++ 可执行文件；每个测试文件自带少量断言辅助函数。没有测试框架依赖。
-- 解析器/布局的 golden 文件是逐行比较的文本 dump；一旦有绘制，图像用小的容差比较。
+- CLI 标志：`--dump-body`、`--dump-dom`、`--dump-style`、`--dump-boxes`、`--screenshot <file> [url]`、`--headless`，以及窗口模式可选的位置参数页面 URL。
+- 测试是注册到 CTest 的普通 C++ 可执行文件；新测试共享 header-only 的 `tests/support/check.h`（接口目标 `toy_test_support`）。没有测试框架依赖。
+- 解析器/布局的 golden 文件是逐行比较的文本 dump。截图是确定性的（整数像素、无抗锯齿），因此绘制测试精确比较像素，跨编译器运行产出逐字节相同的 PPM；不需要图像容差。
 - 测试是确定性的，从不需要网络、显示器、已安装字体或特定 locale。
 
 ## 参考资料

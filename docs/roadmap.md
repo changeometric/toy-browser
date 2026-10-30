@@ -3,7 +3,7 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M5 are done; M6 (paint) is next.** For a snapshot and takeover guide, read
+**Current status: M0–M6 are done; M7 (navigation) is next.** For a snapshot and takeover guide, read
 [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
@@ -92,14 +92,31 @@ done when its demo command works, new logic has tests, and the docs are still ac
   whitespace (non-ASCII text is one word: no Unicode line breaking, hyphenation or emergency
   breaking); no percentage units; and layout paints nothing yet.
 
-## M6 — Paint: first real page (next)
+## M6 — Paint: first real page ✅ (done)
 
-- Display list from the box tree, rasterizer for rectangles and text, clipping; wire it into the
-  window.
-- Done when a local HTML page with headings, paragraphs and links renders in the window, with a
-  golden screenshot test.
+- `render`: flat display list (`FillRect`, `DrawText`, `PushClip`/`PopClip`) and a deterministic
+  software rasterizer — SrcOver rectangle fill, integer clip stack, and a hand-authored 8x16 ASCII
+  bitmap font drawn with nearest-neighbour cell scaling (no anti-aliasing, no font dependency).
+- `paint` module: turns the box tree into a display list — element backgrounds first (pre-order),
+  then one text draw per text box using the computed color/font size. It does not rasterize, and
+  `render` still knows nothing about HTML/CSS.
+- `shell`/CLI: optional positional page URL (`toybrowser [options] [url]`) used by window mode and
+  `--screenshot`; the page is fetched, parsed, styled, laid out at the surface width, painted and
+  presented/written as a PPM. Without a URL both modes keep the M1 placeholder page.
+- Acceptance reached: `render.paint`, `paint.display_list`, `shell.screenshot_page` and the
+  positional-URL CLI tests pass under GCC and Clang with warnings as errors (37 tests total); a
+  pixel end-to-end test proves the red heading/black paragraph geometry on a 200x100 surface, and
+  GCC/Clang render byte-identical PPMs; the window shows the same page.
+- Known M6 limits: all painting is integer device pixels with no anti-aliasing or subpixel layout
+  (1 CSS px = 1 device px); no borders, images or real TTF fonts (M8); the canvas is always filled
+  white by the shell, and `html`/`body` `background-color` paints only its element box (no canvas
+  background propagation); paint order is pre-order with no stacking contexts/z-index; text is
+  ASCII bitmap glyphs only (other code points render `?`, and links are colored but not underlined
+  because `text-decoration` is not in the property set); overflow is clipped by the surface only —
+  scrolling and navigation arrive in M7; the rasterizer is bounded by the clip area, including for
+  adversarial font sizes.
 
-## M7 — Navigation
+## M7 — Navigation (next)
 
 - Clickable links, scrolling, back/forward history, window title.
 - Done when a small local multi-page site can be browsed.

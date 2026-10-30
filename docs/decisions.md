@@ -16,6 +16,8 @@ user's agreement. Each entry says what was decided, why, and where the details l
 | Software rasterization, ARGB32 surfaces, PPM screenshots | No GPU or graphics dependencies; deterministic tests | [architecture.md](architecture.md) |
 | Dumps are deterministic, line-oriented contracts (`DOM`, style, boxes) | They are the testing and debugging interface | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
 | `layout` produces a pure arena `BoxTree`; text metrics arrive through a `shell`-supplied callback (no `layout` → `render` edge) | Keeps the layer boundaries and lets layout be unit-tested with a fake measurer | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
+| Painting is integer-device-pixel and anti-aliasing-free; text uses the built-in 8x16 bitmap glyphs with nearest-neighbour scaling | Deterministic pixel tests and byte-identical GCC/Clang screenshots without a font dependency | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
+| The shell fills the page canvas white; element `background-color` paints that element's box only (no canvas background propagation) | Keeps the MVP painter explicit and simple; revisit if real sites look wrong | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
 | HTML/CSS support is an explicit subset with documented known limits | A browser toy, not a spec compliance project | [roadmap.md](roadmap.md) |
 | Text starts with a built-in bitmap font; real TTF deferred to M8 | Avoids a font dependency before layout exists | [roadmap.md](roadmap.md) |
 | HTTP/1.1 only; no TLS and no proxy yet (deferred by the user) | Proportionate to the toy scope; revisit when needed | [roadmap.md](roadmap.md), [open-questions.md](open-questions.md) |

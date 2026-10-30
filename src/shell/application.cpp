@@ -10,8 +10,10 @@
 #include "toy/layout/box.h"
 #include "toy/net/http.h"
 #include "toy/net/url.h"
+#include "toy/paint/paint.h"
 #include "toy/platform/window.h"
 #include "toy/render/font.h"
+#include "toy/render/paint.h"
 #include "toy/render/ppm.h"
 #include "toy/render/surface.h"
 #include "toy/style/computed_style.h"
@@ -36,11 +38,45 @@ layout::TextMetrics MeasureText(std::string_view text_utf8, float font_size_px) 
 }
 
 // M1 placeholder page: a white page with a blue band at the top. It proves the
-// whole pixel path (surface -> presentation) works; real page content arrives
-// with the later milestones.
+// whole pixel path (surface -> presentation) works; it is also what both window
+// mode and --screenshot show when no page URL is given.
 void PaintPlaceholderPage(render::Surface& surface) {
   surface.Fill(kPageColor);
   surface.FillRect(0, 0, surface.width(), kDemoBandHeight, kDemoBandColor);
+}
+
+// Loads and fully resolves one page: URL -> fetch -> DOM -> computed styles.
+// On failure sets *error to a ready-to-print message (the caller prefixes
+// "toybrowser: ") and returns false. HTML and CSS parsing never fail.
+bool LoadPage(std::string_view url_text, dom::Document* document, style::StyleTree* styles,
+              std::string* error) {
+  const std::optional<net::Url> url = net::ParseUrl(url_text, error);
+  if (!url) {
+    *error = "cannot parse URL '" + std::string(url_text) + "': " + *error;
+    return false;
+  }
+
+  net::Response response;
+  if (!net::Fetch(*url, net::FetchOptions{}, &response, error)) {
+    *error = "cannot fetch '" + std::string(url_text) + "': " + *error;
+    return false;
+  }
+
+  *document = dom::ParseDocument(response.body);
+  *styles = style::ComputeStyles(*document);
+  return true;
+}
+
+// Paints a loaded page into `surface`: white page background, layout viewport =
+// surface width, then the display list built from the box tree. Content taller
+// than the surface is clipped by the rasterizer (no scrolling until M7).
+void PaintPage(const dom::Document& document, const style::StyleTree& styles,
+               render::Surface& surface) {
+  surface.Fill(kPageColor);
+  const layout::BoxTree boxes = layout::LayoutDocument(
+      document, styles, layout::LayoutOptions{static_cast<float>(surface.width())}, MeasureText);
+  const render::DisplayList list = paint::BuildDisplayList(document, styles, boxes);
+  render::DrawDisplayList(list, surface);
 }
 
 int RunDumpBody(const Options& options) {
@@ -155,7 +191,19 @@ int RunDumpBoxes(const Options& options) {
 
 int RunHeadless(const Options& options) {
   render::Surface surface(options.width, options.height);
-  PaintPlaceholderPage(surface);
+  if (options.page_url.empty()) {
+    // Backward compatible: no URL keeps the M1 placeholder path unchanged.
+    PaintPlaceholderPage(surface);
+  } else {
+    dom::Document document;
+    style::StyleTree styles;
+    std::string error;
+    if (!LoadPage(options.page_url, &document, &styles, &error)) {
+      std::fprintf(stderr, "toybrowser: %s\n", error.c_str());
+      return 1;
+    }
+    PaintPage(document, styles, surface);
+  }
   if (!render::WritePpm(surface, options.screenshot_path)) {
     std::fprintf(stderr, "toybrowser: cannot write screenshot '%s'\n",
                  options.screenshot_path.c_str());
@@ -165,6 +213,20 @@ int RunHeadless(const Options& options) {
 }
 
 int RunWindowed(const Options& options) {
+  // With a page URL, load it before creating the window so a URL or fetch error
+  // fails cleanly, without ever showing an empty window. The loaded page stays
+  // a value for the whole event loop and is repainted on expose and resize.
+  dom::Document document;
+  style::StyleTree styles;
+  const bool has_page = !options.page_url.empty();
+  if (has_page) {
+    std::string load_error;
+    if (!LoadPage(options.page_url, &document, &styles, &load_error)) {
+      std::fprintf(stderr, "toybrowser: %s\n", load_error.c_str());
+      return 1;
+    }
+  }
+
   std::string error;
   const std::unique_ptr<platform::Window> window =
       platform::Window::Create(options.width, options.height, options.title, &error);
@@ -186,7 +248,11 @@ int RunWindowed(const Options& options) {
       case platform::EventType::kResize: {
         // Redraw the whole page at the window's current size.
         render::Surface surface(window->width(), window->height());
-        PaintPlaceholderPage(surface);
+        if (has_page) {
+          PaintPage(document, styles, surface);
+        } else {
+          PaintPlaceholderPage(surface);
+        }
         window->Present(platform::PixelView{surface.pixels(), surface.width(), surface.height(),
                                             surface.stride()});
         break;

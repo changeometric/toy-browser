@@ -12,7 +12,7 @@ add_library(toy_test_support INTERFACE)
 target_include_directories(toy_test_support INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # Test directories follow the same explicit list as the source tree.
-foreach(module render platform net dom css style layout shell)
+foreach(module render platform net dom css style layout paint shell)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${module}/CMakeLists.txt")
     add_subdirectory(${module})
   endif()

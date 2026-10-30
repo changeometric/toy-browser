@@ -9,20 +9,21 @@ speculative — abstractions are added when a real slice needs them.
 | --- | --- | --- | --- |
 | `base` | Small shared utilities (geometry, logging, UTF-8), only when a need appears | — | when first needed |
 | `platform` | Window, input events, event loop, presenting pixel surfaces | `base` | M1 |
-| `render` | Display list, software rasterizer, bitmap font, image decoding | `base` | M1 |
+| `render` | Display list, software rasterizer, built-in bitmap font (metrics and glyphs), image decoding | `base` | M1 |
 | `net` | URL parsing, sockets, HTTP/1.1 fetch | `base` | M2 |
 | `dom` | HTML tokenizer, tree builder, DOM arena | `base` | M3 |
 | `css` | CSS tokenizer, rule/declaration parser, selectors | `base` | M4 |
 | `style` | Cascade and computed styles, default stylesheet | `dom`, `css` | M4 |
 | `layout` | Box tree, block/inline layout, line breaking | `dom`, `style`, a text-measurement callback from `shell` | M5 |
+| `paint` | Display list construction from the box tree (element backgrounds and text) | `dom`, `style`, `layout`, `render` | M6 |
 | `js` | Small JavaScript engine and DOM bindings (optional, last) | `dom`, `base` | M9 |
 | `shell` | Navigation, pipeline orchestration, window chrome | all | M1 |
 
 Dependencies point downward only; no cycles. `render` knows nothing about HTML/CSS (it consumes
-display lists); `platform` knows nothing about page content (it blits pixels and reports input).
-Only `shell` sees all modules and wires them together. `base` does not exist yet: M1–M5 modules use
-only the standard library and standard POSIX interfaces, and the module appears when a shared
-utility is actually needed.
+display lists); `paint` knows the DOM/style/layout data but never rasterizes; `platform` knows
+nothing about page content (it blits pixels and reports input). Only `shell` sees all modules and
+wires them together. `base` does not exist yet: M1–M6 modules use only the standard library and
+standard POSIX interfaces, and the module appears when a shared utility is actually needed.
 
 New modules are registered in the explicit lists in the root and `tests` `CMakeLists.txt`; the Lead
 adds the name once. `--dump-*` modes and exit codes (0 ok, 1 runtime error, 2 usage error) are
@@ -37,7 +38,7 @@ frozen interfaces.
 5. `css` parses style sheets (`<style>` and `style=` attributes first; external CSS later).
 6. `style` resolves the cascade into a style tree.
 7. `layout` turns the style tree into a box tree with geometry.
-8. `render` builds a display list and rasterizes it into a `Surface`.
+8. `paint` builds a flat display list from the box tree and `render` rasterizes it into a `Surface`.
 9. `platform` presents the surface (window blit, or PPM dump in headless mode).
 
 MVP keeps the whole chain synchronous and single-threaded. Every stage takes plain data and
@@ -73,6 +74,18 @@ font code duplicated in `layout`. `DumpBoxTree()` is the deterministic text form
 never paints. The geometry is a pure function of its inputs; a summary of the MVP simplifications
 lives in the known-limits list in [roadmap.md](roadmap.md).
 
+Painting (M6): `paint` walks the box tree in pre-order and emits a flat `render::DisplayList`:
+every element box with a non-transparent computed background becomes a `FillRect` (backgrounds
+before children), and every text box becomes a `DrawText` with the inherited color and font size.
+`paint` never rasterizes and never includes render implementation headers. `render` executes the
+list: rectangle fills use the frozen SrcOver integer formula over an opaque destination, text uses
+the built-in 8x16 ASCII glyph table with nearest-neighbour cell scaling (no anti-aliasing), and an
+integer rectangle clip stack bounds every command (M6 emits no clip commands yet; overflow and
+scroll clipping arrive with M7). `shell` fills the canvas white, lays the page out at the surface
+width, builds the list and rasterizes it; the window and `--screenshot` share exactly this path.
+Determinism is the point: identical inputs produce byte-identical PPMs on GCC and Clang, which the
+screenshot test relies on.
+
 ## Data model
 
 - **DOM**: an arena (`std::vector<Node>`) addressed by integer `NodeId`; parent, first/last child,
@@ -82,8 +95,8 @@ lives in the known-limits list in [roadmap.md](roadmap.md).
 - **Box tree**: layout arena addressed by integer `BoxId` (same shape as the DOM); each box
   references its DOM origin (element or text-node id) and holds an absolute border-box rectangle in
   CSS pixels. Text boxes hold the word placed on their line. Anonymous boxes have no DOM origin.
-- **Display list**: flat `std::vector` of commands (`FillRect`, `DrawText`, `DrawImage`,
-  `PushClip`/`PopClip`).
+- **Display list**: flat `std::vector` of commands (`FillRect`, `DrawText`, `PushClip`/`PopClip`
+  today; `DrawImage` when images arrive). Commands are integer device pixels.
 - **Units**: CSS pixels as `float` in style/layout; device pixels as `int` in the rasterizer.
   MVP assumes 1 CSS px = 1 device px (no zoom, no DPI scaling).
 
@@ -107,18 +120,26 @@ can't form ownership cycles. Revisit only if it actually hurts.
 
 - Software rasterization only; no GPU, no render threads.
 - Surface: 32-bit ARGB, straight alpha, SrcOver blending, top-left origin.
-- Clipping is a simple rectangle stack pushed by display list commands.
-- Text starts with a small built-in bitmap font (own glyph data, ASCII) so no font library is
-  needed; real TTF text comes later, after approval.
+- Clipping is an integer rectangle stack pushed by display list commands; the initial clip is the
+  whole surface, and rasterizer work is bounded by the clip area (so adversarial input such as a
+  huge font size cannot make painting unbounded).
+- The shell fills the canvas white before painting; element `background-color` is painted as that
+  element's box (M6 does not propagate `html`/`body` backgrounds to the canvas).
+- Text uses a small built-in bitmap font with hand-authored 8x16 ASCII glyphs, so no font library
+  is needed; glyph cells are scaled to the computed font size with nearest-neighbour sampling and
+  there is no anti-aliasing. Non-ASCII code points render the `?` glyph for now; real TTF text
+  comes later, after approval.
+- Paint order is the box-tree pre-order: a box paints its background, then its children; there are
+  no stacking contexts or z-index yet, so overlapping boxes paint in document order.
 - Presentation: the platform receives a pixel view (pixels, width, height, stride measured in
   pixels per row — the same units as `render::Surface::stride()`) and copies it out. The headless
   backend writes a PPM file instead, which keeps render tests dependency-free.
 - **Headless-first**: every stage runs without a window. Page loading, parsing, layout, painting
   and screenshots are driven and inspected through CLI modes (`--dump-body`, `--dump-dom`,
-  `--dump-boxes`, `--screenshot`); the window only ever presents pixels that the headless path
-  already produced. Automated tests never require a display.
-- M1's visible result — a white page with a blue band in a window — uses exactly this path, so
-  later stages only swap display lists in.
+  `--dump-style`, `--dump-boxes`, `--screenshot [url]`); the window only ever presents pixels that
+  the headless path already produced. Automated tests never require a display.
+- The M1 placeholder page (white with a blue band) remains the fallback when no URL is given, so
+  the pixel path can still be exercised without a page; real pages use the M6 paint path.
 
 ## Errors and ownership
 
@@ -157,12 +178,13 @@ can't form ownership cycles. Revisit only if it actually hurts.
 
 ## Testing hooks (added with the stages that need them)
 
-- CLI flags: `--dump-body`, `--dump-dom`, `--dump-style`, `--dump-boxes`, `--screenshot <file>`,
-  `--headless`.
-- Tests are plain C++ executables registered with CTest; each test file carries its own small
-  assertion helpers. No test framework dependency.
-- Parser/layout golden files are text dumps compared line by line; images are compared with a
-  small tolerance once paint exists.
+- CLI flags: `--dump-body`, `--dump-dom`, `--dump-style`, `--dump-boxes`,
+  `--screenshot <file> [url]`, `--headless`, and the optional positional page URL for window mode.
+- Tests are plain C++ executables registered with CTest; new tests share the header-only
+  `tests/support/check.h` (interface target `toy_test_support`). No test framework dependency.
+- Parser/layout golden files are text dumps compared line by line. Screenshots are deterministic
+  (integer pixels, no anti-aliasing), so paint tests compare exact pixels and cross-compiler runs
+  produce byte-identical PPMs; no image tolerance is needed.
 - Tests are deterministic and never need a network, display, installed font or particular locale.
 
 ## Reference material

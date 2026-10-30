@@ -90,3 +90,39 @@ add_test(NAME shell.dump_boxes_conflict
   COMMAND $<TARGET_FILE:toybrowser> --dump-boxes "file://${shell_dump_boxes_fixture}"
           --dump-dom "file://${shell_dump_boxes_fixture}")
 set_tests_properties(shell.dump_boxes_conflict PROPERTIES WILL_FAIL TRUE)
+
+# M6 end-to-end pixel path: fetch -> parse -> style -> layout -> paint ->
+# rasterize -> PPM, all headless and deterministic. The fixture's frozen M5
+# geometry (200x100 viewport): h1 text cell x=8..40 y=24..56 in red, p cell
+# x=8..48 y=88..100 in black, white page elsewhere.
+set(shell_screenshot_page_fixture
+    "${CMAKE_CURRENT_BINARY_DIR}/screenshot_page_fixture.html")
+file(WRITE "${shell_screenshot_page_fixture}"
+     "<!doctype html><html><head><style>h1 { color: #ff0000 }</style></head><body><h1>AB</h1><p>Hello</p></body></html>\n")
+
+add_executable(shell_screenshot_page_test screenshot_page_test.cpp)
+target_link_libraries(shell_screenshot_page_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(shell_screenshot_page_test)
+add_test(NAME shell.screenshot_page
+  COMMAND shell_screenshot_page_test "${shell_screenshot_page_fixture}"
+          "${CMAKE_CURRENT_BINARY_DIR}/screenshot_page.ppm")
+
+# CLI contract for the optional positional page URL: at most one URL, never
+# together with a --dump-* mode, and a screenshot of a missing page is a runtime
+# error. CTest only checks the non-zero status; the contract's exact exit codes
+# are 2 (usage error) and 1 (runtime error).
+add_test(NAME shell.cli_positional_url_twice
+  COMMAND $<TARGET_FILE:toybrowser> "file://${shell_screenshot_page_fixture}"
+          "file://${shell_screenshot_page_fixture}")
+set_tests_properties(shell.cli_positional_url_twice PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME shell.cli_positional_url_with_dump_dom
+  COMMAND $<TARGET_FILE:toybrowser> --dump-dom "file://${shell_dump_dom_fixture}"
+          "file://${shell_screenshot_page_fixture}")
+set_tests_properties(shell.cli_positional_url_with_dump_dom PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME shell.cli_screenshot_missing_page
+  COMMAND $<TARGET_FILE:toybrowser>
+          --screenshot "${CMAKE_CURRENT_BINARY_DIR}/missing_page.ppm"
+          "file://${CMAKE_CURRENT_BINARY_DIR}/missing_screenshot_page.html")
+set_tests_properties(shell.cli_screenshot_missing_page PROPERTIES WILL_FAIL TRUE)

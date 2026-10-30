@@ -14,6 +14,11 @@ struct Options {
   // When non-empty, render one frame to this PPM file instead of opening a window.
   // The headless path needs no display.
   std::string screenshot_path;
+  // Optional page URL, used by window mode and by --screenshot. When non-empty,
+  // Run fetches the page and renders it; when empty, both modes show the M1
+  // placeholder page. The --dump-* modes pass their URL through their own field
+  // and the CLI rejects combining them with this one.
+  std::string page_url;
   // When non-empty, fetch this URL and write the raw response body to stdout.
   // No window is opened, so no display is needed.
   std::string dump_body_url;

@@ -2,9 +2,10 @@
 
 A toy web browser built from scratch: C++20, CMake, and no ready-made browser components.
 
-**Status: M5 — the style tree is laid out into a box tree with geometry, exposed through the
-headless `--dump-boxes` command.** Page painting is still the M1 placeholder; real rendering starts
-in M6. See the [roadmap](docs/roadmap.md). 中文版：[README.zh.md](README.zh.md).
+**Status: M6 — real pages are painted.** The window and `--headless --screenshot` render the page
+given by an optional URL, using the display list built from the M5 box tree; `--dump-boxes` still
+exposes the geometry. Navigation, scrolling and interaction start in M7. See the
+[roadmap](docs/roadmap.md). 中文版：[README.zh.md](README.zh.md).
 
 **New team or agent?** Start with [docs/handoff.md](docs/handoff.md) (current state and takeover
 guide), then the [documentation index](docs/README.md).
@@ -16,8 +17,9 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 
+./build/toybrowser file:///path/page.html            # window with a real page
 ./build/toybrowser                                   # window with the placeholder page
-./build/toybrowser --headless --screenshot out.ppm   # same frame, no display needed
+./build/toybrowser --headless --screenshot out.ppm file:///path/page.html  # page, no display
 ./build/toybrowser --dump-body file:///etc/hostname  # fetch a URL, raw bytes to stdout
 ./build/toybrowser --dump-dom  file:///etc/hostname  # fetch and dump the parsed DOM tree
 ./build/toybrowser --dump-style file:///etc/hostname # fetch, style, dump computed styles
