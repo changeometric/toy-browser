@@ -40,7 +40,9 @@ returns plain data, so each one can be exercised through a `--dump-*` command in
 Networking (M2): `net` owns URLs, sockets and HTTP. Fetching is a blocking HTTP/1.1 GET — one
 request per connection, connect and read timeouts, `Content-Length` or chunked bodies, redirects,
 no TLS and no keep-alive — behind `Fetch()`, so it can become non-blocking later without changing
-callers. `net` is the only module allowed to touch sockets; page code never sees them.
+callers. `net` is the only module allowed to touch sockets; page code never sees them. Proxy
+support (HTTP proxy first) is planned behind `FetchOptions` and stays inside `net`; it needs no new
+dependency.
 
 ## Data model
 

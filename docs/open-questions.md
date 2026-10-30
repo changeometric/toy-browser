@@ -10,7 +10,8 @@ Decisions that still need the user. Everything approved so far is recorded in
 
 **Recommendation:** no TLS for now: support `http://` and `file://` only. TLS from scratch is out
 of proportion for a toy project; revisit when real pages become the goal. OpenSSL is currently not
-approved.
+approved. The user deferred TLS (and proxy support) on 2026-10-31; note that proxy support does not
+remove this decision: sites such as Google are only reachable over `https`.
 
 ## 2. External test corpora — optional, from M3
 

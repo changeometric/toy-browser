@@ -81,6 +81,16 @@ done when its demo command works, new logic has tests, and the docs are still ac
 More CSS (flex, tables), forms, better text handling, performance, conformance suites. Each item
 starts only after the previous slice is clean and the user agrees on priority.
 
+## Backlog — planned follow-ups
+
+- **Proxy support (M2.1)** — fetch `http://` URLs through an HTTP proxy: a proxy setting in
+  `FetchOptions`, a `--proxy host:port` CLI flag and `http_proxy` environment fallback; requests to
+  a proxy use absolute-form request targets. Tests use an in-process fake proxy. Deferred by the
+  user on 2026-10-31: implement only when real-site testing needs it, or when it is cheap and
+  clearly useful.
+- **TLS / `https://`** — deferred by the user on 2026-10-31; OpenSSL is not approved. Reaching
+  sites such as Google needs `https`, and proxy support alone is not enough for them.
+
 ## Rules
 
 - Do not start a milestone before the previous milestone's demo works.
