@@ -299,3 +299,10 @@ the round when possible. Clean up stale build directories and stray files.
   a small XSendEvent helper linked only against libX11 — no `xdotool` and no new dependency.
 - M7: hardcoding the fixture's link coordinates from a `--dump-boxes` run (as in M6) kept the
   navigation test headless and fast; the fixture and coordinates must move together.
+- M7: a read-only subagent audit of the hand-authored glyph table (parse the bytes, print each
+  glyph as ASCII art, compare against the intended character) found 11 real shape/alignment errors
+  that every existing pixel test missed, because those tests only rendered `H` and `H` is
+  invariant under mirroring/flipping. The fixes were verified by rendering a zoomed before/after
+  sheet; the user explicitly prefers eyeballing the font over hardcoded expectations, so the
+  project keeps no frozen glyph-table/fingerprint test. Render a sample when glyph quality is
+  questioned — and do not re-add the removed `render.glyphs` test.

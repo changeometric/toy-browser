@@ -195,3 +195,6 @@ TLS, and test-helper migration.
   M7 limits); do not 'fix' either without a contract change.
 - The window loop rebuilds the layout and display list on expose, resize and scroll. That is
   correct and deliberately simple for the MVP; only optimize it with evidence.
+- The built-in 8x16 glyph table is hand-authored and its shapes are reviewed visually (the user's
+  preference): there is deliberately no frozen glyph-bitmap/fingerprint test. Changing a glyph is a
+  visual change — render a sample and look at it before committing.

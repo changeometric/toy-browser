@@ -23,6 +23,7 @@
 | 点击激活：用滚动后的页面坐标对盒树做命中测试，再沿 DOM 祖先找最近的带 `href` 元素；只有 `http`/`file` 引用会导航，纯 fragment 引用是 no-op，加载失败保留当前页面、滚动偏移与历史 | 确定性的链接语义，且 `layout`/`render` 不需要了解 HTML | [architecture.md](architecture.md) |
 | 滚动只有垂直方向、以整数设备像素表示，范围钳制在 `[0, content_height - viewport_height]`；`paint` 用视口 `PushClip`/`PopClip` 对包裹页面并把每条命令按 `-scroll_y` 平移；导航把偏移重置为 0 | 最小确定性滚动；恢复滚动位置是有文档的 MVP 限制 | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
 | 平台输入归一化（左键点击、滚轮格数、带修饰键的映射按键、`SetTitle`）；`shell` 拥有按键绑定与滚动单位 | 把 X11 细节挡在 `shell` 之外，把页面内容挡在 `platform` 之外 | [architecture.md](architecture.md) |
+| 手写位图字形表靠肉眼复核；不保留冻结的字形位图/指纹测试 | 用户更愿意自己看字形，而不是维护硬编码期望；M8 的真实字体会替换或扩展该表 | `src/render/font.cpp`, [handoff.md](handoff.md) |
 | HTML/CSS 支持是显式子集，已知限制有文档 | 这是浏览器玩具，不是规范符合性项目 | [roadmap.md](roadmap.md) |
 | 文本从内置位图字体开始；真实 TTF 推迟到 M8 | 在布局存在前避免字体依赖 | [roadmap.md](roadmap.md) |
 | 只支持 HTTP/1.1；尚无 TLS 与代理（用户已推迟） | 与玩具范围相称；需要时再考虑 | [roadmap.md](roadmap.md), [open-questions.md](open-questions.md) |
