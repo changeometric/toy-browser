@@ -28,8 +28,8 @@ development headers are a build-time requirement even when only headless modes a
 runs need no display and are the primary mode for testing and debugging: every rendered result can
 be inspected without opening a window.
 
-Any C++20 compiler and CMake generator that meets the minimum CMake version works; nothing in the
-tree depends on a specific machine's paths, toolchain version or installed package set.
+CMake 3.20 or newer and any C++20 compiler work; nothing in the tree depends on a specific
+machine's paths, toolchain version or installed package set.
 
 ## Documentation
 

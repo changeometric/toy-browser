@@ -72,10 +72,15 @@ done when its demo command works, new logic has tests, and the docs are still ac
 
 ## M5 — Layout (next)
 
-- Box tree (block, inline, anonymous boxes), block width/margins/padding/borders, line breaking
-  with bitmap font metrics.
+- Box tree (block, inline, anonymous boxes), block width/margins/padding. Borders are not in the
+  M4 property set and are deferred to a later milestone.
+- Line breaking using text metrics: `layout` takes a measurement callback (standard types only)
+  supplied by `shell`; the built-in bitmap font stays in `render`, so `layout` does not depend on
+  `render`. The bitmap-font decision is already locked (real TTF at M8); the M5 intake only settles
+  the callback API and ASCII coverage.
 - `--dump-boxes`.
-- Done when box dumps for fixtures match expected geometry.
+- Done when box dumps for fixtures match expected geometry, the `layout` module is registered in
+  the shared CMake lists, and all existing tests keep passing.
 
 ## M6 — Paint: first real page
 

@@ -17,8 +17,11 @@ Hard rules for every agent: [../AGENTS.md](../AGENTS.md).
 
 Existing conventions worth knowing before touching code:
 
-- One CMake library target per module, `src/<module>/`, public headers under `include/toy/<module>/`.
-- The root and test `CMakeLists.txt` include a module as soon as `src/<module>/CMakeLists.txt`
-  exists; module owners create their own file and never edit the shared ones.
+- One CMake library target per module, `src/<module>/`, public headers under
+  `src/<module>/include/toy/<module>/`.
+- Module targets are registered in the explicit lists in the root and test `CMakeLists.txt`.
+  The Lead adds a new module name there once; module owners create their own
+  `src/<module>/CMakeLists.txt` and never edit the shared files. Names listed before the
+  directory exists are skipped.
 - Executables are registered with CTest; every module keeps deterministic, display-free tests.
 - Committed files are English (only `README.zh.md`, `docs/zh/**` and future i18n data are exempt).

@@ -15,11 +15,13 @@
 | `dom` | HTML tokenizer（词法分析器）、树构建器、DOM arena（区域分配器） | `base` | M3 |
 | `css` | CSS tokenizer、规则/声明解析器、选择器 | `base` | M4 |
 | `style` | 层叠与计算样式、默认样式表 | `dom`、`css` | M4 |
-| `layout` | 盒树、块级/行内布局、换行 | `dom`、`style` | M5 |
+| `layout` | 盒树、块级/行内布局、换行 | `dom`、`style`、来自 `shell` 的文本度量回调 | M5 |
 | `js` | 小型 JavaScript 引擎与 DOM 绑定（可选，最后） | `dom`、`base` | M9 |
 | `shell` | 导航、流水线编排、窗口外壳 | 所有模块 | M1 |
 
-依赖只向下指向；没有环。`render` 完全不了解 HTML/CSS（它消费显示列表）；`platform` 不了解页面内容（它 blit 像素并上报输入）。只有 `shell` 能看到所有模块并把它们接在一起。`base` 尚不存在：M1-M3 的模块只用标准库与标准 POSIX 接口，只有当共享工具确实需要时该模块才出现。
+依赖只向下指向；没有环。`render` 完全不了解 HTML/CSS（它消费显示列表）；`platform` 不了解页面内容（它 blit 像素并上报输入）。只有 `shell` 能看到所有模块并把它们接在一起。`base` 尚不存在：M1-M4 的模块只用标准库与标准 POSIX 接口，只有当共享工具确实需要时该模块才出现。
+
+新模块注册在根与 `tests` `CMakeLists.txt` 的显式列表中；Lead 添加一次名字。`--dump-*` 模式与退出码（0 成功，1 运行时错误，2 用法错误）是冻结接口。
 
 ## 一次页面加载的完整流程
 
@@ -40,6 +42,8 @@ MVP 保持整条链路同步、单线程。每个阶段接收普通数据并返�
 HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM。解析是容错的，且总是产生一个带 `head` 和 `body` 子节点的 `html` 元素；tokenizer 覆盖支持的子集（元素与属性、注释、doctype、raw-text 与 RCDATA 元素、少量实体），遇到畸形输入也永不失败。`DumpDocument()` 是确定性的文本形式，供 `--dump-dom` 与解析器测试使用。节点用整数 id 寻址（没有持有指针、没有环）；DOM 完全不了解 CSS、布局或脚本。
 
 样式（M4）：`css` 把样式表与声明列表解析成普通结构，完全不了解 DOM。`style` 在 DOM 上匹配这些选择器，应用 UA/作者/行内层叠——依据 specificity（优先级）、`!important` 与继承——并为每个元素生成一个 `ComputedStyle`；内置的 UA 样式表本身就是由我们的解析器解析的 CSS。`DumpStyleTree()` 是 `--dump-style` 与样式测试背后的确定性文本形式。布局只会消费样式树，永远不会消费原始 CSS。
+
+布局（M5 计划）：换行需要文本度量。`layout` 将接受一个由 `shell` 提供的度量回调（只用标准类型）；内置位图字体位于 `render`，由 `shell` 适配。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。
 
 ## 数据模型
 

@@ -36,6 +36,17 @@ must follow are in [AGENTS.md](../AGENTS.md).
 **Peer reviewer** — optional, used when the Lead authored the change or a module is risky. Same
 checklist as the Lead review; findings go to the owner, not into a direct edit.
 
+## 1b. Shared state
+
+- **Task board** — provided by the agent runtime: create tasks, claim/complete with the current
+  `revision`. A task has an id, subject, description (goal, write scope, contract, acceptance),
+  owner, status, `revision`, `blocked_by` and advertised write scopes. If a runtime has no task
+  board, keep the same fields in a tracked `docs/tasks/<milestone>.md` per round.
+- **New module registration** — the root and test `CMakeLists.txt` hold explicit module lists.
+  The Lead adds a new module name once; directories that do not exist yet are skipped. Module
+  owners never edit those shared lists.
+- **Git** — one grouped commit per round, made by the Lead only.
+
 ## 2. Phase 0 — Intake
 
 Before any code:

@@ -40,9 +40,10 @@ add_executable(toybrowser src/main.cpp)
 target_compile_definitions(toybrowser PRIVATE TOYBROWSER_VERSION="${PROJECT_VERSION}")
 toybrowser_set_warnings(toybrowser)
 
-# Each module owns its CMakeLists.txt and is picked up as soon as the file
-# exists, so parallel work on different modules never has to edit this file.
-foreach(module render platform net dom css style shell)
+# Explicit module list: deterministic and easy to audit. The Lead adds a module
+# name here (and in tests/CMakeLists.txt) once when the module is introduced;
+# directories without a CMakeLists.txt are skipped, so names may be added early.
+foreach(module render platform net dom css style layout shell)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${module}/CMakeLists.txt")
     add_subdirectory(src/${module})
   endif()

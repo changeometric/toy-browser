@@ -62,6 +62,8 @@ stays out of git.
 
 - CMake: modern target-based style (`target_link_libraries`, `target_include_directories`,
   `target_compile_features`). No global `include_directories` / `add_definitions`.
+- Shared CMake module lists are explicit: the Lead adds a new module name once in the root and
+  test `CMakeLists.txt`; module owners create only their own `src/<module>/CMakeLists.txt`.
 - Out-of-source builds only; build directories stay untracked.
 - Never commit build artifacts, binaries, downloaded files or caches.
 - Before finishing a task: configure and build; run `ctest` if tests exist. If verification is

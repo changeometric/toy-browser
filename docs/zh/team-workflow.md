@@ -33,6 +33,12 @@ Lead 与实现者如何推进一轮工作。这是流程手册（playbook）；�
 
 **Peer reviewer**——可选，在 Lead 本人编写了改动或模块有风险时使用。检查清单与 Lead 审查相同；发现的问题交给所有者，而不是直接编辑。
 
+## 1b. Shared state（共享状态）
+
+- **任务板** —— 由 agent 运行时提供：用当前 `revision` 创建任务、认领/完成任务。任务有 id、subject、description（目标、写范围、契约、验收）、owner、status、`revision`、`blocked_by` 以及声明的写范围。如果运行时没有任务板，就在每轮使用一个受跟踪的 `docs/tasks/<milestone>.md`，字段相同。
+- **新模块注册** —— 根与测试 `CMakeLists.txt` 维护显式的模块列表。Lead 添加一次新模块名；尚不存在的目录会被跳过。模块所有者从不编辑这些共享列表。
+- **Git** —— 每轮一个合并提交，只由 Lead 制作。
+
 ## 2. Phase 0 — Intake（需求受理）
 
 任何代码之前：

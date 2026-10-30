@@ -18,7 +18,7 @@
 
 动代码之前值得了解的现有约定：
 
-- 每个模块一个 CMake 库目标，位于 `src/<module>/`，公共头文件位于 `include/toy/<module>/`。
-- 只要 `src/<module>/CMakeLists.txt` 存在，根与测试的 `CMakeLists.txt` 就会包含该模块；模块所有者创建自己的文件，从不编辑共享文件。
+- 每个模块一个 CMake 库目标，位于 `src/<module>/`，公共头文件位于 `src/<module>/include/toy/<module>/`。
+- 模块目标注册在根与测试 `CMakeLists.txt` 的显式列表中。Lead 在那里添加一次新模块名；模块所有者创建自己的 `src/<module>/CMakeLists.txt`，从不编辑共享文件。目录尚不存在时，列出的名字会被跳过。
 - 可执行文件注册到 CTest；每个模块都保持确定性、无需显示器的测试。
 - 提交的文件都是英语（只有 `README.zh.md`、`docs/zh/**` 以及未来的 i18n 数据例外）。

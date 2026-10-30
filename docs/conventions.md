@@ -46,9 +46,9 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
   `toy_shell`.
 - Never depend on a higher layer. New source files are listed explicitly in CMake — no globbing.
 - Every first-party target gets `toybrowser_set_warnings()`.
-- A module owns its own `CMakeLists.txt`: the root file and `tests/CMakeLists.txt` include
-  `src/<module>` / `tests/<module>` as soon as that directory has a `CMakeLists.txt`. This lets
-  several modules be written in parallel without editing shared build files.
+- A module owns its own `CMakeLists.txt`. The root and test `CMakeLists.txt` contain explicit
+  module lists; the Lead adds a new module name once, and names whose directories do not exist yet
+  are skipped. This keeps the shared files Lead-owned during parallel work.
 - Shared build files (root `CMakeLists.txt`, `tests/CMakeLists.txt`) and `docs/` are owned by the
   Lead while parallel work is in flight; module owners do not edit them.
 
@@ -71,8 +71,8 @@ ctest --test-dir build --output-on-failure
 
 - Out-of-source builds only. Add `-DTOYBROWSER_WERROR=ON` to treat warnings as errors.
 - Build directories are never committed.
-- `CMAKE_EXPORT_COMPILE_COMMANDS` is on, so `build/compile_commands.json` is available for clangd
-  and IDEs; it stays untracked (`build/` is ignored).
+- `CMAKE_EXPORT_COMPILE_COMMANDS` is on, so `compile_commands.json` appears in the configured
+  build directory for clangd and IDEs; build directories stay untracked.
 
 ## Logging and diagnostics
 

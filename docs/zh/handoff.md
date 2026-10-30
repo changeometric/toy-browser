@@ -2,7 +2,7 @@
 
 # 交接 —— 当前状态与接管指南
 
-如果你是新接手这个仓库的团队或 agent，从这里开始。这是快照；硬性规则在 [AGENTS.md](../../AGENTS.md)，阅读顺序在 [docs/README.md](README.md)。
+本文件是接手仓库的团队所用的快照。规范的阅读顺序在 [docs/README.md](README.md)；硬性规则在 [AGENTS.md](../../AGENTS.md)。
 
 ## 项目当前状态
 
@@ -21,23 +21,28 @@
 
 ## 验证当前状态（无需上下文）
 
-```sh
-cmake -S . -B build && cmake --build build
-ctest --test-dir build --output-on-failure
+以下命令请在仓库根目录执行：
 
-./build/toybrowser --help
-./build/toybrowser --dump-dom   file:///etc/hostname | head
-./build/toybrowser --dump-style file:///etc/hostname | head
-./build/toybrowser --headless --screenshot out.ppm && file out.ppm
+```sh
+BUILD=build/onboard-check
+cmake -S . -B "$BUILD" -DTOYBROWSER_WERROR=ON
+cmake --build "$BUILD"
+ctest --test-dir "$BUILD" --output-on-failure
+
+"$BUILD"/toybrowser --help
+"$BUILD"/toybrowser --dump-dom   "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --dump-style "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --headless --screenshot /tmp/toybrowser.ppm && file /tmp/toybrowser.ppm
 ```
 
-预期：20/20 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM。所有 headless 模式都不需要显示器。构建需要 X11 开发头文件（已批准的依赖）；只有窗口模式需要运行中的显示服务器。
+预期：20/20 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11 开发头文件（已批准的依赖）；只有窗口模式需要运行中的显示服务器。
 
 ## 下一轮：M5 —— 布局（尚未开始）
 
 - 目标：把样式树变成带几何信息的盒树，由 `--dump-boxes` dump。
-- 初步范围：块级与行内盒、匿名盒、宽度/margin/padding、换行。
-- 待定的设计问题：换行需要文本度量。计划是先做一个小型内置位图字体（先 ASCII），这样布局可以在 headless 下测试；真实 TTF 文本仍留到 M8。在 M5 intake 时确认，而不是假设。
+- 初步范围：块级与行内盒、匿名盒、宽度/margin/padding、换行。border 不在 M4 属性集中，M5 范围之外。
+- 文本度量：`layout` 接受由 `shell` 提供的度量回调；内置位图字体位于 `render`。位图字体决策已锁定（TTF 在 M8）；M5 intake 只确定回调 API 与 ASCII 覆盖范围。
+- `layout` 已经在共享 CMake 模块列表中注册，因此有 `src/layout/CMakeLists.txt` 就能开始。
 - 验收草案：fixture 页面产生预期的盒 dump；所有现有测试保持通过；两个编译器下无警告；完全 headless。
 
 M5 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：M8 的图像/字体库决策、代理支持、TLS，以及测试辅助代码合并。
@@ -48,6 +53,7 @@ M5 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：M8 的图像/字�
 - `src/main.cpp` —— 只做 CLI 解析；`shell` 编排 fetch → parse → style → dump/present。
 - `tests/<module>/` —— 每个主题一个可执行文件，注册到 CTest。
 - `docs/` —— 架构、路线图、约定、团队流程、决策、依赖、待决问题（本文件是快照）。
+- 共享任务板 —— 由 agent 运行时提供（任务 create/claim/update，带 revision）；如果运行时没有，则用 `docs/tasks/<milestone>.md`，字段相同。见 [team-workflow.md](team-workflow.md)。
 - `README.md` / `README.zh.md` 与 `docs/zh/` —— 面向用户的入口（英语为权威）。
 
 ## 冻结契约（不要随意改动）

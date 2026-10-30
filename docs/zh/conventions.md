@@ -36,7 +36,7 @@
 - 每个模块一个静态库目标：`toy_<module>`；`toybrowser` 可执行文件链接 `toy_shell`。
 - 绝不依赖更高层。新源文件在 CMake 中显式列出——不做 glob。
 - 每个第一方目标都获得 `toybrowser_set_warnings()`。
-- 模块拥有自己的 `CMakeLists.txt`：只要 `src/<module>` / `tests/<module>` 目录有 `CMakeLists.txt`，根文件和 `tests/CMakeLists.txt` 就会包含它。这让多个模块可以并行编写，而无需编辑共享构建文件。
+- 模块拥有自己的 `CMakeLists.txt`。根与测试 `CMakeLists.txt` 包含显式的模块列表；Lead 添加一次新模块名，目录尚不存在的名字会被跳过。这让共享文件在并行工作期间由 Lead 拥有。
 - 共享构建文件（根 `CMakeLists.txt`、`tests/CMakeLists.txt`）和 `docs/` 在并行工作期间由 Lead 拥有；模块所有者不编辑它们。
 
 ## 测试
@@ -56,7 +56,7 @@ ctest --test-dir build --output-on-failure
 
 - 只做 out-of-source 构建。加 `-DTOYBROWSER_WERROR=ON` 把警告视为错误。
 - 构建目录从不提交。
-- `CMAKE_EXPORT_COMPILE_COMMANDS` 已开启，因此 `build/compile_commands.json` 可用于 clangd 和 IDE；它保持未跟踪（`build/` 被忽略）。
+- `CMAKE_EXPORT_COMPILE_COMMANDS` 已开启，因此 `compile_commands.json` 会出现在配置的构建目录中，可用于 clangd 和 IDE；构建目录保持未跟踪。
 
 ## 日志与诊断
 

@@ -14,15 +14,19 @@ speculative — abstractions are added when a real slice needs them.
 | `dom` | HTML tokenizer, tree builder, DOM arena | `base` | M3 |
 | `css` | CSS tokenizer, rule/declaration parser, selectors | `base` | M4 |
 | `style` | Cascade and computed styles, default stylesheet | `dom`, `css` | M4 |
-| `layout` | Box tree, block/inline layout, line breaking | `dom`, `style` | M5 |
+| `layout` | Box tree, block/inline layout, line breaking | `dom`, `style`, a text-measurement callback from `shell` | M5 |
 | `js` | Small JavaScript engine and DOM bindings (optional, last) | `dom`, `base` | M9 |
 | `shell` | Navigation, pipeline orchestration, window chrome | all | M1 |
 
 Dependencies point downward only; no cycles. `render` knows nothing about HTML/CSS (it consumes
 display lists); `platform` knows nothing about page content (it blits pixels and reports input).
-Only `shell` sees all modules and wires them together. `base` does not exist yet: M1-M3 modules use
+Only `shell` sees all modules and wires them together. `base` does not exist yet: M1-M4 modules use
 only the standard library and standard POSIX interfaces, and the module appears when a shared
 utility is actually needed.
+
+New modules are registered in the explicit lists in the root and `tests` `CMakeLists.txt`; the Lead
+adds the name once. `--dump-*` modes and exit codes (0 ok, 1 runtime error, 2 usage error) are
+frozen interfaces.
 
 ## One page load, end to end
 
@@ -59,6 +63,11 @@ cascade (specificity, `!important`, inheritance) and produces a `ComputedStyle` 
 embedded UA stylesheet is itself CSS parsed by our parser. `DumpStyleTree()` is the deterministic
 text form behind `--dump-style` and the style tests. Layout will consume the style tree only, never
 the raw CSS.
+
+Layout (M5 plan): line breaking needs text metrics. `layout` will accept a measurement callback
+(standard types only) supplied by `shell`; the built-in bitmap font lives in `render`, and `shell`
+adapts it. This keeps the dependency direction intact: no `layout` → `render` edge and no font
+code duplicated in `layout`.
 
 ## Data model
 

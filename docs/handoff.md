@@ -1,7 +1,7 @@
 # Handoff — current state and takeover guide
 
-Start here if you are a new team or agent taking over this repository. This is the snapshot; the
-hard rules are in [AGENTS.md](../AGENTS.md), the reading order in [docs/README.md](README.md).
+This is the snapshot for a team taking over the repository. The canonical reading order is in
+[docs/README.md](README.md); the hard rules are in [AGENTS.md](../AGENTS.md).
 
 ## Where the project is
 
@@ -22,28 +22,35 @@ page; everything useful today goes through headless CLI modes.
 
 ## Verify the current state (no context needed)
 
-```sh
-cmake -S . -B build && cmake --build build
-ctest --test-dir build --output-on-failure
+Run the following from the repository root:
 
-./build/toybrowser --help
-./build/toybrowser --dump-dom   file:///etc/hostname | head
-./build/toybrowser --dump-style file:///etc/hostname | head
-./build/toybrowser --headless --screenshot out.ppm && file out.ppm
+```sh
+BUILD=build/onboard-check
+cmake -S . -B "$BUILD" -DTOYBROWSER_WERROR=ON
+cmake --build "$BUILD"
+ctest --test-dir "$BUILD" --output-on-failure
+
+"$BUILD"/toybrowser --help
+"$BUILD"/toybrowser --dump-dom   "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --dump-style "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --headless --screenshot /tmp/toybrowser.ppm && file /tmp/toybrowser.ppm
 ```
 
 Expected: 20/20 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; the screenshot writes a binary PPM. All headless modes
-need no display. Building needs the X11 development headers (approved dependency); only windowed
-mode needs a running display.
+need no display. CMake 3.20 or newer is required; building needs the X11 development headers
+(approved dependency); only windowed mode needs a running display.
 
 ## Next round: M5 — layout (not started)
 
 - Goal: turn the style tree into a box tree with geometry, dumped by `--dump-boxes`.
 - Preliminary scope: block and inline boxes, anonymous boxes, width/margins/padding, line breaking.
-- Open design question: line breaking needs text metrics. The plan is a small built-in bitmap font
-  (ASCII first) so layout can be tested headless; real TTF text stays at M8. Confirm during the M5
-  intake instead of assuming.
+  Borders are not supported by the M4 property set and are out of scope for M5.
+- Text metrics: `layout` takes a measurement callback supplied by `shell`; the built-in bitmap
+  font lives in `render`. The bitmap-font decision is locked (TTF at M8); the M5 intake only
+  settles the callback API and ASCII coverage.
+- `layout` is already registered in the shared CMake module lists, so `src/layout/CMakeLists.txt`
+  is enough to start.
 - Acceptance sketch: fixture pages produce expected box dumps; all existing tests keep passing;
   warning-free under both compilers; fully headless.
 
@@ -58,6 +65,9 @@ support, TLS, and test-helper consolidation.
 - `tests/<module>/` — one executable per subject, registered with CTest.
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
   questions (this file is the snapshot).
+- Shared task board — provided by the agent runtime (task create/claim/update with revision); if
+  the runtime has none, use `docs/tasks/<milestone>.md` with the same fields. See
+  [team-workflow.md](team-workflow.md).
 - `README.md` / `README.zh.md` and `docs/zh/` — user-facing entry points (English authoritative).
 
 ## Frozen contracts (do not change casually)

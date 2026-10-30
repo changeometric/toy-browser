@@ -43,9 +43,10 @@
 
 ## M5 — 布局（下一轮）
 
-- 盒树（块级、行内、匿名盒）、块宽度/margin/padding/border、带位图字体度量的换行。
+- 盒树（块级、行内、匿名盒）、块宽度/margin/padding。border 不在 M4 属性集中，推迟到后续里程碑。
+- 使用文本度量的换行：`layout` 接受一个由 `shell` 提供的度量回调（只用标准类型）；内置位图字体留在 `render`，因此 `layout` 不依赖 `render`。位图字体决策已经锁定（真实 TTF 在 M8）；M5 intake 只确定回调 API 与 ASCII 覆盖范围。
 - `--dump-boxes`。
-- 当 fixtures 的盒 dump 与预期几何匹配时完成。
+- 当 fixtures 的盒 dump 与预期几何匹配、`layout` 模块已注册进共享 CMake 列表、且所有现有测试保持通过时完成。
 
 ## M6 — 绘制：第一个真实页面
 
