@@ -29,7 +29,7 @@ tree depends on a specific machine's paths, toolchain version or installed packa
 | [architecture.md](docs/architecture.md) | Module map, data flow, data model, rendering and threading |
 | [roadmap.md](docs/roadmap.md) | Milestones, each a minimal vertical slice |
 | [dependencies.md](docs/dependencies.md) | Third-party policy and pending approval requests |
-| [team-workflow.md](docs/team-workflow.md) | Lead and teammate roles, task board, parallel work rules |
+| [team-workflow.md](docs/team-workflow.md) | Round-based team process: roles, phases, quality gates, lessons |
 | [conventions.md](docs/conventions.md) | C++, CMake and testing conventions |
 | [open-questions.md](docs/open-questions.md) | Decisions waiting for the user |
 | [AGENTS.md](AGENTS.md) | Rules for AI agents working on the repository |

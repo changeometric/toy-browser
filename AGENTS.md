@@ -73,8 +73,9 @@ the gitignored `AGENTS.local.md`.
   contract is a Lead bug, not a teammate bug: raise it immediately.
 - Parallel work requires disjoint write scopes. If two tasks must touch the same file, the Lead
   serializes them. Blocked work is reported, never silently worked around by widening scope.
-- Team norms and lessons live in `docs/team-workflow.md`; keep only rules that every agent must
-  follow in this file.
+- Every new feature or requirement follows the round playbook in `docs/team-workflow.md`
+  (intake -> contracts -> kickoff -> parallel work -> integration -> delivery -> retro). Team norms
+  and lessons live there too; keep only rules that every agent must follow in this file.
 
 ## Git discipline
 
