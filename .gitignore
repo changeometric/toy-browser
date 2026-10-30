@@ -1,0 +1,21 @@
+# Build trees
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+compile_commands.json
+CMakeUserPresets.json
+
+# Local render and test artifacts
+*.ppm
+
+# Editor and tool state
+.vscode/
+.idea/
+.cache/
+.clangd/
+*.swp
+.DS_Store
+
+# Local, machine-specific and personal notes (never committed)
+/AGENTS.local.md
