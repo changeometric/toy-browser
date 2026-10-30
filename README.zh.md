@@ -5,6 +5,9 @@
 **状态：M4 —— CSS 已被解析、级联，并可通过 headless 的 `--dump-style` 命令查看。** 页面渲染仍是
 M1 的占位页；布局从 M5 开始。详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
 
+**新团队 / 新 agent？** 先读[接管指南](docs/zh/handoff.md)（当前状态与接手方式），再看
+[文档索引](docs/zh/README.md)。
+
 ## 构建与运行
 
 ```sh
@@ -30,7 +33,10 @@ ctest --test-dir build --output-on-failure
 
 | 文档 | 内容 |
 | --- | --- |
+| [handoff.md](docs/zh/handoff.md) | 当前状态、验证步骤、下一里程碑、接管指南 |
+| [README.md](docs/zh/README.md) | 文档索引与阅读顺序 |
 | [architecture.md](docs/zh/architecture.md) | 模块划分、数据流、数据模型、渲染与线程模型 |
+| [decisions.md](docs/zh/decisions.md) | 已锁定的技术决策及其理由 |
 | [roadmap.md](docs/zh/roadmap.md) | 里程碑，每个都是最小垂直切片 |
 | [dependencies.md](docs/zh/dependencies.md) | 第三方依赖策略与审批记录 |
 | [conventions.md](docs/zh/conventions.md) | C++、CMake 与测试约定 |

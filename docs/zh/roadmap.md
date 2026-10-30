@@ -4,6 +4,8 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
+**当前状态：M0–M4 已完成；下一步是 M5（布局）。** 快照与接管指南见 [handoff.md](handoff.md)。
+
 ## M0 — 设计与骨架 ✅（已完成）
 
 - 文档、可构建的 CMake 骨架、桩可执行文件、工具链冒烟测试。
@@ -39,7 +41,7 @@
 - 已达成验收：`css.parser`、`style.cascade`、`style.dump`、`shell.dump_style_file` 和 `shell.dump_style_missing_file` 在 GCC 和 Clang 下、警告视为错误时通过（共 20 个测试）。
 - M4 已知限制：没有外部 `<link>` 样式表（需要 URL 解析与抓取；以后再做），没有 at-rule 内容，没有伪类/伪元素，没有属性选择器，没有 `rgb()`/`hsl()`/`calc()`、`inherit`/`initial` 关键字或 CSS 变量，没有 `%`/`pt`/`rem` 单位，没有 `margin: auto`，命名颜色使用标准值（例如 green = #008000）。
 
-## M5 — 布局
+## M5 — 布局（下一轮）
 
 - 盒树（块级、行内、匿名盒）、块宽度/margin/padding/border、带位图字体度量的换行。
 - `--dump-boxes`。

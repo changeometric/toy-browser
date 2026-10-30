@@ -6,6 +6,9 @@ A toy web browser built from scratch: C++20, CMake, and no ready-made browser co
 Page rendering is still the M1 placeholder; layout starts in M5. See the
 [roadmap](docs/roadmap.md). 中文版：[README.zh.md](README.zh.md).
 
+**New team or agent?** Start with [docs/handoff.md](docs/handoff.md) (current state and takeover
+guide), then the [documentation index](docs/README.md).
+
 ## Build and run
 
 ```sh
@@ -32,7 +35,10 @@ tree depends on a specific machine's paths, toolchain version or installed packa
 
 | Document | Content |
 | --- | --- |
+| [handoff.md](docs/handoff.md) | Current state, verification steps, next milestone, takeover guide |
+| [README.md](docs/README.md) | Documentation index and reading order |
 | [architecture.md](docs/architecture.md) | Module map, data flow, data model, rendering and threading |
+| [decisions.md](docs/decisions.md) | Locked technical decisions and their rationale |
 | [roadmap.md](docs/roadmap.md) | Milestones, each a minimal vertical slice |
 | [dependencies.md](docs/dependencies.md) | Third-party policy and pending approval requests |
 | [team-workflow.md](docs/team-workflow.md) | Round-based team process: roles, phases, quality gates, lessons |

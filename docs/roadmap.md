@@ -3,6 +3,9 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
+**Current status: M0–M4 are done; M5 (layout) is next.** For a snapshot and takeover guide, read
+[handoff.md](handoff.md).
+
 ## M0 — Design and skeleton ✅ (done)
 
 - Documentation, buildable CMake skeleton, stub executable, toolchain smoke test.
@@ -67,7 +70,7 @@ done when its demo command works, new logic has tests, and the docs are still ac
   `inherit`/`initial` keywords or CSS variables, no `%`/`pt`/`rem` units, no `margin: auto`, and
   named colors use the standard values (e.g. green = #008000).
 
-## M5 — Layout
+## M5 — Layout (next)
 
 - Box tree (block, inline, anonymous boxes), block width/margins/padding/borders, line breaking
   with bitmap font metrics.

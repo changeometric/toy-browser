@@ -102,8 +102,9 @@ stays out of git.
 
 ## Working style
 
-- Read `docs/` and the existing code before acting. Ask the user when a design direction is
-  unclear; never silently make big decisions.
+- Read `docs/` and the existing code before acting. In a new session or takeover, start with
+  `docs/handoff.md` (current state) and `docs/README.md` (reading order). Ask the user when a
+  design direction is unclear; never silently make big decisions.
 - When parsing or rendering behavior is unclear, consult the relevant standard and compare with a
   real browser; use them as references only, never copy reference implementations.
 - Do only what the current task requires — no future features, no scope creep. If the task is
