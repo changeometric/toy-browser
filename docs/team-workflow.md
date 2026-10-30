@@ -248,3 +248,20 @@ the round when possible. Clean up stale build directories and stray files.
 - M4: teammate self-reports flagged contract gaps (inline `!important`, named-color values,
   unbounded style dump indentation) that were accepted or fixed by the Lead; keep that reporting
   habit — it is cheaper than a review round.
+- M5: publishing the layout public header as an explicit checkpoint (the M4 lesson applied up
+  front) let the shell/CLI owner start in parallel with the layout implementation; the only extra
+  coordination was one short "header published" message.
+- M5: two Lead-owned enabling changes — the header-only `tests/support/check.h` plus a
+  `toy_test_support` interface target — removed a repeated infrastructure decision from the
+  implementers and fulfilled the roadmap backlog item without touching old tests.
+- M5: the layout contract had six genuinely ambiguous corner cases (br vs display, trailing empty
+  lines, split-inline padding, whitespace-only nodes, hidden html, fit checks with pending inline
+  padding). Listing them in one message and getting one approval round-trip was much cheaper than
+  discovering divergent behavior at integration.
+- M5: because the box dump is user-visible and frozen, the Lead hand-derived the expected end-to-end
+  geometry in the contract and both the layout and shell owners derived it independently; they
+  matched on the first try. Put computed golden values in the contract when an output format is
+  frozen.
+- M5: deep-nesting safety was designed in from the start (iterative layout, no DOM recursion, capped
+  dump, 10k-div regression test) instead of being discovered by a review round; the full 31-test
+  suite runs in under a second.

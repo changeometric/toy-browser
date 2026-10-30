@@ -15,7 +15,8 @@
 | MVP 中单进程、单线程、阻塞抓取 | 复杂度预算；只有真正成为问题才异步 | [architecture.md](architecture.md) |
 | headless 优先：每个功能不开窗口也能工作并测试 | 支持 CI、调试与自动化验证 | [AGENTS.md](../../AGENTS.md), [architecture.md](architecture.md) |
 | 软件光栅化、ARGB32 表面、PPM 截图 | 无 GPU 或图形依赖；测试确定性 | [architecture.md](architecture.md) |
-| Dump 是确定性、面向行的契约（`DOM`、style、以后的 boxes） | 它们是测试与调试接口 | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
+| Dump 是确定性、面向行的契约（`DOM`、style、boxes） | 它们是测试与调试接口 | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
+| `layout` 产出纯 arena `BoxTree`；文本度量通过 `shell` 提供的回调到达（没有 `layout` → `render` 的边） | 保持层边界，并让布局可用假度量器单元测试 | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
 | HTML/CSS 支持是显式子集，已知限制有文档 | 这是浏览器玩具，不是规范符合性项目 | [roadmap.md](roadmap.md) |
 | 文本从内置位图字体开始；真实 TTF 推迟到 M8 | 在布局存在前避免字体依赖 | [roadmap.md](roadmap.md) |
 | 只支持 HTTP/1.1；尚无 TLS 与代理（用户已推迟） | 与玩具范围相称；需要时再考虑 | [roadmap.md](roadmap.md), [open-questions.md](open-questions.md) |

@@ -14,11 +14,12 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M2 | URL parsing, HTTP/1.1 GET, `file://` fetching (`--dump-body`) |
 | M3 | HTML tokenizer/tree builder, arena DOM, deterministic dump (`--dump-dom`) |
 | M4 | CSS parser/selectors, UA + author cascade, computed styles (`--dump-style`) |
+| M5 | `layout` box tree with block/inline/anonymous boxes and line breaking, bitmap-font metrics in `render`, deterministic box dump (`--dump-boxes`) |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-Not implemented yet: layout, painted pages, real text/fonts, images, JavaScript, `https`/TLS,
-proxies, external stylesheets, interaction and navigation. Window mode shows the M1 placeholder
-page; everything useful today goes through headless CLI modes.
+Not implemented yet: painting, real text/glyphs on screen, images, JavaScript, `https`/TLS,
+proxies, external stylesheets, interaction and navigation. Window mode still shows the M1
+placeholder page; everything useful today goes through headless CLI modes.
 
 ## Verify the current state (no context needed)
 
@@ -31,38 +32,45 @@ cmake --build "$BUILD"
 ctest --test-dir "$BUILD" --output-on-failure
 
 "$BUILD"/toybrowser --help
-"$BUILD"/toybrowser --dump-dom   "file://$PWD/README.md" | head
-"$BUILD"/toybrowser --dump-style "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --dump-dom    "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --dump-style  "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --dump-boxes  "file://$PWD/README.md" | head
 "$BUILD"/toybrowser --headless --screenshot /tmp/toybrowser.ppm && file /tmp/toybrowser.ppm
 ```
 
-Expected: 20/20 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 31/31 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; the screenshot writes a binary PPM. All headless modes
 need no display. CMake 3.20 or newer is required; building needs the X11 development headers
 (approved dependency); only windowed mode needs a running display.
 
-## Next round: M5 — layout (not started)
+## Next round: M6 — paint (not started)
 
-- Goal: turn the style tree into a box tree with geometry, dumped by `--dump-boxes`.
-- Preliminary scope: block and inline boxes, anonymous boxes, width/margins/padding, line breaking.
-  Borders are not supported by the M4 property set and are out of scope for M5.
-- Text metrics: `layout` takes a measurement callback supplied by `shell`; the built-in bitmap
-  font lives in `render`. The bitmap-font decision is locked (TTF at M8); the M5 intake only
-  settles the callback API and ASCII coverage.
-- `layout` is already registered in the shared CMake module lists, so `src/layout/CMakeLists.txt`
-  is enough to start.
-- Acceptance sketch: fixture pages produce expected box dumps; all existing tests keep passing;
-  warning-free under both compilers; fully headless.
+- Goal: turn the box tree into pixels. Build a display list from the box tree, rasterize filled
+  rectangles and bitmap-font text into a `Surface`, apply simple rectangular clipping, and wire the
+  result into both the window and `--screenshot` (with a golden screenshot test).
+- Preliminary scope: `render` gains the display list, `FillRect`/`DrawText` commands and the 8x16
+  ASCII glyph bitmaps that the M5 font metrics already describe; `shell` builds the list from the
+  box tree and presents it; colors come from the computed style.
+- Still out of scope: borders (not in the M4 property set), images, real TTF fonts, scrolling and
+  navigation (M7), JavaScript.
+- Acceptance sketch: a local fixture page with headings and paragraphs renders in the window and
+  matches a golden screenshot; every existing `--dump-*` mode and test keeps working headless;
+  warning-free under both compilers.
+- Paint must consume the box tree only: `render` still knows nothing about HTML/CSS.
 
-Backlog after M5 (details in [roadmap.md](roadmap.md)): image/font library decisions at M8, proxy
-support, TLS, and test-helper consolidation.
+Backlog after M6 (details in [roadmap.md](roadmap.md)): image/font library decisions at M8, proxy
+support, TLS, and test-helper migration.
 
 ## Map of the repository
 
 - `src/<module>/` — one CMake library target per module (`base` does not exist yet; see
   [architecture.md](architecture.md) for the module map and dependency direction).
-- `src/main.cpp` — CLI parsing only; `shell` orchestrates fetch → parse → style → dump/present.
-- `tests/<module>/` — one executable per subject, registered with CTest.
+- `src/main.cpp` — CLI parsing only; `shell` orchestrates fetch → parse → style → layout →
+  dump/present.
+- `src/render/include/toy/render/font.h` — bitmap-font metrics; `layout` consumes them through a
+  `shell`-supplied callback and has no `render` dependency.
+- `tests/<module>/` — one executable per subject, registered with CTest; new tests use the
+  header-only `tests/support/check.h`.
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
   questions (this file is the snapshot).
 - Shared task board — provided by the agent runtime (task create/claim/update with revision); if
@@ -73,8 +81,14 @@ support, TLS, and test-helper consolidation.
 ## Frozen contracts (do not change casually)
 
 - CLI modes, flags and exit codes: `0` success, `1` runtime error, `2` usage error.
-- Dump formats (DOM, style, later boxes): deterministic, line-oriented, asserted by tests; any
-  change needs tests and docs in the same round.
+- Dump formats (DOM, style, boxes): deterministic, line-oriented, asserted by tests; any change
+  needs tests and docs in the same round. The box dump is pre-order lines of
+  `<tag> block|inline`, `anonymous block` or `text "..."` followed by `x= y= width= height=`, all
+  integers (`std::lround`) of absolute CSS pixels; indent is two spaces per box depth, capped at 64
+  levels.
+- Layout semantics frozen through the layout tests and the M5 known limits: viewport width from
+  `--size`, no margin collapsing, top-aligned lines, word-level text boxes, ASCII-only line
+  breaking, no painting.
 - Module boundaries and dependency direction in [architecture.md](architecture.md).
 - `--size` is clamped to 1..8192 per side and at most 16M pixels; bodies are capped by
   `FetchOptions::max_body_bytes` (16 MiB by default); dump indentation is capped at 64 levels.
@@ -99,7 +113,12 @@ support, TLS, and test-helper consolidation.
 - Don't test with a display when a `--dump-*` mode can prove the same thing; everything is
   designed to be headless-first.
 - Deeply nested input used to make dumps quadratic; keep any new dump depth-capped and tested.
+  Layout is deliberately iterative (10,000 nested divs are a test): do not turn it back into DOM
+  recursion.
 - Build artifacts and object files must never be committed; use isolated build directories.
 - No `https` yet: most real-world sites cannot be fetched; `http://` and `file://` work.
 - The HTML/CSS/URL parsers are error-tolerant by design; they never fail on malformed input, so
   "it didn't error" is not evidence of correctness — compare dumps with the golden tests.
+- `--dump-boxes` uses `--size`'s width as the viewport and ignores the height; heights come from
+  the content. `layout` must never include a `render` header — text metrics only arrive through the
+  callback.

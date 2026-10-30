@@ -3,7 +3,7 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M4 are done; M5 (layout) is next.** For a snapshot and takeover guide, read
+**Current status: M0–M5 are done; M6 (paint) is next.** For a snapshot and takeover guide, read
 [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
@@ -70,19 +70,29 @@ done when its demo command works, new logic has tests, and the docs are still ac
   `inherit`/`initial` keywords or CSS variables, no `%`/`pt`/`rem` units, no `margin: auto`, and
   named colors use the standard values (e.g. green = #008000).
 
-## M5 — Layout (next)
+## M5 — Layout ✅ (done)
 
-- Box tree (block, inline, anonymous boxes), block width/margins/padding. Borders are not in the
-  M4 property set and are deferred to a later milestone.
-- Line breaking using text metrics: `layout` takes a measurement callback (standard types only)
-  supplied by `shell`; the built-in bitmap font stays in `render`, so `layout` does not depend on
-  `render`. The bitmap-font decision is already locked (real TTF at M8); the M5 intake only settles
-  the callback API and ASCII coverage.
-- `--dump-boxes`.
-- Done when box dumps for fixtures match expected geometry, the `layout` module is registered in
-  the shared CMake lists, and all existing tests keep passing.
+- `layout` module: arena `BoxTree` with absolute CSS-pixel geometry (border-box rectangles; `float`
+  geometry, integers in dumps), block and inline boxes, anonymous blocks, block width/margins/
+  padding, auto and fixed heights, line breaking with a caller-supplied measurement callback,
+  inline-element fragmentation, `<br>`, and a deterministic box dump (indent capped at 64 levels).
+- `render`: built-in monospace bitmap-font metrics (`toy/render/font.h`) on an 8x16 design grid at
+  a 16 px em. M5 ships metrics only; glyph painting arrives with M6.
+- `shell`/CLI: `--dump-boxes <url>` fetches, parses, styles, lays out and dumps; the viewport width
+  is `--size`'s width (default 800). Fully headless.
+- Acceptance reached: `render.font_metrics`, `layout.block`, `layout.inline`, `layout.line_break`,
+  `layout.dump`, `layout.deep_nesting`, `shell.dump_boxes_file`, `shell.dump_boxes_size`,
+  `shell.dump_boxes_missing_file`, `shell.dump_boxes_missing_url` and `shell.dump_boxes_conflict`
+  pass under GCC and Clang with warnings as errors (31 tests total, deterministic and headless).
+- Known M5 limits (MVP simplifications): no margin collapsing (a parent's auto height includes its
+  in-flow children's margins); no baseline alignment (boxes on one line are top-aligned and share
+  the line height); horizontal inline margins/padding only (vertical inline margins/padding and
+  inline width/height are ignored); no `text-align`/`line-height`/`vertical-align`/`white-space`
+  support, so `<pre>` collapses whitespace like everything else; line breaks happen only at ASCII
+  whitespace (non-ASCII text is one word: no Unicode line breaking, hyphenation or emergency
+  breaking); no percentage units; and layout paints nothing yet.
 
-## M6 — Paint: first real page
+## M6 — Paint: first real page (next)
 
 - Display list from the box tree, rasterizer for rectangles and text, clipping; wire it into the
   window.
@@ -118,9 +128,10 @@ starts only after the previous slice is clean and the user agrees on priority.
   clearly useful.
 - **TLS / `https://`** — deferred by the user on 2026-10-31; OpenSSL is not approved. Reaching
   sites such as Google needs `https`, and proxy support alone is not enough for them.
-- **Test helper consolidation** — the per-file `Check`/`g_failures` test harness is duplicated in
-  every test executable. Introduce a header-only `tests/support/check.h` when the next test file is
-  added (M5); no framework dependency.
+- **Test helper consolidation** — the per-file `Check`/`g_failures` test harness is still
+  duplicated in the older test executables. The header-only `tests/support/check.h` (interface
+  target `toy_test_support`) was introduced in M5 and is used by the new tests; migrate the older
+  files only when they are touched. No framework dependency.
 
 ## Rules
 

@@ -19,7 +19,7 @@
 | `js` | 小型 JavaScript 引擎与 DOM 绑定（可选，最后） | `dom`、`base` | M9 |
 | `shell` | 导航、流水线编排、窗口外壳 | 所有模块 | M1 |
 
-依赖只向下指向；没有环。`render` 完全不了解 HTML/CSS（它消费显示列表）；`platform` 不了解页面内容（它 blit 像素并上报输入）。只有 `shell` 能看到所有模块并把它们接在一起。`base` 尚不存在：M1-M4 的模块只用标准库与标准 POSIX 接口，只有当共享工具确实需要时该模块才出现。
+依赖只向下指向；没有环。`render` 完全不了解 HTML/CSS（它消费显示列表）；`platform` 不了解页面内容（它 blit 像素并上报输入）。只有 `shell` 能看到所有模块并把它们接在一起。`base` 尚不存在：M1–M5 的模块只用标准库与标准 POSIX 接口，只有当共享工具确实需要时该模块才出现。
 
 新模块注册在根与 `tests` `CMakeLists.txt` 的显式列表中；Lead 添加一次名字。`--dump-*` 模式与退出码（0 成功，1 运行时错误，2 用法错误）是冻结接口。
 
@@ -43,13 +43,13 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 
 样式（M4）：`css` 把样式表与声明列表解析成普通结构，完全不了解 DOM。`style` 在 DOM 上匹配这些选择器，应用 UA/作者/行内层叠——依据 specificity（优先级）、`!important` 与继承——并为每个元素生成一个 `ComputedStyle`；内置的 UA 样式表本身就是由我们的解析器解析的 CSS。`DumpStyleTree()` 是 `--dump-style` 与样式测试背后的确定性文本形式。布局只会消费样式树，永远不会消费原始 CSS。
 
-布局（M5 计划）：换行需要文本度量。`layout` 将接受一个由 `shell` 提供的度量回调（只用标准类型）；内置位图字体位于 `render`，由 `shell` 适配。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。
+布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型）；内置等宽位图字体度量位于 `render`，由 `shell` 适配。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。
 
 ## 数据模型
 
 - **DOM**：一个用整数 `NodeId` 寻址的 arena（`std::vector<Node>`）；父节点、首/末子节点、前/后兄弟链接都是 id。属性存在每个节点的小 vector 里。没有父/子指针环，没有 `shared_ptr`。
 - **样式树**：按 DOM id 索引的计算值组成的并行结构。
-- **盒树**：布局 arena；每个盒子引用其样式/DOM 来源，并持有一个 float 矩形。
+- **盒树**：用整数 `BoxId` 寻址的布局 arena（与 DOM 同构）；每个盒引用其 DOM 来源（元素或文本节点 id），并持有一个以 CSS 像素表示的绝对 border-box 矩形。文本盒保存放置在该行上的那个单词。匿名盒没有 DOM 来源。
 - **显示列表**：命令的扁平 `std::vector`（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）。
 - **单位**：样式/布局中 CSS 像素用 `float`；光栅化器中设备像素用 `int`。MVP 假设 1 CSS px = 1 设备 px（无缩放，无 DPI 缩放）。
 

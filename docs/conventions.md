@@ -57,8 +57,10 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
 - One file per subject: `tests/<module>/<topic>_test.cpp`; CTest name `<module>.<topic>`.
 - Deterministic: no network, no display, no dependence on time, locale, home directory or
   installed fonts.
-- Prefer golden-dump comparisons for parsers and layout; a tiny local assertion helper instead of a
-  test framework dependency.
+- Prefer golden-dump comparisons for parsers and layout. New tests use the header-only
+  `tests/support/check.h` (CMake interface target `toy_test_support`) instead of copying a local
+  `Check`/`g_failures` harness; older files migrate when they are touched. No test framework
+  dependency.
 - A bug fix without a regression test is not done unless the user explicitly waives it.
 
 ## Build

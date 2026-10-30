@@ -14,7 +14,8 @@ user's agreement. Each entry says what was decided, why, and where the details l
 | Single process, single thread, blocking fetch in the MVP | Complexity budget; async only if it becomes a real problem | [architecture.md](architecture.md) |
 | Headless-first: every feature works and is tested without a window | Enables CI, debugging and automated verification | [AGENTS.md](../AGENTS.md), [architecture.md](architecture.md) |
 | Software rasterization, ARGB32 surfaces, PPM screenshots | No GPU or graphics dependencies; deterministic tests | [architecture.md](architecture.md) |
-| Dumps are deterministic, line-oriented contracts (`DOM`, style, later boxes) | They are the testing and debugging interface | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
+| Dumps are deterministic, line-oriented contracts (`DOM`, style, boxes) | They are the testing and debugging interface | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
+| `layout` produces a pure arena `BoxTree`; text metrics arrive through a `shell`-supplied callback (no `layout` → `render` edge) | Keeps the layer boundaries and lets layout be unit-tested with a fake measurer | [architecture.md](architecture.md), [roadmap.md](roadmap.md) |
 | HTML/CSS support is an explicit subset with documented known limits | A browser toy, not a spec compliance project | [roadmap.md](roadmap.md) |
 | Text starts with a built-in bitmap font; real TTF deferred to M8 | Avoids a font dependency before layout exists | [roadmap.md](roadmap.md) |
 | HTTP/1.1 only; no TLS and no proxy yet (deferred by the user) | Proportionate to the toy scope; revisit when needed | [roadmap.md](roadmap.md), [open-questions.md](open-questions.md) |

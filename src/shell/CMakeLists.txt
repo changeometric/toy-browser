@@ -3,6 +3,6 @@ add_library(toy_shell STATIC
 )
 
 target_include_directories(toy_shell PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(toy_shell PUBLIC toy_render toy_platform toy_net toy_dom toy_style)
+target_link_libraries(toy_shell PUBLIC toy_render toy_platform toy_net toy_dom toy_style toy_layout)
 
 toybrowser_set_warnings(toy_shell)

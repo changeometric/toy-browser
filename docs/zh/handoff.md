@@ -15,9 +15,10 @@
 | M2 | URL 解析、HTTP/1.1 GET、`file://` 抓取（`--dump-body`） |
 | M3 | HTML tokenizer/树构建器、arena DOM、确定性 dump（`--dump-dom`） |
 | M4 | CSS 解析器/选择器、UA + 作者层叠、计算样式（`--dump-style`） |
+| M5 | `layout` 盒树：块级/行内/匿名盒与换行，`render` 中的位图字体度量，确定性盒 dump（`--dump-boxes`） |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-尚未实现：布局、页面绘制、真实文本/字体、图像、JavaScript、`https`/TLS、代理、外部样式表、交互与导航。窗口模式显示 M1 的占位页；今天所有有用的东西都通过 headless CLI 模式。
+尚未实现：绘制、屏幕上的真实文本/字形、图像、JavaScript、`https`/TLS、代理、外部样式表、交互与导航。窗口模式仍显示 M1 的占位页；今天所有有用的东西都通过 headless CLI 模式。
 
 ## 验证当前状态（无需上下文）
 
@@ -30,28 +31,30 @@ cmake --build "$BUILD"
 ctest --test-dir "$BUILD" --output-on-failure
 
 "$BUILD"/toybrowser --help
-"$BUILD"/toybrowser --dump-dom   "file://$PWD/README.md" | head
-"$BUILD"/toybrowser --dump-style "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --dump-dom    "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --dump-style  "file://$PWD/README.md" | head
+"$BUILD"/toybrowser --dump-boxes  "file://$PWD/README.md" | head
 "$BUILD"/toybrowser --headless --screenshot /tmp/toybrowser.ppm && file /tmp/toybrowser.ppm
 ```
 
-预期：20/20 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11 开发头文件（已批准的依赖）；只有窗口模式需要运行中的显示服务器。
+预期：31/31 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11 开发头文件（已批准的依赖）；只有窗口模式需要运行中的显示服务器。
 
-## 下一轮：M5 —— 布局（尚未开始）
+## 下一轮：M6 —— 绘制（尚未开始）
 
-- 目标：把样式树变成带几何信息的盒树，由 `--dump-boxes` dump。
-- 初步范围：块级与行内盒、匿名盒、宽度/margin/padding、换行。border 不在 M4 属性集中，M5 范围之外。
-- 文本度量：`layout` 接受由 `shell` 提供的度量回调；内置位图字体位于 `render`。位图字体决策已锁定（TTF 在 M8）；M5 intake 只确定回调 API 与 ASCII 覆盖范围。
-- `layout` 已经在共享 CMake 模块列表中注册，因此有 `src/layout/CMakeLists.txt` 就能开始。
-- 验收草案：fixture 页面产生预期的盒 dump；所有现有测试保持通过；两个编译器下无警告；完全 headless。
+- 目标：把盒树变成像素。从盒树构建显示列表，把实心矩形和位图字体文本光栅化进 `Surface`，应用简单的矩形裁剪，并把结果接入窗口与 `--screenshot`（带 golden 截图测试）。
+- 初步范围：`render` 获得显示列表、`FillRect`/`DrawText` 命令，以及 M5 字体度量已经描述的 8x16 ASCII 字形点阵；`shell` 从盒树构建显示列表并呈现；颜色来自计算样式。
+- 仍不在范围内：border（不在 M4 属性集中）、图像、真实 TTF 字体、滚动与导航（M7）、JavaScript。
+- 验收草案：一个带标题和段落的本地 fixture 页面在窗口中渲染出来，并匹配 golden 截图；所有现有 `--dump-*` 模式与测试继续 headless 工作；两个编译器下无警告。
+- 绘制只能消费盒树：`render` 仍然完全不了解 HTML/CSS。
 
-M5 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：M8 的图像/字体库决策、代理支持、TLS，以及测试辅助代码合并。
+M6 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：M8 的图像/字体库决策、代理支持、TLS，以及测试辅助代码迁移。
 
 ## 仓库地图
 
 - `src/<module>/` —— 每个模块一个 CMake 库目标（`base` 尚不存在；模块图与依赖方向见 [architecture.md](architecture.md)）。
-- `src/main.cpp` —— 只做 CLI 解析；`shell` 编排 fetch → parse → style → dump/present。
-- `tests/<module>/` —— 每个主题一个可执行文件，注册到 CTest。
+- `src/main.cpp` —— 只做 CLI 解析；`shell` 编排 fetch → parse → style → layout → dump/present。
+- `src/render/include/toy/render/font.h` —— 位图字体度量；`layout` 通过 `shell` 提供的回调消费它们，自身不依赖 `render`。
+- `tests/<module>/` —— 每个主题一个可执行文件，注册到 CTest；新测试使用 header-only 的 `tests/support/check.h`。
 - `docs/` —— 架构、路线图、约定、团队流程、决策、依赖、待决问题（本文件是快照）。
 - 共享任务板 —— 由 agent 运行时提供（任务 create/claim/update，带 revision）；如果运行时没有，则用 `docs/tasks/<milestone>.md`，字段相同。见 [team-workflow.md](team-workflow.md)。
 - `README.md` / `README.zh.md` 与 `docs/zh/` —— 面向用户的入口（英语为权威）。
@@ -59,7 +62,8 @@ M5 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：M8 的图像/字�
 ## 冻结契约（不要随意改动）
 
 - CLI 模式、标志与退出码：`0` 成功，`1` 运行时错误，`2` 用法错误。
-- Dump 格式（DOM、style、以后的 boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。
+- Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层。
+- 布局语义通过布局测试与 M5 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，仅按 ASCII 空白换行，不绘制。
 - [architecture.md](architecture.md) 中的模块边界与依赖方向。
 - `--size` 每边被钳制在 1..8192，且总像素最多 16M；body 由 `FetchOptions::max_body_bytes` 限制（默认 16 MiB）；dump 缩进最多 64 层。
 - HTML/CSS/JS 支持是刻意不完整的：读 `roadmap.md` 里的 known-limits 条目，而不是假设规范行为。
@@ -75,7 +79,8 @@ M5 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：M8 的图像/字�
 ## 曾让上一支团队付出时间的坑
 
 - 能用 `--dump-*` 模式证明同一件事时，不要用显示器测试；一切设计都以 headless 优先。
-- 深层嵌套输入曾让 dump 变成二次复杂度；任何新的 dump 都要保持有深度上限并有测试。
+- 深层嵌套输入曾让 dump 变成二次复杂度；任何新的 dump 都要保持有深度上限并有测试。布局是刻意做成迭代式的（10,000 层嵌套 div 是一个测试）：不要把它改回 DOM 递归。
 - 构建产物与目标文件绝不能提交；使用隔离的构建目录。
 - 还没有 `https`：大多数真实站点无法抓取；`http://` 和 `file://` 可用。
 - HTML/CSS/URL 解析器按设计是容错的；它们遇到畸形输入永不失败，所以“没有报错”不是正确性的证据——把 dump 与 golden 测试比较。
+- `--dump-boxes` 用 `--size` 的宽度作为视口并忽略高度；高度由内容决定。`layout` 绝不能包含 `render` 头文件——文本度量只通过回调到达。

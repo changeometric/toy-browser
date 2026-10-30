@@ -4,11 +4,14 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "toy/dom/node.h"
+#include "toy/layout/box.h"
 #include "toy/net/http.h"
 #include "toy/net/url.h"
 #include "toy/platform/window.h"
+#include "toy/render/font.h"
 #include "toy/render/ppm.h"
 #include "toy/render/surface.h"
 #include "toy/style/computed_style.h"
@@ -24,6 +27,13 @@ constexpr int kDemoBandHeight = 8;
 // cap is 64 MiB. Run enforces both limits for every mode, before any allocation.
 constexpr int kMaxDimension = 8192;
 constexpr int kMaxPixels = 16'777'216;
+
+// Adapts the built-in bitmap font to layout's measurement callback. layout never
+// depends on render; shell is the only module that sees both and wires them.
+layout::TextMetrics MeasureText(std::string_view text_utf8, float font_size_px) {
+  return layout::TextMetrics{render::MeasureTextWidth(text_utf8, font_size_px),
+                             render::LineHeightPx(font_size_px)};
+}
 
 // M1 placeholder page: a white page with a blue band at the top. It proves the
 // whole pixel path (surface -> presentation) works; real page content arrives
@@ -113,6 +123,36 @@ int RunDumpStyle(const Options& options) {
   return 0;
 }
 
+int RunDumpBoxes(const Options& options) {
+  std::string error;
+  const std::optional<net::Url> url = net::ParseUrl(options.dump_boxes_url, &error);
+  if (!url) {
+    std::fprintf(stderr, "toybrowser: cannot parse URL '%s': %s\n", options.dump_boxes_url.c_str(),
+                 error.c_str());
+    return 1;
+  }
+
+  net::Response response;
+  if (!net::Fetch(*url, net::FetchOptions{}, &response, &error)) {
+    std::fprintf(stderr, "toybrowser: cannot fetch '%s': %s\n", options.dump_boxes_url.c_str(),
+                 error.c_str());
+    return 1;
+  }
+
+  // Parsing, styling and layout are error-tolerant: they never fail on bad input.
+  const dom::Document document = dom::ParseDocument(response.body);
+  const style::StyleTree styles = style::ComputeStyles(document);
+  const layout::BoxTree boxes = layout::LayoutDocument(
+      document, styles, layout::LayoutOptions{static_cast<float>(options.width)}, MeasureText);
+  const std::string dump = layout::DumpBoxTree(document, boxes);
+  if (std::fwrite(dump.data(), 1, dump.size(), stdout) != dump.size()) {
+    std::fprintf(stderr, "toybrowser: cannot write the box dump to stdout\n");
+    return 1;
+  }
+  std::fflush(stdout);
+  return 0;
+}
+
 int RunHeadless(const Options& options) {
   render::Surface surface(options.width, options.height);
   PaintPlaceholderPage(surface);
@@ -172,12 +212,16 @@ int Run(const Options& options) {
   const int headless_modes = static_cast<int>(!options.screenshot_path.empty()) +
                              static_cast<int>(!options.dump_body_url.empty()) +
                              static_cast<int>(!options.dump_dom_url.empty()) +
-                             static_cast<int>(!options.dump_style_url.empty());
+                             static_cast<int>(!options.dump_style_url.empty()) +
+                             static_cast<int>(!options.dump_boxes_url.empty());
   if (headless_modes > 1) {
     std::fprintf(stderr,
-                 "toybrowser: --screenshot, --dump-body, --dump-dom and --dump-style are mutually "
-                 "exclusive\n");
+                 "toybrowser: --screenshot, --dump-body, --dump-dom, --dump-style and "
+                 "--dump-boxes are mutually exclusive\n");
     return 2;
+  }
+  if (!options.dump_boxes_url.empty()) {
+    return RunDumpBoxes(options);
   }
   if (!options.dump_style_url.empty()) {
     return RunDumpStyle(options);

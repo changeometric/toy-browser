@@ -2,8 +2,9 @@
 
 一个从零实现的玩具网页浏览器：C++20、CMake，不使用现成的浏览器组件。
 
-**状态：M4 —— CSS 已被解析、级联，并可通过 headless 的 `--dump-style` 命令查看。** 页面渲染仍是
-M1 的占位页；布局从 M5 开始。详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
+**状态：M5 —— 样式树已被布局成带几何信息的盒树，并可通过 headless 的 `--dump-boxes` 命令查看。**
+页面绘制仍是 M1 的占位页；真正的页面渲染从 M6 开始。详见[路线图](docs/zh/roadmap.md)。
+英文原版：[README.md](README.md)。
 
 **新团队 / 新 agent？** 先读[接管指南](docs/zh/handoff.md)（当前状态与接手方式），再看
 [文档索引](docs/zh/README.md)。
@@ -20,6 +21,7 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --dump-body file:///etc/hostname  # 抓取 URL，原始字节输出到 stdout
 ./build/toybrowser --dump-dom  file:///etc/hostname  # 抓取并输出解析后的 DOM 树
 ./build/toybrowser --dump-style file:///etc/hostname # 抓取、计算样式并输出样式树
+./build/toybrowser --dump-boxes file:///etc/hostname # 抓取、计算样式、布局并输出盒树
 ```
 
 窗口后端链接 libX11（已批准，见[依赖说明](docs/zh/dependencies.md)），因此即使只用 headless 模式，

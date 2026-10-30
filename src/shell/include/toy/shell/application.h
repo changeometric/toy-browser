@@ -24,6 +24,10 @@ struct Options {
   // the computed style tree to stdout. Parsing never fails; only URL and fetch
   // errors are reported.
   std::string dump_style_url;
+  // When non-empty, fetch this URL, parse it as HTML, compute styles, lay the
+  // page out at the window width and write the box tree to stdout. Parsing and
+  // layout never fail; only URL and fetch errors are reported.
+  std::string dump_boxes_url;
 };
 
 // Runs the browser.

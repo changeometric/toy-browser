@@ -20,7 +20,7 @@ speculative — abstractions are added when a real slice needs them.
 
 Dependencies point downward only; no cycles. `render` knows nothing about HTML/CSS (it consumes
 display lists); `platform` knows nothing about page content (it blits pixels and reports input).
-Only `shell` sees all modules and wires them together. `base` does not exist yet: M1-M4 modules use
+Only `shell` sees all modules and wires them together. `base` does not exist yet: M1–M5 modules use
 only the standard library and standard POSIX interfaces, and the module appears when a shared
 utility is actually needed.
 
@@ -64,10 +64,14 @@ embedded UA stylesheet is itself CSS parsed by our parser. `DumpStyleTree()` is 
 text form behind `--dump-style` and the style tests. Layout will consume the style tree only, never
 the raw CSS.
 
-Layout (M5 plan): line breaking needs text metrics. `layout` will accept a measurement callback
-(standard types only) supplied by `shell`; the built-in bitmap font lives in `render`, and `shell`
-adapts it. This keeps the dependency direction intact: no `layout` → `render` edge and no font
-code duplicated in `layout`.
+Layout (M5): `layout` turns the style tree into a `BoxTree` with absolute CSS-pixel geometry.
+Line breaking needs text metrics, so `LayoutDocument()` takes a `MeasureText` callback (standard
+types only) supplied by `shell`; the built-in monospace bitmap-font metrics live in `render`, and
+`shell` adapts them. This keeps the dependency direction intact: no `layout` → `render` edge and no
+font code duplicated in `layout`. `DumpBoxTree()` is the deterministic text form behind
+`--dump-boxes` and the layout tests. Layout consumes the style tree only: it never reads raw CSS and
+never paints. The geometry is a pure function of its inputs; a summary of the MVP simplifications
+lives in the known-limits list in [roadmap.md](roadmap.md).
 
 ## Data model
 
@@ -75,7 +79,9 @@ code duplicated in `layout`.
   previous/next sibling links are ids. Attributes live in a small vector per node. No parent/child
   pointer cycles, no `shared_ptr`.
 - **Style tree**: parallel structure of computed values keyed by DOM ids.
-- **Box tree**: layout arena; each box references its style/DOM origin and holds a float rectangle.
+- **Box tree**: layout arena addressed by integer `BoxId` (same shape as the DOM); each box
+  references its DOM origin (element or text-node id) and holds an absolute border-box rectangle in
+  CSS pixels. Text boxes hold the word placed on their line. Anonymous boxes have no DOM origin.
 - **Display list**: flat `std::vector` of commands (`FillRect`, `DrawText`, `DrawImage`,
   `PushClip`/`PopClip`).
 - **Units**: CSS pixels as `float` in style/layout; device pixels as `int` in the rasterizer.

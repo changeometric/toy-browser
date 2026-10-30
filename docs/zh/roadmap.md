@@ -4,7 +4,7 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M4 已完成；下一步是 M5（布局）。** 快照与接管指南见 [handoff.md](handoff.md)。
+**当前状态：M0–M5 已完成；下一步是 M6（绘制）。** 快照与接管指南见 [handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
 
@@ -41,14 +41,15 @@
 - 已达成验收：`css.parser`、`style.cascade`、`style.dump`、`shell.dump_style_file` 和 `shell.dump_style_missing_file` 在 GCC 和 Clang 下、警告视为错误时通过（共 20 个测试）。
 - M4 已知限制：没有外部 `<link>` 样式表（需要 URL 解析与抓取；以后再做），没有 at-rule 内容，没有伪类/伪元素，没有属性选择器，没有 `rgb()`/`hsl()`/`calc()`、`inherit`/`initial` 关键字或 CSS 变量，没有 `%`/`pt`/`rem` 单位，没有 `margin: auto`，命名颜色使用标准值（例如 green = #008000）。
 
-## M5 — 布局（下一轮）
+## M5 — 布局 ✅（已完成）
 
-- 盒树（块级、行内、匿名盒）、块宽度/margin/padding。border 不在 M4 属性集中，推迟到后续里程碑。
-- 使用文本度量的换行：`layout` 接受一个由 `shell` 提供的度量回调（只用标准类型）；内置位图字体留在 `render`，因此 `layout` 不依赖 `render`。位图字体决策已经锁定（真实 TTF 在 M8）；M5 intake 只确定回调 API 与 ASCII 覆盖范围。
-- `--dump-boxes`。
-- 当 fixtures 的盒 dump 与预期几何匹配、`layout` 模块已注册进共享 CMake 列表、且所有现有测试保持通过时完成。
+- `layout` 模块：arena 形式的 `BoxTree`，带绝对 CSS 像素几何（border-box 矩形；几何用 `float`，dump 中取整），块级与行内盒、匿名盒、块宽度/margin/padding、auto 与指定高度、使用调用方提供的文本度量回调进行换行、行内元素分段、`<br>`，以及确定性的盒 dump（缩进上限 64 层）。
+- `render`：内置等宽位图字体度量（`toy/render/font.h`），8x16 设计网格、16 px em。M5 只交付度量；字形绘制在 M6 到来。
+- `shell`/CLI：`--dump-boxes <url>` 完成抓取、解析、样式、布局并 dump；视口宽度取 `--size` 的宽度（默认 800）。完全 headless。
+- 已达成验收：`render.font_metrics`、`layout.block`、`layout.inline`、`layout.line_break`、`layout.dump`、`layout.deep_nesting`、`shell.dump_boxes_file`、`shell.dump_boxes_size`、`shell.dump_boxes_missing_file`、`shell.dump_boxes_missing_url` 和 `shell.dump_boxes_conflict` 在 GCC 和 Clang 下、警告视为错误时通过（共 31 个测试，确定性且 headless）。
+- M5 已知限制（MVP 简化）：没有 margin 合并（父元素的 auto 高度包含其流内子元素的 margin）；没有基线对齐（同一行的盒顶部对齐并共享行高）；只应用行内元素的水平 margin/padding（行内垂直 margin/padding 以及行内 width/height 被忽略）；不支持 `text-align`/`line-height`/`vertical-align`/`white-space`，因此 `<pre>` 也和其他元素一样折叠空白；只在 ASCII 空白处换行（非 ASCII 文本整体视为一个单词：没有 Unicode 换行、断字或强制断行）；没有百分比单位；并且布局暂时不绘制任何内容。
 
-## M6 — 绘制：第一个真实页面
+## M6 — 绘制：第一个真实页面（下一轮）
 
 - 从盒树生成显示列表、矩形与文本的光栅化器、裁剪；接入窗口。
 - 当一个带标题、段落和链接的本地 HTML 页面在窗口中渲染出来，并有 golden 截图测试时完成。
@@ -76,7 +77,7 @@
 
 - **代理支持（M2.1）**——通过 HTTP 代理抓取 `http://` URL：`FetchOptions` 中的代理设置、`--proxy host:port` CLI 标志与 `http_proxy` 环境变量回退；发往代理的请求使用 absolute-form 请求目标。测试使用进程内的假代理。用户于 2026-10-31 推迟：只有当真实站点测试需要它，或它成本低且明显有用时才实现。
 - **TLS / `https://`**——用户于 2026-10-31 推迟；OpenSSL 未获批准。访问 Google 之类的站点需要 `https`，仅靠代理支持不够。
-- **测试辅助代码合并**——每个文件里的 `Check`/`g_failures` 测试支架在每个测试可执行文件中重复。在添加下一个测试文件（M5）时引入 header-only 的 `tests/support/check.h`；不引入框架依赖。
+- **测试辅助代码合并**——较旧的测试可执行文件里仍然重复着每个文件各自的 `Check`/`g_failures` 测试支架。header-only 的 `tests/support/check.h`（接口目标 `toy_test_support`）已在 M5 引入，新测试都在使用；旧文件只在被改动时迁移。不引入框架依赖。
 
 ## 规则
 
