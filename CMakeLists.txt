@@ -15,8 +15,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # which stays untracked.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(TOYBROWSER_BUILD_TESTS "Build the unit tests" ON)
+# Tests are opt-in so a plain `cmake --build` only compiles the browser itself.
+# CTest executables are numerous; enable them explicitly for verification with
+# -DTOYBROWSER_BUILD_TESTS=ON (see docs/conventions.md).
+option(TOYBROWSER_BUILD_TESTS "Build the unit tests" OFF)
 option(TOYBROWSER_WERROR "Treat compiler warnings as errors" OFF)
+
+if(NOT TOYBROWSER_BUILD_TESTS)
+  message(STATUS
+    "toybrowser: tests are not built (pass -DTOYBROWSER_BUILD_TESTS=ON to build and run them)")
+endif()
 
 # Applied to every first-party target. Module targets added in later milestones
 # call this from their own CMakeLists.txt.

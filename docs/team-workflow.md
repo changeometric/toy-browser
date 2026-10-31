@@ -106,7 +106,8 @@ Lead:
 Implementer:
 
 - Stays inside the write scope; a needed change elsewhere becomes a message, not an edit.
-- Builds in its own directory; never touches another member's build tree.
+- Builds in its own directory (configure with `-DTOYBROWSER_BUILD_TESTS=ON` when its module has
+  tests); never touches another member's build tree.
 - Reports blockers and ambiguities early, with what is blocked and what is needed.
 - Keeps the module self-contained and follows module boundaries.
 - No drive-by refactors, no new abstractions without a contract change.
@@ -125,7 +126,9 @@ The Lead never trusts a report alone. Review:
 
 Verification gates, run by the Lead after merging parallel work:
 
-1. Fresh build with each supported compiler group (GCC and Clang), warnings as errors.
+1. Fresh build with each supported compiler group (GCC and Clang), configured with
+   `-DTOYBROWSER_BUILD_TESTS=ON -DTOYBROWSER_WERROR=ON` (tests are opt-in; a plain configure
+   builds only the browser), warnings as errors.
 2. Full `ctest` suite on each fresh build.
 3. The round's demo command, with its observable output checked (not just exit code).
 4. Manual smoke for anything that needs hardware or a display (window, network), documented in

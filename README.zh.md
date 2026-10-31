@@ -18,7 +18,12 @@
 ## 构建与运行
 
 ```sh
+# 快速构建浏览器本体（测试是 opt-in 的）。
 cmake -S . -B build
+cmake --build build
+
+# 完整验证：同时构建并运行测试。
+cmake -S . -B build -DTOYBROWSER_BUILD_TESTS=ON -DTOYBROWSER_WERROR=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 

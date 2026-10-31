@@ -66,12 +66,20 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
 ## Build
 
 ```sh
+# Fast browser-only build: tests are opt-in, so this does not compile 55 test executables.
 cmake -S . -B build
+cmake --build build
+
+# Full verification: build and run the tests as well.
+cmake -S . -B build -DTOYBROWSER_BUILD_TESTS=ON -DTOYBROWSER_WERROR=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
 - Out-of-source builds only. Add `-DTOYBROWSER_WERROR=ON` to treat warnings as errors.
+- Tests are opt-in (`TOYBROWSER_BUILD_TESTS`, default `OFF`) so a plain build only compiles the
+  browser; always pass it for a verification run. `cmake --build build --target toybrowser` is the
+  other fast way to build just the browser in a configured test build.
 - Build directories are never committed.
 - `CMAKE_EXPORT_COMPILE_COMMANDS` is on, so `compile_commands.json` appears in the configured
   build directory for clangd and IDEs; build directories stay untracked.

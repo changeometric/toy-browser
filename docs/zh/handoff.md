@@ -30,7 +30,8 @@
 
 ```sh
 BUILD=build/onboard-check
-cmake -S . -B "$BUILD" -DTOYBROWSER_WERROR=ON
+# 测试是 opt-in 的（默认构建只编译浏览器本体）；验证时传入该标志。
+cmake -S . -B "$BUILD" -DTOYBROWSER_BUILD_TESTS=ON -DTOYBROWSER_WERROR=ON
 cmake --build "$BUILD"
 ctest --test-dir "$BUILD" --output-on-failure
 

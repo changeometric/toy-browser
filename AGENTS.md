@@ -66,8 +66,9 @@ stays out of git.
   test `CMakeLists.txt`; module owners create only their own `src/<module>/CMakeLists.txt`.
 - Out-of-source builds only; build directories stay untracked.
 - Never commit build artifacts, binaries, downloaded files or caches.
-- Before finishing a task: configure and build; run `ctest` if tests exist. If verification is
-  impossible in this environment, say so explicitly.
+- Before finishing a task: configure with `-DTOYBROWSER_BUILD_TESTS=ON`, build, and run `ctest`
+  (tests are opt-in so that a plain build stays fast; see `docs/conventions.md`). If verification
+  is impossible in this environment, say so explicitly.
 - Small, reversible changes. No drive-by refactors, reformatting or dependency upgrades.
 - Local scratch files (throwaway fixtures, test output, notes, approved downloads) go in the
   gitignored `.tmp/` directory at the repository root. Never commit them and never scatter them

@@ -20,7 +20,12 @@ guide), then the [documentation index](docs/README.md).
 ## Build and run
 
 ```sh
+# Fast browser-only build (tests are opt-in).
 cmake -S . -B build
+cmake --build build
+
+# Full verification: also build and run the tests.
+cmake -S . -B build -DTOYBROWSER_BUILD_TESTS=ON -DTOYBROWSER_WERROR=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 

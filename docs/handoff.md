@@ -36,7 +36,8 @@ Run the following from the repository root:
 
 ```sh
 BUILD=build/onboard-check
-cmake -S . -B "$BUILD" -DTOYBROWSER_WERROR=ON
+# Tests are opt-in (the default build only compiles the browser); pass the flag for verification.
+cmake -S . -B "$BUILD" -DTOYBROWSER_BUILD_TESTS=ON -DTOYBROWSER_WERROR=ON
 cmake --build "$BUILD"
 ctest --test-dir "$BUILD" --output-on-failure
 
