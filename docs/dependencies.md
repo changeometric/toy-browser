@@ -114,3 +114,12 @@ be completed first.
   test fontconfig configs; the system font configuration is never used by tests), and the M9 TLS
   tests use committed self-signed test certificates (`tests/fixtures/tls/`), never public CAs or
   public sites.
+## M11 performance: no new dependency
+
+The performance round (M11) added no third-party dependency: the caches, viewport culling and
+window-loop changes use only the existing approved libraries and the C++20 standard library.
+Software rendering is kept deliberately: measurements showed fill rate is not the bottleneck, so no
+GPU/OpenGL/Vulkan backend is used. XShm/dirty-rectangle presentation was considered and deliberately
+deferred; XShm would need a new approved dependency (libXext) and is not approved today. Any future
+GPU or presentation-extension work must go through the approval process above and keep a working
+headless software path.

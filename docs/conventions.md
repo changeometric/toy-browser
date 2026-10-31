@@ -72,11 +72,17 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
   fonts or the machine's font configuration. CJK layout/paint tests use
   `tests/fixtures/cjk_site/` and the `layout.cjk_line_break` tokenizer tests.
 - A bug fix without a regression test is not done unless the user explicitly waives it.
+- Caches, viewport culling and other optimizations must be output-neutral: add tests comparing warm
+  vs cold/reference results (metrics, runs, pixels) rather than wall-time assertions. Performance is
+  verified with the Lead's throwaway benchmarks in `.tmp/`, not in CTest; do not add flaky timing
+  tests to the suite.
 
 ## Build
 
 ```sh
 # Fast browser-only build: tests are opt-in, so this does not compile 66 test executables.
+# Without CMAKE_BUILD_TYPE the build defaults to RelWithDebInfo (M11); pass
+# -DCMAKE_BUILD_TYPE=Debug for unoptimised debugging.
 cmake -S . -B build
 cmake --build build
 
@@ -87,6 +93,9 @@ ctest --test-dir build --output-on-failure
 ```
 
 - Out-of-source builds only. Add `-DTOYBROWSER_WERROR=ON` to treat warnings as errors.
+- The default build type is `RelWithDebInfo`; do not remove that default (an unoptimised default
+  made pages several times slower) and do not remove `-ffp-contract=off` (it keeps floating-point
+  layout geometry byte-identical across build types and GCC/Clang).
 - Tests are opt-in (`TOYBROWSER_BUILD_TESTS`, default `OFF`) so a plain build only compiles the
   browser; always pass it for a verification run. `cmake --build build --target toybrowser` is the
   other fast way to build just the browser in a configured test build.

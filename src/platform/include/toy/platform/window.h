@@ -75,6 +75,15 @@ class Window {
   // Blocks until the next event is available. Returns false once the window is
   // gone; in that case a kClose event is still delivered. After a false return
   // the window must not be used anymore.
+  //
+  // A backend may coalesce bursts of same-kind events that are already queued:
+  // consecutive Expose events are reported as one kExpose (one repaint covers
+  // every damaged region), and consecutive ConfigureNotify events are reported
+  // as one kResize carrying the final size. A configure burst that leaves the
+  // size unchanged produces no kResize at all; WaitEvent keeps blocking for the
+  // next event. Only consecutive Expose/ConfigureNotify events may be merged:
+  // every input and close event is delivered exactly once, in arrival order,
+  // and the blocking semantics above apply either way.
   virtual bool WaitEvent(Event* event) = 0;
 
   virtual int width() const = 0;

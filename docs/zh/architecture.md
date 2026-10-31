@@ -87,6 +87,25 @@ fontconfig pattern（每个字体族一个 `FC_FAMILY`，`FC_WEIGHT` 经 `FcWeig
 （无回退）；`--font-family NAME` 强制首选字体族（仍保留字符回退），并开始遵循计算出的 weight/style。
 初始字体族为 `serif`；其他语言通过同一套字符覆盖机制尽力支持（暂无 bidi/RTL 重排与词典断行）。
 
+性能（M11）：浏览器在不改变任何渲染像素的前提下优化交互路径。未指定构建类型时默认使用
+`RelWithDebInfo`，第一方目标编译时加 `-ffp-contract=off`，使布局几何在不同构建类型与编译器间
+逐字节一致。`render::Font` 保留私有、有界 LRU 缓存：每个字体复用一个 `hb_font`/`hb_buffer`
+（单一 `hb_face`，因此 harfbuzz 的 shape-plan 缓存生效）、按精确 26.6 字号 + UTF-8 文本索引的
+shaped-run 缓存（16 MiB / 16k entries）、按 glyph id + 26.6 字号索引的 glyph 覆盖率缓存
+（32 MiB / 16k entries）；分配失败视为 miss，逐出不改变输出。shell 的 `Fonts` 增加无分配的解析
+样式快速路径与稳定 style id、文本度量 LRU（32 MiB / 100k）与 run LRU（16 MiB / 100k）；位图
+退化路径绕过这些缓存。`paint` 把显示列表裁剪到视口：填充/图片按精确目标矩形相交、文本盒按四周
+扩大 `ceil(2 * font_size_px)` 后的矩形判定（覆盖 glyph overhang/斜体/抗锯齿），裁剪发生在
+样式/图片/字体 run 查找之前，同时保留一个 viewport clip 对与命令顺序；渲染像素与不裁剪逐字节
+相同。窗口循环在 Expose 时只重绘不重排，只有窗口尺寸真正变化才重排；X11 后端合并连续的
+Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃或乱序）；每个窗口尺寸复用一个
+`render::Surface`。因此一帧成本是 O(可见命令 + 一次盒树遍历)，而不是 O(整页 shaping/光栅化)；
+重排仍是全量 reflow，只是被度量缓存变便宜。渲染仍是单线程、纯软件：实测填充率不是瓶颈
+（系统字体在 800×600 与 1600×1000 下光栅化耗时相同），因此没有 GPU 后端；窗口仍用
+`XPutImage` 呈现整个 surface（XShm/dirty-rect 留待后续，需要新依赖审批）。在 8.1 万文本盒压力页
+（800×600、自动系统字体）上实测：单帧绘制 10.6 s -> 3.5 ms，布局 2.1 s -> 31 ms，页面加载
+2.2 s -> 69 ms，且所有 M11 之前的 fixture 截图与 33 个滚动参考帧逐字节相同。
+
 导航（M7）：`shell::Browser` 拥有一个浏览器会话：当前页面（最终 URL、DOM、样式树、盒树、解码后的图片与字体）、
 导航历史、整数垂直滚动偏移与绘制。历史是一个 URL 向量加一个索引；每次成功加载追加一条
 （后退后再加载会截断前进条目），加载失败则页面、滚动偏移与历史都不变。点击先用滚动偏移换算成
@@ -112,12 +131,12 @@ fontconfig pattern（每个字体族一个 `FC_FAMILY`，`FC_WEIGHT` 经 `FcWeig
 - 一个进程、一个线程、一个事件循环。MVP 中没有工作线程。`render::Font` 在度量/绘制之间缓存可变的 freetype face 字号，因此刻意只支持单线程；不要跨线程共享同一个 `Font`。
 - 页面加载在导航回调中同步执行；加载期间窗口无响应。对玩具项目来说可以接受，只有当真成为问题时才引入异步网络。
 - `net::Fetch` 是接口后面的阻塞调用，因此以后可以替换成非阻塞状态机而不触碰调用方。
-- 平台事件循环等待窗口事件，并把 close/resize/input/paint 请求转发给 `shell`；由 `shell` 决定重绘什么。重绘按需发生（expose、resize、scroll），不靠定时器。
+- 平台事件循环等待窗口事件，并把 close/resize/input/paint 请求转发给 `shell`；由 `shell` 决定重绘什么。重绘按需发生（expose、resize、scroll），不靠定时器。自 M11 起 Expose 只重绘（页面已布局）、resize 只有窗口尺寸真正变化才重排，X11 后端会先合并队列中的 Expose/ConfigureNotify burst 再交付一次重绘/重排请求；输入与 close 事件永不合并或乱序。
 - 没有全局可变状态：应用对象拥有所有模块。
 
 ## 渲染模型
 
-- 只做软件光栅化；没有 GPU，没有渲染线程。
+- 只做软件光栅化；没有 GPU，没有渲染线程。M11 的实测表明填充率不是瓶颈（成本在 shaping/字形处理），因此刻意不引入 GPU 后端；软件缓存与视口裁剪已足够。
 - Surface：32 位 ARGB、straight alpha（非预乘 alpha）、SrcOver 混合、左上角原点。
 - 裁剪是由显示列表命令压入的整数矩形栈；初始裁剪是整个 surface，光栅化器的工作量受裁剪区域限制（因此对抗性输入如超大字号也不会让绘制无界）。
 - `shell` 在绘制前把 canvas 填白；元素的 `background-color` 绘制为该元素的盒（M6 不会把 `html`/`body` 背景传播到 canvas）。

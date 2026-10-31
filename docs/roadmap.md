@@ -3,9 +3,9 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M10 are done (M10 = automatic font selection and Chinese-capable line
-breaking). M11 (HTTP proxy) is the next planned milestone but was deprioritized by the user; the
-JavaScript subset is deferred.** For a snapshot and takeover guide, read [handoff.md](handoff.md).
+**Current status: M0–M11 are done (M11 = performance). M12 (HTTP proxy) is deferred by the user;
+the JavaScript subset is deferred.** For a snapshot and takeover guide, read
+[handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
 
@@ -259,10 +259,10 @@ JavaScript subset is deferred.** For a snapshot and takeover guide, read [handof
   certificate, hostname and timeout failures are explicit errors; every pre-M9 `http`/`file` dump
   and screenshot is byte-identical to the M8b baseline and GCC/Clang PPMs are identical; manual
   public-site checks (raw body, DOM dump, screenshot) work. Real-site checking is manual and
-  network-dependent; restricted networks still need the M11 proxy.
+  network-dependent; restricted networks still need the M12 proxy.
 - Known M9 limits: HTTP/1.1 only (no ALPN/HTTP/2), no compression (no `Accept-Encoding` is sent), no
   cookies/sessions, HSTS, mixed-content blocking, client certificates, TLS session reuse or HTTP
-  caching; no proxy (M11); IPv6 literal https URLs are still unsupported by the URL parser; the
+  caching; no proxy (M12); IPv6 literal https URLs are still unsupported by the URL parser; the
   trust policy is exactly OpenSSL's default store plus the standard env overrides (no pinning, no
   insecure mode); the TLS context is created lazily once per process; real-world rendering stays
   limited by the existing HTML/CSS subset; public-network details are never committed and real-site
@@ -318,7 +318,49 @@ JavaScript subset is deferred.** For a snapshot and takeover guide, read [handof
   `<html lang>`; output with system fonts is machine-dependent by design (tests pin
   `FONTCONFIG_FILE`).
 
-## M11 — HTTP proxy (planned; deferred by the user after M9)
+## M11 — Performance ✅ (done)
+
+- Goal: make large pages responsive without changing any rendered pixel. Measured start point
+  (80x600, automatic system fonts, stress pages: a 4000-paragraph page with 81k text boxes and a
+  1200-paragraph Chinese page with 48k Han boxes): paint 1.3 s (10k words) to 10.6 s (81k boxes)
+  per frame, layout 0.27–2.1 s, scrolling/resizing re-doing all of it every frame; only 0.4% of the
+  text boxes intersect the viewport at any scroll position. Bitmap pages were 3–7x faster than
+  needed because the default build was unoptimised; the window loop also relaid out the page on
+  every Expose and once per resize event without coalescing X11 event bursts.
+- P0 build: the default build type is now optimised (RelWithDebInfo) with `-ffp-contract=off` for
+  deterministic floating point, so layout geometry stays byte-identical across build types and
+  compilers. This alone cut bitmap-path page load/截图 times by 3–7x.
+- P1 text caches (render + shell): reuse one harfbuzz font/face per font/size instead of creating
+  one per shaped run (the fresh hb_face defeated harfbuzz's shape-plan cache), reuse buffers, add
+  bounded LRU caches for shaped runs and glyph coverage bitmaps, and in the shell add a cheap
+  resolved-style fast path plus bounded LRU caches for text metrics and font runs. All caches are
+  private, single-threaded and eviction never changes output.
+- P2 frame/窗口: viewport culling in `paint` (conservative text margin so pixels stay identical;
+  backgrounds/images cull by intersection), and window-loop fixes: Expose no longer triggers a
+  relayout, resize relayouts only when the size actually changed, consecutive Expose/ConfigureNotify
+  events are coalesced, and the paint surface is reused instead of allocated per frame.
+- Acceptance reached: all 66 pre-M11 tests and the byte-compat/cross-compiler gates stay green;
+  fixture-font and bitmap frames are byte-identical to the pre-M11 baseline at 33 scrolled reference
+  frames; the window opens with a single layout. Measured on the 81k-text-box stress page (800x600,
+  automatic system fonts, this machine): frame paint **10.6 s -> 3.5 ms**, scroll **11.0 s ->
+  3.1 ms**, resize frame **11.0 s -> 3.0 ms**, layout **2.1 s -> 31 ms**, page load **2.2 s ->
+  69 ms**; on a 10k-word page paint **1.38 s -> 0.89 ms**, layout **267 ms -> 3.3 ms**, load
+  **290 ms -> 30 ms**; the Chinese stress page paint **3.2 s -> 2.3 ms**, load 1.3 s -> 142 ms
+  (first-use CJK font loading dominates the remaining load time). The bitmap path also improved
+  (culling removes offscreen commands) with no layout regression. Real-window smoke on X11 passed:
+  no stale frame after resize, 40-event configure burst coalesced into 2 relayouts, single layout
+  on first expose, clean close.
+- Known limits after this round: the first frame still pays cold cache costs; culling still walks
+  the whole box tree per frame (cheap, but no spatial index yet); resize is still a full reflow
+  (fast measurement caches, but very large pages may not be perfectly smooth while dragging; no
+  incremental layout); rendering stays single-threaded (no background layout/paint, no parallel
+  resource loading); image loading and real-site network/HTTP performance (keep-alive, gzip,
+  parallel fetch, image cache/lazy loading) stay out of this round; the window still presents the
+  whole surface per frame (XShm/dirty-rect later, needs a new dependency approval); GPU rendering is
+  deliberately not used (measurements show fill rate is not the bottleneck; the costs are
+  algorithmic CPU work).
+
+## M12 — HTTP proxy (planned; deferred by the user after M9)
 
 - Fetch `http://` through an HTTP proxy with absolute-form request targets, and `https://` through
   a proxy `CONNECT` tunnel followed by the TLS handshake.
@@ -333,7 +375,7 @@ JavaScript subset is deferred.** For a snapshot and takeover guide, read [handof
   large optional milestone (lexer, parser, small interpreter, DOM bindings and event handlers);
   do not start it without an explicit user priority decision.
 
-## M12+ — Opportunistic
+## M13+ — Opportunistic
 
 More CSS (flex, tables), forms, better text handling, performance, conformance suites. Each item
 starts only after the previous slice is clean and the user agrees on priority.

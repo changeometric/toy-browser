@@ -15,16 +15,22 @@
 // and 11.2 px (CJK); shaping may be one 26.6 unit off, so the checks use a small
 // tolerance and also compare against the committed faces' own shaped widths.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "support/check.h"
 #include "toy/layout/box.h"
 #include "toy/render/font.h"
+#include "toy/render/surface.h"
+#include "toy/shell/browser.h"
 #include "toy/shell/fonts.h"
 #include "toy/style/computed_style.h"
 
@@ -305,6 +311,317 @@ void TestBitmapFallback(const std::string& fixture_directory) {
   }
 }
 
+// --- M11: private font caches ----------------------------------------------
+
+bool SameMetrics(const TextMetrics& a, const TextMetrics& b) {
+  return a.advance_px == b.advance_px && a.line_height_px == b.line_height_px &&
+         a.ascent_px == b.ascent_px;
+}
+
+bool SameRuns(const std::vector<FontRun>& a, const std::vector<FontRun>& b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (std::size_t index = 0; index < a.size(); ++index) {
+    if (a[index].font != b[index].font || a[index].text != b[index].text) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// One measurement sample: a computed style (different weight/style/family/size
+// plus irrelevant non-font properties), the text and the page language hint.
+struct Sample {
+  ComputedStyle style;
+  std::string text;
+  std::string language;
+};
+
+std::vector<Sample> CacheSamples() {
+  std::vector<Sample> samples;
+  const ComputedStyle base;
+  auto add = [&samples](ComputedStyle style, std::string_view text, std::string_view language) {
+    samples.push_back(Sample{std::move(style), std::string(text), std::string(language)});
+  };
+  add(base, "Hello", "");
+  add(base, kMixedText, "");
+  add(base, kMixedText, "zh-CN");
+  add(base, "Hello", "en");
+  ComputedStyle bold;
+  bold.font_weight = 700;
+  add(bold, "Hello", "");
+  add(bold, kMixedText, "zh-CN");
+  ComputedStyle italic;
+  italic.font_style = FontStyle::kItalic;
+  add(italic, "Hello", "");
+  add(italic, "", "");
+  ComputedStyle large = base;
+  large.font_size_px = 32.0f;
+  add(large, "Hello", "");
+  add(large, kMixedText, "");
+  ComputedStyle small = base;
+  small.font_size_px = 8.0f;
+  add(small, "Hello", "");
+  ComputedStyle named;
+  named.font_family = {"Toy Test Font"};
+  add(named, "ABC", "");
+  ComputedStyle monospace;
+  monospace.font_family = {"monospace"};
+  add(monospace, "ABC", "");
+  // Non-font properties must not affect the font selection cache result.
+  ComputedStyle decorated = base;
+  decorated.color = 0x00FF00;
+  decorated.margin_left = 12.0f;
+  decorated.background_color = 0x11223344;
+  add(decorated, "Hello", "");
+  return samples;
+}
+
+// M11 cache correctness: repeated MeasureText/Runs calls return bit-identical
+// results, and interleaving styles, sizes and languages never cross-contaminates
+// a cache entry. Everything is compared against the same call order on a fresh
+// Fonts object (no warm cache) so a wrong hit is visible.
+void TestFontCaches(const std::string& fixture_directory) {
+  const std::shared_ptr<const Fonts> fonts = Fonts::SystemDefault();
+  toy_test::Check(fonts != nullptr, "SystemDefault is available for the cache checks");
+  if (!fonts) {
+    return;
+  }
+  const ComputedStyle base;
+  const bool bitmap_mode = fonts->Runs("A", base, "").empty();
+  const std::vector<Sample> samples = CacheSamples();
+
+  // First pass: values a warmed cache must reproduce.
+  std::vector<TextMetrics> metrics;
+  std::vector<std::vector<FontRun>> runs;
+  for (const Sample& sample : samples) {
+    metrics.push_back(fonts->MeasureText(sample.text, sample.style, sample.language));
+    if (!bitmap_mode) {
+      runs.push_back(fonts->Runs(sample.text, sample.style, sample.language));
+    }
+  }
+
+  // Repeated identical calls (metrics are served from the cache, so they must be
+  // bit-identical to the computed fresh result).
+  for (std::size_t index = 0; index < samples.size(); ++index) {
+    const Sample& sample = samples[index];
+    toy_test::Check(
+        SameMetrics(metrics[index], fonts->MeasureText(sample.text, sample.style, sample.language)),
+        "a repeated MeasureText result is bit-identical (metrics cache)");
+    if (!bitmap_mode) {
+      toy_test::Check(
+          SameRuns(runs[index], fonts->Runs(sample.text, sample.style, sample.language)),
+          "a repeated Runs result is identical (run cache, same faces and texts)");
+    }
+  }
+
+  // Reverse order: the caches are keyed by style/size/language/text, so mixing
+  // the samples in a different order must return the same values.
+  for (std::size_t index = samples.size(); index-- > 0;) {
+    const Sample& sample = samples[index];
+    toy_test::Check(
+        SameMetrics(metrics[index], fonts->MeasureText(sample.text, sample.style, sample.language)),
+        "interleaved styles/sizes/languages do not cross-contaminate metrics");
+    if (!bitmap_mode) {
+      toy_test::Check(
+          SameRuns(runs[index], fonts->Runs(sample.text, sample.style, sample.language)),
+          "interleaved styles/sizes/languages do not cross-contaminate runs");
+    }
+  }
+
+  // A fresh object (cold caches) computes exactly the same values for the same
+  // configured font set: the caches cannot change behavior.
+  const std::shared_ptr<const Fonts> cold = Fonts::SystemDefault();
+  if (cold) {
+    for (std::size_t index = 0; index < samples.size(); ++index) {
+      const Sample& sample = samples[index];
+      toy_test::Check(SameMetrics(metrics[index],
+                                  cold->MeasureText(sample.text, sample.style, sample.language)),
+                      "a cold Fonts object measures the same metrics as the warm cache");
+      if (!bitmap_mode) {
+        const std::vector<FontRun> cold_runs =
+            cold->Runs(sample.text, sample.style, sample.language);
+        bool same_shape = cold_runs.size() == runs[index].size();
+        for (std::size_t run = 0; same_shape && run < cold_runs.size(); ++run) {
+          same_shape = cold_runs[run].text == runs[index][run].text &&
+                       std::fabs(cold_runs[run].font->MeasureTextWidth(cold_runs[run].text,
+                                                                       sample.style.font_size_px) -
+                                 runs[index][run].font->MeasureTextWidth(
+                                     runs[index][run].text, sample.style.font_size_px)) <= 0.001f;
+        }
+        toy_test::Check(same_shape, "a cold Fonts object selects the same runs as the run cache");
+      }
+    }
+  }
+
+  // Different font sizes are distinct cache entries, and scaling is preserved.
+  const std::string scaled_text = "A";
+  ComputedStyle half = base;
+  half.font_size_px = 16.0f;
+  ComputedStyle doubled = base;
+  doubled.font_size_px = 32.0f;
+  const float at_16 = fonts->MeasureText(scaled_text, half, "").advance_px;
+  const float at_32 = fonts->MeasureText(scaled_text, doubled, "").advance_px;
+  toy_test::Check(at_16 > 0.0f && NearlyEqual(at_32, 2.0f * at_16),
+                  "the metrics cache separates font sizes (32 px advances twice 16 px)");
+
+  // Different weights remain distinct entries: bold text has its own advance.
+  if (!bitmap_mode) {
+    ComputedStyle bold = base;
+    bold.font_weight = 700;
+    const float regular_advance = fonts->MeasureText(scaled_text, base, "").advance_px;
+    const float bold_advance = fonts->MeasureText(scaled_text, bold, "").advance_px;
+    toy_test::Check(std::fabs(bold_advance - regular_advance) > 0.01f,
+                    "the run/metrics caches separate font weights");
+  }
+
+  // FromFile mode also caches metrics; repeating the call is identical and the
+  // single-face runs are unchanged.
+  std::string error;
+  const std::shared_ptr<const Fonts> single =
+      Fonts::FromFile(fixture_directory + "/toy_test.ttf", &error);
+  toy_test::Check(single != nullptr, "FromFile is available for the file-mode cache checks");
+  if (single) {
+    const TextMetrics first = single->MeasureText(kMixedText, base, "");
+    const TextMetrics second = single->MeasureText(kMixedText, base, "");
+    toy_test::Check(SameMetrics(first, second), "FromFile metrics are identical when repeated");
+    ComputedStyle twice = base;
+    twice.font_size_px = 32.0f;
+    toy_test::Check(!SameMetrics(first, single->MeasureText(kMixedText, twice, "")),
+                    "FromFile metrics are cached per font size, not shared across sizes");
+    const std::vector<FontRun> single_runs = single->Runs(kMixedText, base, "");
+    toy_test::Check(single_runs.size() == 1 && single_runs[0].text == kMixedText,
+                    "FromFile Runs still returns one run for the whole text");
+  }
+}
+
+// --- M11: the visible frame does not depend on off-screen content -----------
+
+bool WriteTestPage(const std::string& file_name, const std::string& html, std::string* url) {
+  const std::filesystem::path path = std::filesystem::current_path() / file_name;
+  std::ofstream file(path, std::ios::binary);
+  if (!file) {
+    return false;
+  }
+  file << html;
+  if (!file) {
+    return false;
+  }
+  *url = "file://" + path.string();
+  return true;
+}
+
+void RemoveTestPage(const std::string& file_name) {
+  std::error_code error;
+  std::filesystem::remove(std::filesystem::current_path() / file_name, error);
+}
+
+using Pixels = std::vector<toy::render::Argb>;
+
+Pixels PaintFrame(toy::shell::Browser& browser, int width, int height) {
+  toy::render::Surface surface(width, height);
+  browser.Paint(surface);
+  Pixels pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+  std::copy_n(surface.pixels(), pixels.size(), pixels.begin());
+  return pixels;
+}
+
+bool SamePixels(const Pixels& a, const Pixels& b) {
+  return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin());
+}
+
+// M11 acceptance: a page with a lot of extra content below the fold must render
+// its first viewport byte-identically to the same page without that content, and
+// scrolled frames must be deterministic across sessions (the culling and the
+// font caches never change a pixel). `suffix` keeps the two CTest runs of this
+// executable (fixture config and empty bitmap config) from sharing temp files.
+void TestVisibleFrameIgnoresOffscreenContent(const std::string& suffix) {
+  constexpr int kWidth = 320;
+  constexpr int kHeight = 200;
+  const std::shared_ptr<const Fonts> fonts = Fonts::SystemDefault();
+  toy_test::Check(fonts != nullptr, "SystemDefault is available for the frame test");
+  if (!fonts) {
+    return;
+  }
+  const std::string head = "<!doctype html><html><head><title>frame</title></head><body>";
+  const std::string visible_content =
+      "<div style=\"background-color: #336699; height: 40px; width: 200px\"></div>"
+      "<p style=\"font-size: 20px\">Visible ABC</p>"
+      "<p><b>Bold</b> and <i>italic</i> text</p>"
+      "<p>\u4e2d\u6587 visible</p>";
+  std::string offscreen_content;
+  for (int index = 0; index < 300; ++index) {
+    offscreen_content += "<p>Offscreen paragraph ";
+    offscreen_content += std::to_string(index);
+    offscreen_content += " quick brown fox jumps over the lazy dog</p>";
+    if (index % 10 == 0) {
+      offscreen_content += "<div style=\"background-color: #101820; height: 150px\"></div>";
+    }
+  }
+  const std::string visible_name = "font_selection_visible_" + suffix + ".html";
+  const std::string tall_name = "font_selection_tall_" + suffix + ".html";
+  std::string visible_url;
+  std::string tall_url;
+  const bool written =
+      WriteTestPage(visible_name, head + visible_content + "</body></html>", &visible_url) &&
+      WriteTestPage(tall_name, head + visible_content + offscreen_content + "</body></html>",
+                    &tall_url);
+  toy_test::Check(written, "the visible/tall frame fixture pages are written");
+  if (!written) {
+    RemoveTestPage(visible_name);
+    RemoveTestPage(tall_name);
+    return;
+  }
+
+  std::string error;
+  toy::shell::Browser visible(kWidth, kHeight, fonts);
+  toy::shell::Browser tall(kWidth, kHeight, fonts);
+  toy_test::Check(visible.Open(visible_url, &error), "the visible-content page loads");
+  toy_test::Check(tall.Open(tall_url, &error), "the tall page loads");
+  if (!visible.has_page() || !tall.has_page()) {
+    RemoveTestPage(visible_name);
+    RemoveTestPage(tall_name);
+    return;
+  }
+  toy_test::Check(tall.content_height() > visible.content_height(),
+                  "the tall page has content below the fold");
+  toy_test::Check(tall.content_height() > kHeight, "the tall page scrolls");
+
+  const Pixels visible_frame = PaintFrame(visible, kWidth, kHeight);
+  const Pixels tall_frame = PaintFrame(tall, kWidth, kHeight);
+  if (!SamePixels(visible_frame, tall_frame)) {
+    std::fprintf(stderr,
+                 "font selection test: off-screen content changed the visible frame pixels\n");
+  }
+  toy_test::Check(SamePixels(visible_frame, tall_frame),
+                  "extra content below the fold does not change the visible frame pixels");
+  toy_test::Check(SamePixels(tall_frame, PaintFrame(tall, kWidth, kHeight)),
+                  "a repeated frame is identical once the caches are warm");
+
+  // Same page, same scroll offset, fresh session: scrolling is deterministic.
+  toy::shell::Browser tall_again(kWidth, kHeight, fonts);
+  toy_test::Check(tall_again.Open(tall_url, &error), "the tall page opens in a second session");
+  if (tall_again.has_page()) {
+    const bool scrolled = tall.ScrollBy(400);
+    const bool scrolled_again = tall_again.ScrollBy(400);
+    toy_test::Check(scrolled && scrolled_again && tall.scroll_y() == tall_again.scroll_y(),
+                    "both sessions scroll to the same offset");
+    const Pixels first_scroll = PaintFrame(tall, kWidth, kHeight);
+    const Pixels second_scroll = PaintFrame(tall_again, kWidth, kHeight);
+    if (!SamePixels(first_scroll, second_scroll)) {
+      std::fprintf(stderr, "font selection test: a scrolled frame differs between two sessions\n");
+    }
+    toy_test::Check(SamePixels(first_scroll, second_scroll),
+                    "a scrolled frame is identical across two sessions");
+    toy_test::Check(!SamePixels(first_scroll, tall_frame),
+                    "scrolling reveals content that was below the fold");
+  }
+
+  RemoveTestPage(visible_name);
+  RemoveTestPage(tall_name);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -321,6 +638,8 @@ int main(int argc, char** argv) {
                   "the CJK fixture font loads");
   if (bitmap_mode) {
     TestBitmapFallback(fixture_directory);
+    TestFontCaches(fixture_directory);
+    TestVisibleFrameIgnoresOffscreenContent("bitmap");
     return toy_test::Finish("font selection (bitmap)");
   }
 
@@ -333,5 +652,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   TestSystemFonts(fixture_directory, regular, bold, italic, cjk);
+  TestFontCaches(fixture_directory);
+  TestVisibleFrameIgnoresOffscreenContent("system");
   return toy_test::Finish("font selection");
 }

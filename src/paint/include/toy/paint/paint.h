@@ -84,6 +84,14 @@ using FontRunsProvider = std::function<std::vector<FontRun>(const style::Compute
 // with its translated y, and the last command is PopClip. This clipping is what
 // stops scrolled content from painting outside the viewport; it is frozen paint
 // behavior (M7) and asserted by the paint tests.
+//
+// Since M11 the list is culled: a background FillRect or DrawImage is emitted
+// only when its device-pixel destination rectangle intersects the viewport, and
+// a text box only when its box expanded by 2 * font_size_px on every side
+// intersects it (a conservative margin covering glyph overhang, anti-aliasing
+// and rounding). Culling is purely an optimization: every dropped command would
+// have been rasterized to no pixels, so the rendered pixels are identical to an
+// unculled list and the relative order of the emitted commands is unchanged.
 render::DisplayList BuildDisplayList(const dom::Document& document, const style::StyleTree& styles,
                                      const layout::BoxTree& boxes, const Viewport& viewport,
                                      const ImageMap& images, const FontRunsProvider& font_runs);

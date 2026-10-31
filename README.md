@@ -2,9 +2,13 @@
 
 A toy web browser built from scratch: C++20, CMake, and no ready-made browser components.
 
-**Status: M10 — automatic font selection.** The browser fetches `http://`, `https://` and
-`file://` URLs (`https://` uses the approved OpenSSL library with certificate and hostname
-verification always on, no insecure mode) and renders pages headlessly or in an X11 window. Without
+**Status: M11 — performance.** The browser fetches `http://`, `https://` and `file://` URLs
+(`https://` uses the approved OpenSSL library with certificate and hostname verification always on,
+no insecure mode) and renders pages headlessly or in an X11 window. M11 made large pages responsive
+without changing a pixel: the default build is optimised, real fonts are shaped/rasterized through
+bounded caches, painting is culled to the viewport, and the window loop no longer relayouts on every
+expose/resize event (measured on a stress page: frame 10.6 s -> 3.5 ms, layout 2.1 s -> 31 ms).
+Rendering stays software-only and single-threaded; there is no GPU backend on purpose. Without
 any font flag it picks fonts the way a normal browser does: the computed CSS
 `font-family`/`font-weight`/`font-style` are matched through the approved fontconfig library (the
 initial family is `serif`), and text whose preferred face lacks characters falls back to an
@@ -14,7 +18,7 @@ units, so Chinese pages are readable without spaces and wrap normally. `--font P
 degrades to the built-in bitmap font. Real text is anti-aliased (freetype + harfbuzz), `<img
 src="...png">` images are decoded with libpng, links are clickable in the window, the wheel and
 keyboard scroll, Alt+Left/Right move through history and the title follows `<title>`. **Next
-planned milestone: M11 — HTTP proxy** (deprioritized by the user; design sketch in the
+planned milestone: M12 — HTTP proxy** (deprioritized by the user; design sketch in the
 [roadmap](docs/roadmap.md)). Committed demos:
 [`tests/fixtures/cjk_site/`](tests/fixtures/cjk_site/) for automatic fonts + readable Chinese,
 [`tests/fixtures/font_site/`](tests/fixtures/font_site/) for explicit real text + images,

@@ -9,6 +9,13 @@
 // buttons 4 and 5 become kMouseWheel with -1 (up) and +1 (down, towards the end
 // of the document). SetTitle writes _NET_WM_NAME as UTF8_STRING and WM_NAME
 // through XStoreName as a fallback.
+//
+// WaitEvent coalesces bursts of redraw/geometry events: consecutive Expose
+// events become one kExpose and consecutive ConfigureNotify events become one
+// kResize carrying the final size (a burst that leaves the size unchanged
+// produces no event at all). Input and close events are never merged, dropped or
+// reordered: a lookahead buffer holds the first non-matching event and delivers
+// it on the next call.
 
 #include "toy/platform/window.h"
 
@@ -21,6 +28,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <string>
@@ -169,7 +177,7 @@ class X11Window final : public Window {
     }
     for (;;) {
       XEvent xevent;
-      if (XNextEvent(display_, &xevent) != 0) {
+      if (!NextRawEvent(&xevent)) {
         std::fprintf(stderr, "toybrowser: XNextEvent failed, treating the window as closed\n");
         closed_ = true;
         event->type = EventType::kClose;
@@ -179,17 +187,39 @@ class X11Window final : public Window {
       }
       switch (xevent.type) {
         case Expose:
+          // X reports damage per region; one repaint covers them all, so merge a
+          // burst of consecutive Expose events into a single kExpose.
+          DrainConsecutiveEvents(Expose);
           event->type = EventType::kExpose;
           event->width = width_;
           event->height = height_;
           return true;
-        case ConfigureNotify:
+        case ConfigureNotify: {
+          // A resize drag produces a burst of consecutive ConfigureNotify events;
+          // merge them into one kResize carrying the final size. A burst that
+          // leaves the size unchanged reports no event: keep waiting (blocking,
+          // as before) so the caller never relayouts for a no-op configure.
+          const int previous_width = width_;
+          const int previous_height = height_;
           width_ = xevent.xconfigure.width;
           height_ = xevent.xconfigure.height;
+          XEvent next;
+          while (TryRawEvent(&next)) {
+            if (next.type != ConfigureNotify) {
+              pending_.push_front(next);
+              break;
+            }
+            width_ = next.xconfigure.width;
+            height_ = next.xconfigure.height;
+          }
+          if (width_ == previous_width && height_ == previous_height) {
+            continue;
+          }
           event->type = EventType::kResize;
           event->width = width_;
           event->height = height_;
           return true;
+        }
         case KeyPress: {
           // index 0 is the unshifted keysym; Shift is reported separately.
           const KeySym keysym = XLookupKeysym(&xevent.xkey, 0);
@@ -242,6 +272,44 @@ class X11Window final : public Window {
   int height() const override { return height_; }
 
  private:
+  // Pops the next raw X event, preferring the single lookahead slot over Xlib.
+  // Blocks when no event is queued. Returns false when Xlib fails.
+  bool NextRawEvent(XEvent* event) {
+    if (!pending_.empty()) {
+      *event = pending_.front();
+      pending_.pop_front();
+      return true;
+    }
+    return XNextEvent(display_, event) == 0;
+  }
+
+  // Pops the next raw X event only when one is already available (lookahead
+  // slot or the Xlib queue). Never blocks; false means nothing is queued now.
+  bool TryRawEvent(XEvent* event) {
+    if (!pending_.empty()) {
+      *event = pending_.front();
+      pending_.pop_front();
+      return true;
+    }
+    if (XPending(display_) <= 0) {
+      return false;
+    }
+    return XNextEvent(display_, event) == 0;
+  }
+
+  // Consumes consecutive already-queued events of `type` after the current one.
+  // The first event of another type is put back into the lookahead slot, so only
+  // consecutive same-kind events are merged and later input keeps its order.
+  void DrainConsecutiveEvents(int type) {
+    XEvent next;
+    while (TryRawEvent(&next)) {
+      if (next.type != type) {
+        pending_.push_front(next);
+        return;
+      }
+    }
+  }
+
   Display* display_;
   ::Window window_ = 0;
   GC gc_ = nullptr;
@@ -254,6 +322,8 @@ class X11Window final : public Window {
   Atom net_wm_name_ = None;
   Atom utf8_string_ = None;
   bool closed_ = false;
+  // Raw events read from Xlib while coalescing a burst but not yet delivered.
+  std::deque<XEvent> pending_;
 };
 
 }  // namespace

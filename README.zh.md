@@ -2,15 +2,17 @@
 
 一个从零实现的玩具网页浏览器：C++20、CMake，不使用现成的浏览器组件。
 
-**状态：M10 —— 自动字体选择。** 浏览器可抓取 `http://`、`https://` 与 `file://` 页面（`https://`
-使用已批准的 OpenSSL，证书与主机名校验始终开启，没有 insecure 模式），并可在窗口或 headless
-模式下绘制页面。不传任何字体标志时，浏览器像普通浏览器一样自己选择字体：计算出的 CSS
+**状态：M11 —— 性能。** 浏览器可抓取 `http://`、`https://` 与 `file://` 页面（`https://` 使用
+已批准的 OpenSSL，证书与主机名校验始终开启，没有 insecure 模式），并可在窗口或 headless 模式下
+绘制页面。M11 在不改变任何像素的前提下让大页面响应流畅：默认构建改为优化构建；真实字体通过有界
+缓存做整形/光栅化；绘制按视口裁剪；窗口循环不再对每次 Expose/resize 事件重排（压力页实测：单帧
+10.6 s -> 3.5 ms，布局 2.1 s -> 31 ms）。渲染仍是软件、单线程；刻意不使用 GPU 后端。不传任何字体标志时，浏览器像普通浏览器一样自己选择字体：计算出的 CSS
 `font-family`/`font-weight`/`font-style` 通过已批准的 fontconfig 库匹配（初始字体族 `serif`），
 首选字体缺少的字符回退到覆盖它的已安装字体。布局把文本切成 run，并给 CJK 文本独立的断行单元，
 因此没有空格的中文页面也能阅读、正常换行。`--font PATH` 与 `--font-family NAME` 仍是显式覆盖；
 没有可用系统字体时退化到内置位图字体。真实文本抗锯齿（freetype + harfbuzz），
 `<img src="...png">` 图片由 libpng 解码，窗口中链接可点击、滚轮与键盘可滚动、Alt+Left/Right 在
-历史中前进后退、窗口标题跟随 `<title>`。**下一计划里程碑：M11 —— HTTP 代理**（用户已降低优先级；
+历史中前进后退、窗口标题跟随 `<title>`。**下一计划里程碑：M12 —— HTTP 代理**（用户已降低优先级；
 设计草案见[路线图](docs/zh/roadmap.md)）。仓库中的演示站点：
 [`tests/fixtures/cjk_site/`](tests/fixtures/cjk_site/)（自动字体 + 可读中文）、
 [`tests/fixtures/font_site/`](tests/fixtures/font_site/)（显式真实字体 + 图片）、

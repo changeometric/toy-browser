@@ -421,3 +421,30 @@ the round when possible. Clean up stale build directories and stray files.
 - M10: manual real-site checks (no font flags, system fonts) confirmed fallback and wrapping while
   also exposing the pre-existing limits (external stylesheets still unimplemented, etc.); such
   checks stay manual and their network/site details never enter the repository.
+- M11: the round started with measurements, not code: a throwaway benchmark (stage timings, scroll/resize
+  frames, a callgrind profile and microbenchmarks) showed the real costs were missing text caches,
+  O(page) work per frame and an unoptimised default build — not fill rate. Decide "GPU or not" from
+  measured bottlenecks; in this case GPU was rejected with data (same raster time at 800x600 and
+  1600x1000, text work dominated by shaping/glyph loading).
+- M11: the Lead froze the work as three disjoint tasks before spawning (render caches, paint+shell
+  caches, platform/window loop), which let three implementers run in parallel on disjoint files; the
+  main coordination cost was that full-tree gates only became meaningful once all three landed.
+- M11: a default `RelWithDebInfo` build with `-ffp-contract=off` was a one-line configuration change
+  that removed 3-7x of measured bitmap-path cost while keeping every output byte-identical; verify
+  such build changes with the full test suite, byte-compat gate and GCC/Clang PPM equality, never by
+  assuming optimisation is output-neutral for floating-point layout.
+- M11: the render owner first proved hb_font reuse equivalence with a standalone harness (7 fonts,
+  14 sizes, CJK/Cyrillic/kerning, interleaved sizes) and then with a 5463-case old-vs-new exact
+  comparison before relying on it; caches must be proven output-neutral, not assumed.
+- M11: culling and cache tests deliberately compared against unculled/cold references (edge text,
+  italic/AA overhang, images, tall backgrounds, a 1 px viewport sweep whose oracle was verified by
+  injecting an off-by-one bug) instead of only asserting "it is faster"; a conservative
+  `ceil(2 * font_size_px)` text margin is documented in the contract.
+- M11: the window-loop owner removed a latent double layout (Browser::Open plus first Expose) and
+  coalesced X11 event bursts; because queue/window behavior cannot be unit-tested headlessly, the
+  evidence was a throwaway libX11 smoke that injected resize bursts/exposes and temporary
+  instrumentation (removed afterwards). Keep that habit for event-loop changes.
+- M11: the before/after benchmark harness and scrolled-frame reference generator stayed in `.tmp`
+  (uncommitted); the delivery gates were full GCC/Clang WERROR tests, the bitmap byte-compat gate,
+  and a 33-frame scrolled-screenshot comparison against the pre-M11 binaries. Do not add wall-time
+  assertions to CTest; performance evidence belongs in the round report.

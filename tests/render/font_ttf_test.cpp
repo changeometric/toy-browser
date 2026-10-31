@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "support/check.h"
 #include "toy/render/font.h"
@@ -191,6 +192,80 @@ void TestMeasureTextWidth(const Font& font) {
                   "repeated measurements are identical");
 }
 
+// The render-side shaped-run cache (M11) must be invisible in the numbers: a
+// fresh Font, a cache-warm Font and the same Font after far more distinct
+// (size, text) pairs than the documented budget all report bit-identical
+// widths. Eviction may make a later call slower; it must never change a value.
+void TestCacheDoesNotChangeMeasurements(const std::string& directory) {
+  std::string error;
+  const std::shared_ptr<const Font> warm = Font::LoadFromFile(directory + "/toy_test.ttf", &error);
+  const std::shared_ptr<const Font> fresh = Font::LoadFromFile(directory + "/toy_test.ttf", &error);
+  toy_test::Check(warm != nullptr && fresh != nullptr,
+                  "the fixture font loads twice for the cache tests");
+  if (warm == nullptr || fresh == nullptr) {
+    return;
+  }
+
+  const char* const kTexts[] = {"A",          "ABC", "Hello, World!",           "aa bb cc",
+                                "0123456789", "?",   "\xe4\xbd\xa0\xe5\xa5\xbd"};
+  const float kSizes[] = {1.0f,  8.0f,  11.0f, 12.5f,  13.3333f,          16.0f,
+                          16.5f, 32.0f, 64.0f, 123.5f, kMaxRealFontSizePx};
+  std::vector<float> baseline;
+  for (const char* text : kTexts) {
+    for (float size : kSizes) {
+      baseline.push_back(warm->MeasureTextWidth(text, size));
+    }
+  }
+
+  // Repeating the same measurements must reuse the cache without changing a bit.
+  std::size_t index = 0;
+  bool repeat_equal = true;
+  for (const char* text : kTexts) {
+    for (float size : kSizes) {
+      repeat_equal = repeat_equal && warm->MeasureTextWidth(text, size) == baseline[index++];
+    }
+  }
+  toy_test::Check(repeat_equal, "repeated measurements from a warm cache are bit-identical");
+
+  // A fresh instance (empty caches) must agree bit for bit: shaping results are
+  // a property of the font file and size, not of the cache state.
+  index = 0;
+  bool fresh_equal = true;
+  for (const char* text : kTexts) {
+    for (float size : kSizes) {
+      fresh_equal = fresh_equal && fresh->MeasureTextWidth(text, size) == baseline[index++];
+    }
+  }
+  toy_test::Check(fresh_equal, "a fresh Font measures exactly like a cache-warm one");
+
+  // 20000 distinct texts at 17 distinct sizes evict the documented shaped-run
+  // entry budget (16384 entries) several times over. Re-check the early results.
+  for (int i = 0; i < 20000; ++i) {
+    const std::string text = "stress" + std::to_string(i);
+    (void)warm->MeasureTextWidth(text, 9.0f + static_cast<float>(i % 17));
+  }
+  index = 0;
+  bool evicted_equal = true;
+  for (const char* text : kTexts) {
+    for (float size : kSizes) {
+      evicted_equal = evicted_equal && warm->MeasureTextWidth(text, size) == baseline[index++];
+    }
+  }
+  toy_test::Check(evicted_equal,
+                  "evicting the shaped-run cache does not change earlier measurements");
+
+  // A fresh font still agrees after the stress: the cache cannot leak state.
+  index = 0;
+  bool fresh_after_stress = true;
+  for (const char* text : kTexts) {
+    for (float size : kSizes) {
+      fresh_after_stress =
+          fresh_after_stress && fresh->MeasureTextWidth(text, size) == baseline[index++];
+    }
+  }
+  toy_test::Check(fresh_after_stress, "cache stress on one Font never affects another Font");
+}
+
 void TestFontFromFileAndMemoryAgree(const std::string& directory) {
   const std::optional<std::string> bytes = ReadFile(directory + "/toy_test.ttf");
   if (!bytes.has_value()) {
@@ -260,6 +335,7 @@ int main(int argc, char** argv) {
     TestMetrics(*font);
     TestMeasureTextWidth(*font);
     TestSizeClamp(*font);
+    TestCacheDoesNotChangeMeasurements(directory);
   }
   return toy_test::Finish("render.font_ttf");
 }

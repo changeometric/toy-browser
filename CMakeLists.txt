@@ -8,6 +8,16 @@ project(toybrowser
 # Nothing in the build may depend on one machine's paths, toolchain version or
 # installed package set: only a conforming C++20 compiler and CMake are assumed.
 
+# Default to an optimised build. The browser is CPU-bound (text shaping, layout,
+# rasterization); an unoptimised default made normal pages several times slower.
+# Single-config generators only: multi-config generators choose per-config types.
+# Override with -DCMAKE_BUILD_TYPE=Debug/Release/... as usual.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
+      "Build type (defaults to RelWithDebInfo; pass Debug/Release/... to override)" FORCE)
+  message(STATUS "toybrowser: defaulting CMAKE_BUILD_TYPE to RelWithDebInfo")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -31,6 +41,9 @@ endif()
 function(toybrowser_set_warnings target)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow)
+    # Deterministic floating point: optimisation must not fuse multiply-adds,
+    # so layout geometry stays byte-identical across build types and compilers.
+    target_compile_options(${target} PRIVATE -ffp-contract=off)
     if(TOYBROWSER_WERROR)
       target_compile_options(${target} PRIVATE -Werror)
     endif()

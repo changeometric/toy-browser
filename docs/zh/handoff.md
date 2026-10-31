@@ -22,10 +22,11 @@
 | M8b | 真实字体：冻结 pimpl 后的 `render::Font`（freetype 度量/光栅化 + harfbuzz 整形、4096 px 有效字号上限）、按基线放置的抗锯齿 `DrawTextWithFont`、`--font PATH` / `--font-family NAME`（fontconfig）选择、自造字体 fixture 与 `tests/fixtures/font_site/`、55 个测试；位图路径保持逐字节不变 |
 | M9 | `https://` 抓取：`net` URL 层接受 https（默认端口 443）；保持阻塞 `Fetch()` 不变，内部接入 OpenSSL TLS 传输，并通过私有字节流抽象与 HTTP/1.1 代码共用；证书与主机名校验始终开启并使用 OpenSSL 默认信任库（无 insecure 模式）、SNI、沿用现有超时；重定向改用 `net::ResolveUrl`（相对/协议相对、http<->https）；提交测试 CA/叶证书、进程内 TLS loopback 服务器、`net.tls` + `shell.https` 端到端测试、57 个测试；http/file 输出逐字节不变 |
 | M10 | 自动字体选择：CSS `font-family`/`font-weight`/`font-style` 通过已批准的 fontconfig 匹配，初始字体族 `serif`，按码点字符覆盖切分 run 实现回退（拉丁页面上的汉字，反之亦然），根 `<html lang>` 作为 fontconfig 语言提示；共享的 `shell::Fonts` 对象同时驱动布局度量与绘制（`TextMetrics::ascent_px`、`Box::baseline_offset_px`、`paint::FontRunsProvider`）；layout 中加入简化的 CJK 断行单元，使中文段落可换行；提交了常规/粗体/斜体/汉字 fixture 字体与确定性的 fixture/空 fontconfig 测试配置；保留 `--font`/`--font-family` 覆盖；位图路径仍是逐字节相同的退化路径；66 个测试 |
+| M11 | 性能：默认 RelWithDebInfo 构建 + `-ffp-contract=off`；render 文本缓存（每个字体复用一个 hb_font/hb_buffer，有界 shaped-run 与 glyph 覆盖率 LRU）；shell 字体缓存（无分配的解析样式快速路径、度量与 run LRU）；paint 视口裁剪（文本保守余量）；窗口循环修正（Expose 不重排、resize 仅尺寸变化时重排、合并 X11 Expose/ConfigureNotify burst、复用 surface）；渲染逐字节不变；66 个测试 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-**下一计划里程碑：M11 —— HTTP 代理（已计划，尚未开始；用户已降低优先级）。** M10（自动字体选择，
-含可读中文文本）已交付。M11 通过 `FetchOptions` 支持 HTTP 代理（`http` 用 absolute-form，`https`
+**下一计划里程碑：M12 —— HTTP 代理（已计划，尚未开始；用户已降低优先级）。** M11（性能）已
+交付。M12 通过 `FetchOptions` 支持 HTTP 代理（`http` 用 absolute-form，`https`
 用 `CONNECT`）；用户表示代理目前不重要，后续工作按其优先级安排。JavaScript 子集已暂缓。
 
 尚未实现：代理（计划 M11）、JavaScript（已暂缓）、外部样式表、border、水平滚动/滚动条、
@@ -57,7 +58,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-预期：66/66 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。
+预期：66/66 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -125,7 +126,7 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 # 方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right 前进后退；窗口标题跟随 <title>。
 ```
 
-## 下一轮：M11 —— HTTP 代理（已计划；等用户确认后开始）
+## 下一轮：M12 —— HTTP 代理（已计划；等用户确认后开始）
 
 **状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M11 代码。M10 已完成且全绿，因此
 起点就是当前 HEAD；用户降低了代理优先级，开始前先确认。
@@ -154,11 +155,13 @@ bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
   `src/render/include/toy/render/image.h` —— `Image` 与基于 libpng 的 `DecodePng`；
   `src/render/include/toy/render/font.h` —— 位图字体度量加真实 `Font` API（加载、度量、整形 advance；
   公开头文件不含 freetype/harfbuzz 类型），实现位于 `src/render/font_ttf.cpp`；显示列表与光栅化器在
-  `toy/render/paint.h`，`src/paint/` 从盒树构建列表且不光栅化。字体选择位于
-  `src/shell/fonts.h`/`fonts.cpp`（`Fonts` pimpl：fontconfig 匹配、run 回退、缓存），它是唯一使用
-  fontconfig 的地方；`src/shell/application.cpp` 每次运行根据 `--font`/`--font-family` 或自动系统
-  默认构建一个 `Fonts`。`layout` 通过 `shell` 提供的回调消费文本度量，自身不依赖 `render`；
-  `src/layout/text_break.cpp` 拥有断行单元分词器（单词加 CJK 单元与标点禁则）。
+  `toy/render/paint.h`，`src/paint/` 从盒树构建列表且不光栅化（M11：`src/paint/paint.cpp` 的
+  视口裁剪）。字体选择位于 `src/shell/fonts.h`/`fonts.cpp`（`Fonts` pimpl：fontconfig 匹配、run
+  回退、M11 私有解析样式/度量/run 缓存），它是唯一使用 fontconfig 的地方；`src/shell/application.cpp`
+  每次运行根据 `--font`/`--font-family` 或自动系统默认构建一个 `Fonts`。`src/render/font_ttf.cpp`
+  含 M11 的 shaped-run/glyph 覆盖率缓存与私有 `src/render/font_cache_internal.h` LRU；`src/platform/window.cpp`
+  合并 X11 Expose/ConfigureNotify burst（M11）。`layout` 通过 `shell` 提供的回调消费文本度量，自身
+  不依赖 `render`；`src/layout/text_break.cpp` 拥有断行单元分词器（单词加 CJK 单元与标点禁则）。
 - `tests/<module>/` —— 每个主题一个可执行文件，注册到 CTest；新测试使用 header-only 的
   `tests/support/check.h`。提交的 fixtures：`tests/fixtures/nav_site/`（三页导航演示；它的
   “Unsupported page” 链接是故意的不支持 scheme 用例，任何测试都不会访问公网）、
@@ -177,7 +180,7 @@ bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
 ## 冻结契约（不要随意改动）
 
 - CLI 模式、标志与退出码：`0` 成功，`1` 运行时错误，`2` 用法错误。可选的位置参数页面 URL（`toybrowser [options] [url]`）只用于窗口模式和 `--screenshot`；最多一个 URL，不能与 `--dump-*` 模式组合，不给 URL 时保留 M1 占位页。M8b 新增 `--font PATH` 与 `--font-family NAME`：各自需要非空参数，二者互斥，且与 `--dump-body`/`--dump-dom`/`--dump-style` 组合是用法错误（退出码 2）；允许与窗口模式、`--screenshot`、`--dump-boxes` 组合。选中的字体无法加载/解析是运行时错误（退出码 1）。两个标志都不给时浏览器使用自动系统字体（M10：计算出的 CSS 字体族/weight/style 经 fontconfig，带字符回退）；只有没有可用系统字体时才退化到内置位图字体。`--font PATH` 保持单一精确 face、无回退；`--font-family NAME` 强制首选字体族并保留字符回退，且自 M10 起也遵循计算出的 weight/style。
-- Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。style dump 自 M10 起在 `font-style=` 之后有 `font-family=` 字段：项之间用 ", " 连接，匹配 `[A-Za-z0-9_-]+` 的项原样输出，否则用双引号包裹并以反斜杠转义 `\` 与 `"`。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层。
+- Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。style dump 自 M10 起在 `font-style=` 之后有 `font-family=` 字段：项之间用 ", " 连接，匹配 `[A-Za-z0-9_-]+` 的项原样输出，否则用双引号包裹并以反斜杠转义 `\` 与 `"`。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层，格式在 M10/M11 均未改变（CJK 文本只是每个断行单元一个文本盒）。
 - 布局语义通过布局测试与 M5/M8a/M10 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，换行发生在空白处以及 M10 的 CJK 断行单元（每个 CJK 字符一个单元、简化标点禁则；拉丁词永不拆开、没有完整 UAX#14/词典断行）。自 M10 起 `MeasureText` 回调也收到文本的 `style::ComputedStyle`；`TextMetrics` 携带 `ascent_px`，每个文本盒携带 `baseline_offset_px` = 行最大 ascent（只是元数据，不参与 dump）。M8a replaced 元素：`LayoutOptions::replaced_sizes`（DOM 节点 id → 固有 CSS px）把行内元素变成原子行内级盒；CSS `width`/`height` px 覆盖固有尺寸，只指定一侧时保持固有宽高比，盒整体换行、抬高行高并顶部对齐；其 dump 行仍是 `<tag> inline x= y= width= height=`，没有子节点，`display:block` 的 replaced 元素不支持，replaced 盒的 margin/padding 被忽略。没有条目的页面保持原有几何逐字节不变。
 - 绘制语义通过 M6/M7 测试冻结：显示列表命令使用整数设备像素（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）；填充对不透明目标使用 SrcOver 公式 `(src * a + dst * (255 - a) + 127) / 255`；初始裁剪是整个 surface，光栅化工作量受裁剪限制；`shell` 把 canvas 填白；绘制顺序是盒树前序（先背景、再图片、再子节点/文本）；文本使用内置 8x16 ASCII 字形，最近邻缩放、无抗锯齿、非 ASCII 用 `?`、文本像素不透明。
   M7 绘制：非空页面恰好被一个 `PushClip(0, 0, viewport)`/`PopClip` 对包裹，每条命令的 y 按
@@ -194,7 +197,17 @@ bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
   设备像素、远离零，再加 freetype bitmap_left/top），用同一 SrcOver 公式以覆盖率为 alpha 混合
   （结果不透明），裁剪到当前 clip，有效字号钳制到 `kMaxRealFontSizePx`（4096 px）。provider 为
   null/空，或某文本盒返回空 run 时，精确输出 M10 之前的冻结位图命令（`DrawText`、cell 顶部 y、
-  不透明无抗锯齿像素），必须逐字节复现。
+  不透明无抗锯齿像素），必须逐字节复现。 M11 裁剪：滚动平移后背景 `FillRect` 与 `DrawImage` 的精确设备像素目标矩形与视口不相交时
+  省略该命令；文本盒在其矩形四周扩大 `ceil(2 * font_size_px)` 后与视口不相交时省略。裁剪发生在
+  样式/图片/字体 run 查找之前，非空盒树仍恰好保留一个 `PushClip`/`PopClip` viewport 对并保持命令
+  顺序；被省略的命令本来就不会画出任何像素，因此渲染像素与不裁剪逐字节相同。paint 的显示列表测试
+  现在断言这一裁剪契约（显示列表可以合法地省略永不可见命令）；像素仍是冻结契约。
+- Render 缓存契约（M11）：`render::Font` 保留私有、单线程、有界 LRU 缓存——每个字体复用一个
+  `hb_font`/`hb_buffer`（单一 `hb_face`，因此 harfbuzz shape-plan 缓存生效；freetype face 尺寸变化
+  后用 `hb_ft_font_changed` 同步），shaped-run 缓存（精确 26.6 字号 + UTF-8 文本，16 MiB / 16384
+  entries），glyph 覆盖率缓存（glyph id + 26.6 字号，32 MiB / 16384 entries，负结果也缓存）。缓存
+  分配失败视为 miss；逐出不改变像素、度量或 advance；渲染公式、clip、SrcOver 与位图字体路径不变；
+  不改任何公开头文件/API。
 - 字体引擎契约（M8b）：`render::Font` 加载后不可变（pimpl，公开头文件不出现 freetype/harfbuzz
   类型），加载失败是普通错误，只支持 face 0，度量是设计单位按 `size / unitsPerEm` 缩放，advance
   宽度是 harfbuzz 整形后的 26.6 求和。
@@ -248,9 +261,12 @@ bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
   `Fonts` 会用于该会话的每次加载/重新布局/绘制。
 - 平台输入契约（`toy/platform/window.h`）：`kMouseDown` 是窗口设备像素中的主键点击，`kMouseWheel`
   携带 `wheel_delta`（正值表示朝文档末尾滚动），`kKeyDown` 携带归一化的 `Key` 与 alt/ctrl/shift；
-  `SetTitle` 尽力而为，不会让窗口失败。
+  `SetTitle` 尽力而为，不会让窗口失败。M11 `WaitEvent` 合并语义：后端可以把已排队的连续 Expose
+  合并为一个 `kExpose`，把连续 ConfigureNotify 合并为一个携带最终尺寸的 `kResize`（尺寸未变化的
+  burst 不产生事件且 WaitEvent 继续阻塞）；输入与 close 事件永不合并、丢弃或乱序，阻塞语义不变。
 - [architecture.md](architecture.md) 中的模块边界与依赖方向。
 - `--size` 每边被钳制在 1..8192，且总像素最多 16M；解码图片使用相同的包含式上界（每边最多 8192 px，总计最多 16,777,216 像素）；body 由 `FetchOptions::max_body_bytes` 限制（默认 16 MiB）；dump 缩进最多 64 层。
+- 构建契约（M11）：未指定 `CMAKE_BUILD_TYPE` 时单配置生成器默认 `RelWithDebInfo`；第一方目标编译时加 `-ffp-contract=off`，使浮点布局几何在不同构建类型与 GCC/Clang 间逐字节一致。不要移除默认构建类型（未优化构建慢 3–7 倍）或 FP 参数，除非重跑全量测试、字节兼容与跨编译器门禁；测试里不要加耗时断言。
 - HTML/CSS/JS 支持是刻意不完整的：读 `roadmap.md` 里的 known-limits 条目，而不是假设规范行为。
 
 ## 新团队如何开始工作
@@ -388,3 +404,24 @@ bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
   `fontconfig/*.h` 不出现在任何公开头文件中，也不要添加版本、路径或 vendoring。fixture fontconfig
   配置生成在构建目录（由 `tests/shell/CMakeLists.txt` 生成）；提交的 fixture 字体是测试唯一可用的
   字体文件。
+- M11 裁剪意味着显示列表可以合法地省略“绘制区域不可能与视口相交”的命令。像素才是冻结契约；paint
+  的显示列表测试同时断言裁剪规则与“与不裁剪 reference 像素相同”。文本余量是
+  `ceil(2 * font_size_px)`（四周）；如果未来字体或绘制路径能从盒外更远处着色，需要增大余量并重跑
+  裁剪/不裁剪等价测试。
+- M11 render 缓存是 `Font` 的私有状态：单线程、有界 LRU（每个 Font 16 MiB shaped runs、32 MiB
+  glyph 覆盖率），分配失败视为 miss。不要跨线程共享一个 `Font`（与之前相同），不要加公开缓存 API；
+  所有缓存必须输出中性，逐出测试必须比较 fresh 与 warm 结果，绝不能断言耗时。
+- M11 shell `Fonts` 缓存同样是私有且有界（16 槽样式快速路径、32 MiB 度量、16 MiB run）。位图退化
+  路径刻意绕过它们；缓存绝不能改变度量或 run，`MeasureText`/`Runs` 必须可以任意顺序调用。
+- X11 事件合并只合并连续已排队的 Expose/ConfigureNotify 事件；输入与 close 事件永不合并、丢弃或
+  乱序。窗口行为无法 headless 单测：改动事件循环后要重跑 M11 真实窗口 smoke（`.tmp` 里的临时
+  X11 帮助程序，不提交），验证 resize 后无残留帧、WM_DELETE 干净退出。
+- M11 基准工具（`.tmp/perf_stages.cpp`、`.tmp/perf_bench.cpp`、`.tmp/run_m11_bench.sh`、
+  `.tmp/gen_baseline_refs.sh`、scroll_shot 工具）刻意不提交：测试不应断言耗时，压力页也只是临时
+  fixture。要测量改动时重新创建它们；数值保持机器相对，并在该轮报告里记录 before/after。如果将来
+  要提交 benchmark，应做成可选的、不进 CTest 的 target。
+- 不要回退默认构建配置：去掉 RelWithDebInfo 默认会让位图路径慢 3–7 倍，去掉 `-ffp-contract=off`
+  有跨构建/编译器的像素漂移风险。全量测试、字节兼容门禁与 GCC/Clang PPM 相等是检查手段。
+- M11 刻意没有加 GPU 后端：实测填充率不是瓶颈（系统字体光栅化在 800×600 与 1600×1000 下耗时
+  相同）；只有在缓存/裁剪之后光栅化仍超帧预算时才重新评估，且 GPU/XShm 工作都算新依赖决策，需要
+  用户批准。

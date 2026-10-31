@@ -21,25 +21,27 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M8b | Real fonts: `render::Font` (freetype metrics/rasterization + harfbuzz shaping, 4096 px effective size cap) behind a frozen pimpl, anti-aliased `DrawTextWithFont` with baseline placement, `--font PATH` / `--font-family NAME` (fontconfig) selection, self-authored font fixture and `tests/fixtures/font_site/`, 55 tests; the bitmap path stayed byte-identical |
 | M9 | `https://` fetching: `net` URL layer accepts https (default port 443), OpenSSL-backed TLS transport behind the unchanged blocking `Fetch()` sharing the HTTP/1.1 code through a private byte-stream abstraction, always-on certificate + hostname verification against OpenSSL's default trust store (no insecure mode), SNI, existing timeouts, redirects resolved with `net::ResolveUrl` (relative/protocol-relative, http<->https), committed test CA/leaf certs, in-process TLS loopback server, `net.tls` + `shell.https` end-to-end tests, 57 tests; http/file output stayed byte-identical |
 | M10 | Automatic font selection: CSS `font-family`/`font-weight`/`font-style` matched through the approved fontconfig library with initial family `serif`, per-code-point character-coverage fallback runs (Han text on Latin pages and vice versa), root `<html lang>` as a fontconfig language hint; a shared `shell::Fonts` object drives layout measurement and painting (`TextMetrics::ascent_px`, `Box::baseline_offset_px`, `paint::FontRunsProvider`); simplified CJK break units in layout so Chinese paragraphs wrap; committed regular/bold/italic/Han fixture fonts and deterministic fixture/empty fontconfig test configs; `--font`/`--font-family` overrides kept; bitmap path remains the byte-identical degradation path; 66 tests |
+| M11 | Performance: default RelWithDebInfo build with `-ffp-contract=off`; render text caches (one reusable hb_font/hb_buffer per font, bounded shaped-run and glyph-coverage LRU caches); shell font caches (allocation-free resolved-style fast path, metrics and run LRUs); paint viewport culling with a conservative text margin; window loop fixes (Expose without relayout, resize only on actual change, coalesced X11 Expose/ConfigureNotify bursts, reused surface); byte-identical rendering; 66 tests |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-**Next planned milestone: M11 — HTTP proxy (planned, not started; deprioritized by the user).**
-M10 (automatic font selection, including readable Chinese text) shipped. M11 adds an HTTP proxy
-(absolute-form for `http`, `CONNECT` for `https`) behind `FetchOptions`; the user said the proxy is
-not important right now, so the remaining work is prioritised by them. The JavaScript subset is
-deferred.
+**Next planned milestone: M12 — HTTP proxy (planned, not started; deprioritized by the user).**
+M11 (performance) shipped. M12 adds an HTTP proxy (absolute-form for `http`, `CONNECT` for
+`https`) behind `FetchOptions`; the user said the proxy is not important right now, so the
+remaining work is prioritised by them. The JavaScript subset is deferred.
 
-Not implemented yet: proxies (planned M11), JavaScript (deferred), external stylesheets, borders,
-horizontal scrolling/scrollbars, hover/active link styling and form controls, and `@font-face`/
-webfont downloads. Font selection works automatically since M10 (CSS families/weight/style through
-fontconfig, character-coverage fallback, CJK line breaking); other scripts are best-effort and
-bidi/RTL plus full Unicode line breaking are not implemented. PNG images work since M8a, real fonts
-since M8b and `https://` since M9 (see the known limits in [roadmap.md](roadmap.md)); `http://` and
-`file://` remain supported. The window and `--screenshot` paint a real page when a URL is given and
-the M1 placeholder page otherwise; with a page URL the window is also browsable (links,
-wheel/keyboard scrolling, Alt+Left/Right history, `<title>`). The `--dump-*` modes remain the
-primary debugging path; with system fonts their text output is machine-dependent by design (tests
-pin `FONTCONFIG_FILE`).
+Not implemented yet: proxies (planned M12), JavaScript (deferred), external stylesheets, borders,
+horizontal scrolling/scrollbars, hover/active link styling and form controls, `@font-face`/webfont
+downloads, HTTP connection reuse/compression/parallel resource loading and image cache/lazy
+loading (real-site network performance), XShm/dirty-rect presentation, and GPU rendering (a
+deliberate decision, see roadmap M11). Font selection works automatically since M10 (CSS
+families/weight/style through fontconfig, character-coverage fallback, CJK line breaking); other
+scripts are best-effort and bidi/RTL plus full Unicode line breaking are not implemented. PNG
+images work since M8a, real fonts since M8b and `https://` since M9 (see the known limits in
+[roadmap.md](roadmap.md)); `http://` and `file://` remain supported. The window and `--screenshot`
+paint a real page when a URL is given and the M1 placeholder page otherwise; with a page URL the
+window is also browsable (links, wheel/keyboard scrolling, Alt+Left/Right history, `<title>`). The
+`--dump-*` modes remain the primary debugging path; with system fonts their text output is
+machine-dependent by design (tests pin `FONTCONFIG_FILE`).
 
 ## Verify the current state (no context needed)
 
@@ -65,7 +67,10 @@ Expected: 66/66 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-fr
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
 or newer is required; building needs the X11, libpng, freetype, harfbuzz, fontconfig and OpenSSL
-development headers (all approved dependencies); only windowed mode needs a running display.
+development headers (all approved dependencies); only windowed mode needs a running display. When
+`CMAKE_BUILD_TYPE` is not given the build defaults to `RelWithDebInfo` (M11); pass
+`-DCMAKE_BUILD_TYPE=Debug` for unoptimised debugging. `-ffp-contract=off` is applied on purpose so
+layout geometry stays byte-identical across build types and compilers.
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -141,9 +146,9 @@ Window demo (needs a display):
 # history; the title follows <title>.
 ```
 
-## Next round: M11 — HTTP proxy (planned; starts only on the user's go-ahead)
+## Next round: M12 — HTTP proxy (planned; starts only on the user's go-ahead)
 
-**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M11 code exists. M10 is complete and
+**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M12 code exists. M11 is complete and
 green, so the starting point is the current HEAD; the user deprioritized the proxy, so confirm the
 priority before starting it.
 
@@ -156,7 +161,7 @@ priority before starting it.
   public network) and byte-identical output when no proxy is configured.
 - Non-goals until re-scoped: SOCKS proxies, proxy authentication, bypass lists, PAC.
 
-After M11 the umbrella roadmap is green; the remaining work is the documented backlog (webfonts,
+After M12 the umbrella roadmap is green; the remaining work is the documented backlog (webfonts,
 more image formats, external stylesheets, bidi/RTL and full Unicode line breaking, etc.) and any new
 user priorities.
 
@@ -171,10 +176,15 @@ user priorities.
   `src/render/include/toy/render/image.h` — `Image` and the libpng-backed `DecodePng`;
   `src/render/include/toy/render/font.h` — bitmap-font metrics plus the real `Font` API (load,
   metrics, shaped advances; no freetype/harfbuzz types in the header), implemented by
-  `src/render/font_ttf.cpp`; the display list + rasterizer live in `toy/render/paint.h`, and
-  `src/paint/` builds the list from the box tree without rasterizing. `src/shell/application.cpp`
-  owns font selection (`--font`/`--font-family`, the only fontconfig user). `layout` consumes text
-  metrics through a `shell`-supplied callback and has no `render` dependency.
+  `src/render/font_ttf.cpp` (plus the private `src/render/font_cache_internal.h` LRU and the M11
+  shaped-run/glyph-coverage caches); the display list + rasterizer live in `toy/render/paint.h`,
+  and `src/paint/` builds the list from the box tree without rasterizing (M11: viewport culling in
+  `src/paint/paint.cpp`). Font selection lives in `src/shell/fonts.h`/`fonts.cpp` (`Fonts` pimpl:
+  fontconfig matching, run fallback, M11 private resolved-style/metrics/run caches), the only
+  fontconfig user; `src/shell/application.cpp` builds it from `--font`/`--font-family` or the
+  automatic system default. `src/platform/window.cpp` coalesces X11 Expose/ConfigureNotify bursts
+  (M11). `layout` consumes text metrics through a `shell`-supplied callback and has no `render`
+  dependency; `src/layout/text_break.cpp` owns the break-unit tokenizer.
 - `src/net/` — URLs (`url.cpp`), shared HTTP/1.1 request/response code (`http.cpp`), and the M9
   private transport split: `socket_internal.h`/`socket.cpp` (TCP connect + poll helpers),
   `stream_internal.h`/`stream.cpp` (the private `Stream` interface, plain `SocketStream` and
@@ -222,7 +232,7 @@ user priorities.
   otherwise double-quoted with `\` and `"` backslash-escaped. The box dump is pre-order lines of
   `<tag> block|inline`, `anonymous block` or `text "..."` followed by `x= y= width= height=`, all
   integers (`std::lround`) of absolute CSS pixels; indent is two spaces per box depth, capped at 64
-  levels, and its format is unchanged by M10 (CJK text simply yields one text box per break unit).
+  levels, and its format is unchanged by M10/M11 (CJK text simply yields one text box per break unit).
 - Layout semantics frozen through the layout tests and the M5/M8a/M10 known limits: viewport width
   from `--size`, no margin collapsing, top-aligned lines, word-level text boxes, and line breaking
   at whitespace plus M10 CJK break units (individual CJK characters, simplified punctuation
@@ -261,7 +271,22 @@ user priorities.
   opaque), clipped to the current clip rectangle, and the effective size is clamped to
   `kMaxRealFontSizePx` (4096 px). A null/empty provider, or an empty run vector for a box, emits the
   frozen M10-pre bitmap command (`DrawText`, top-of-cell y, opaque unaliased pixels) and must
-  reproduce the pre-M10 command list byte for byte.
+  reproduce the pre-M10 command list byte for byte. M11 culling: a background `FillRect` and a
+  `DrawImage` are omitted when their exact device-pixel destination rectangle does not intersect the
+  viewport after the scroll translation; a text box is omitted when its box expanded by
+  `ceil(2 * font_size_px)` on every side does not intersect the viewport. Culling happens before
+  style/image/font-run lookups, keeps exactly one `PushClip`/`PopClip` viewport pair for a non-empty
+  box tree and preserves command order; every omitted command would have painted no pixel, so the
+  rendered pixels are byte-identical to an unculled list. The display-list tests now assert this
+  culling contract (a command list may legitimately omit never-visible commands); pixels remain the
+  frozen contract.
+- Render cache contract (M11): `render::Font` keeps private, single-threaded, bounded LRU caches —
+  one reusable `hb_font`/`hb_buffer` per font (a single `hb_face`, so harfbuzz's shape-plan cache
+  works; the freetype face size is synced with `hb_ft_font_changed`), a shaped-run cache keyed by
+  exact 26.6 size + UTF-8 text (16 MiB / 16384 entries) and a glyph-coverage cache keyed by glyph id
+  + 26.6 size (32 MiB / 16384 entries, negative results cached). Cache allocation failure is a
+  cache miss; eviction never changes pixels, metrics or advances; the rendering formula, clip,
+  SrcOver compositing and the bitmap-font path are unchanged; no public header/API changes.
 
 - Font engine contract (M8b): `render::Font` is immutable after loading (pimpl, no
   freetype/harfbuzz type in a public header), loading failures are ordinary errors, face 0 only,
@@ -277,9 +302,14 @@ user priorities.
   `FromFile` is one exact face (no fallback); `FromFamily` forces the preferred family with
   character fallback and fails with a readable error when unusable. With no usable system font
   (fontconfig init failure, no candidates, no loadable file) `SystemDefault` operates in bitmap
-  mode: bitmap metrics and empty runs, so pages still load. Fontconfig stays shell-only;
-  freetype/harfbuzz stay private to `render`; the default browser behavior and the automatic
-  selection were introduced in M10 only.
+  mode: bitmap metrics and empty runs, so pages still load. Since M11 `Fonts` also keeps private,
+  bounded, single-threaded caches: a 16-slot allocation-free resolved-style fast path with stable
+  style ids (falls back to a full StyleKey map on collisions), a text-metrics LRU keyed by
+  (style id, language, text, exact font size; 100k entries / 32 MiB) and a run LRU keyed by
+  (style id, language, text; 100k / 16 MiB) returning (font, offset, length) views into the current
+  input. Allocation failure is a miss; eviction never changes results; the bitmap-degradation path
+  bypasses the caches. Fontconfig stays shell-only; freetype/harfbuzz stay private to `render`; the
+  default browser behavior and the automatic selection were introduced in M10, the caches in M11.
 - Font determinism contract (M10): tests never use installed fonts or the machine font
   configuration. They set `FONTCONFIG_FILE` via CTest `ENVIRONMENT` to one of two generated configs:
   a fixture config (`<dir>` = `tests/fixtures/fonts/`, generic families mapped to `Toy Test Font`)
@@ -334,12 +364,21 @@ user priorities.
 - Platform input contract (`toy/platform/window.h`): `kMouseDown` is the primary button in window
   device pixels, `kMouseWheel` carries `wheel_delta` (positive = towards the document end), and
   `kKeyDown` carries the normalized `Key` plus alt/ctrl/shift; `SetTitle` is best effort and never
-  fails the window.
+  fails the window. M11 `WaitEvent` coalescing: a backend may merge consecutive already-queued
+  Expose events into one `kExpose`, and consecutive ConfigureNotify events into one `kResize`
+  carrying the final size (a size-unchanged burst produces no event and WaitEvent keeps blocking);
+  input and close events are never merged, dropped or reordered, and blocking semantics are
+  unchanged.
 - Module boundaries and dependency direction in [architecture.md](architecture.md).
 - `--size` is clamped to 1..8192 per side and at most 16M pixels; decoded images use the same
   inclusive bounds (each side at most 8192 px, at most 16,777,216 pixels in total); bodies are
   capped by `FetchOptions::max_body_bytes` (16 MiB by default); dump indentation is capped at 64
   levels.
+- Build contract (M11): when `CMAKE_BUILD_TYPE` is unset a single-config generator defaults to
+  `RelWithDebInfo`; first-party targets compile with `-ffp-contract=off` so floating-point layout
+  geometry is byte-identical across build types and GCC/Clang. Do not remove the default build type
+  (plain builds were 3–7x slower) or the FP flag without re-running the full test, byte-compat and
+  cross-compiler gates; keep tests free of wall-time assertions.
 - HTML/CSS/JS support is deliberately partial: read the known-limits entries in `roadmap.md`
   instead of assuming spec behavior.
 
@@ -428,8 +467,11 @@ user priorities.
   emitting no clip commands are obsolete. The clip does not change scroll-0 pixels.
 - Scroll resets to 0 on every successful load and fragment links are deliberate no-ops (documented
   M7 limits); do not 'fix' either without a contract change.
-- The window loop rebuilds the layout and display list on expose, resize and scroll. That is
-  correct and deliberately simple for the MVP; only optimize it with evidence.
+- The window loop used to rebuild the layout and display list on expose, resize and scroll; M11
+  changed that: expose repaints only, resize relayouts only on an actual size change, and the X11
+  backend coalesces queued Expose/ConfigureNotify bursts. Do not reintroduce per-expose relayout or
+  per-event relayout without evidence; the display list is still rebuilt per frame (cheap after
+  culling) and there is deliberately no cached display list.
 - The built-in 8x16 glyph table is hand-authored and its shapes are reviewed visually: there is
   deliberately no frozen glyph-bitmap/fingerprint test. Changing a glyph is a visual change —
   render a sample and look at it before committing.
@@ -528,3 +570,31 @@ user priorities.
   `src/shell/fonts.cpp`; keep `fontconfig/*.h` out of every public header and do not add versions,
   paths or vendoring. The fixture fontconfig configs live in the build tree (generated by
   `tests/shell/CMakeLists.txt`); the committed font fixtures are the only font files tests may use.
+- M11 culling means a display list may legitimately omit commands whose painted area cannot
+  intersect the viewport. Pixels are the frozen contract; the paint display-list tests assert both
+  the culling rules and pixel equality with an unculled reference. The text margin is
+  `ceil(2 * font_size_px)` on every side; if a future font or paint path can paint further than
+  that from its box, increase the margin and re-run the culled-vs-unculled equivalence tests.
+- M11 render caches are private `Font` state: single-threaded, bounded LRU (16 MiB shaped runs,
+  32 MiB glyph coverage per Font) and allocation-failure-is-a-miss. Do not share a `Font` across
+  threads (unchanged) and do not add public cache APIs; every cache must remain output-neutral, and
+  eviction tests must compare fresh vs warm results, never wall time.
+- M11 shell `Fonts` caches are also private and bounded (16-slot style fast path, 32 MiB metrics,
+  16 MiB runs). The bitmap-degradation path deliberately bypasses them; a cache must never change a
+  measurement or run, and `MeasureText`/`Runs` must be safe to call in any order.
+- X11 event coalescing only merges consecutive already-queued Expose/ConfigureNotify events; input
+  and close events are never merged, dropped or reordered. Window behavior cannot be unit-tested
+  headlessly: re-run the M11 real-window smoke (`.tmp` X11 helpers, not committed) after touching
+  the event loop, and verify no stale frame after resize and a clean WM_DELETE exit.
+- The M11 benchmark harness (`.tmp/perf_stages.cpp`, `.tmp/perf_bench.cpp`,
+  `.tmp/run_m11_bench.sh`, `.tmp/gen_baseline_refs.sh`, the scroll_shot tool) is deliberately not
+  committed: tests must not assert wall time, and the pages are generated stress fixtures. Recreate
+  it when measuring a change; keep numbers machine-relative and document the before/after in the
+  round's report. If a committed benchmark is ever wanted, make it an optional non-CTest target.
+- Do not regress the default build configuration: removing the RelWithDebInfo default costs 3-7x on
+  the bitmap path, and removing `-ffp-contract=off` risks cross-build/compiler pixel drift. The
+  full test suite, byte-compat gate and GCC/Clang PPM equality are the checks.
+- M11 did not add a GPU backend on purpose: measurements showed fill rate was not the bottleneck
+  (system-font raster time was identical at 800x600 and 1600x1000); revisit only if rasterization
+  still exceeds the frame budget after the caches/culling, and treat any GPU/XShm work as a new
+  dependency decision requiring the user's approval.

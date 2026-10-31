@@ -240,16 +240,35 @@ int RunWindowed(const Options& options, const std::shared_ptr<const Fonts>& font
     return 1;
   }
 
+  // The page is already laid out at the session viewport. Relayout only when the
+  // window size and the laid-out viewport disagree (first map of a window the
+  // window manager sized differently, or a configure the backend missed):
+  // SetViewport is a full page relayout and must not run on every expose.
+  const auto sync_viewport = [&]() {
+    if (browser && (browser->viewport_width() != window->width() ||
+                    browser->viewport_height() != window->height())) {
+      browser->SetViewport(window->width(), window->height());
+    }
+  };
+
+  // One surface is kept for the whole event loop and reallocated only when the
+  // window size changes; every repaint fills it white again (Browser::Paint and
+  // PaintPlaceholderPage both do).
+  std::unique_ptr<render::Surface> surface;
   // Paints the current page (or the M1 placeholder) at the window size.
   const auto repaint = [&]() {
-    render::Surface surface(window->width(), window->height());
-    if (browser) {
-      browser->Paint(surface);
-    } else {
-      PaintPlaceholderPage(surface);
+    const int width = window->width();
+    const int height = window->height();
+    if (!surface || surface->width() != width || surface->height() != height) {
+      surface = std::make_unique<render::Surface>(width, height);
     }
-    window->Present(
-        platform::PixelView{surface.pixels(), surface.width(), surface.height(), surface.stride()});
+    if (browser) {
+      browser->Paint(*surface);
+    } else {
+      PaintPlaceholderPage(*surface);
+    }
+    window->Present(platform::PixelView{surface->pixels(), surface->width(), surface->height(),
+                                        surface->stride()});
   };
 
   while (true) {
@@ -262,11 +281,16 @@ int RunWindowed(const Options& options, const std::shared_ptr<const Fonts>& font
       case platform::EventType::kClose:
         return 0;
       case platform::EventType::kExpose:
+        // An expose asks for the pixels again: repaint without relayout. Only a
+        // viewport the session has not laid out yet (first map / missed
+        // configure) needs one SetViewport before painting.
+        sync_viewport();
+        repaint();
+        break;
       case platform::EventType::kResize:
-        // The window may have been resized; re-lay-out before painting.
-        if (browser) {
-          browser->SetViewport(window->width(), window->height());
-        }
+        // The backend reports a resize only when the size actually changed;
+        // sync_viewport is still the single place that decides on a relayout.
+        sync_viewport();
         repaint();
         break;
       case platform::EventType::kMouseDown: {

@@ -40,7 +40,11 @@ namespace toy::shell {
 // creation, shared by every page load, relayout and paint of one session. Results
 // are deterministic for a fixed fontconfig configuration and font set (tests set
 // FONTCONFIG_FILE before the process starts; the fontconfig configuration is
-// initialized once per process).
+// initialized once per process). Since M11 the object keeps private, bounded
+// caches (resolved styles, text metrics and ordered runs) that make repeated
+// measure/paint calls cheap; a cache hit returns exactly what a fresh computation
+// would, a cache allocation failure is treated as a miss, and the caches only
+// change speed, never results.
 class Fonts {
  public:
   // Normal browser mode: fontconfig matching from the computed styles, degrading

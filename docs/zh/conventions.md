@@ -52,6 +52,8 @@
 
 ```sh
 # 快速构建浏览器本体：测试是 opt-in 的，因此不会编译 66 个测试可执行文件。
+# 未指定 CMAKE_BUILD_TYPE 时默认使用 RelWithDebInfo（M11）；调试时传
+# -DCMAKE_BUILD_TYPE=Debug。
 cmake -S . -B build
 cmake --build build
 
@@ -62,6 +64,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 - 只做 out-of-source 构建。加 `-DTOYBROWSER_WERROR=ON` 把警告视为错误。
+- 默认构建类型是 `RelWithDebInfo`；不要移除这个默认值（未优化的默认构建会让页面慢数倍），也不要
+  移除 `-ffp-contract=off`（它让浮点布局几何在不同构建类型与 GCC/Clang 间逐字节一致）。
 - 构建目录从不提交。
 - `CMAKE_EXPORT_COMPILE_COMMANDS` 已开启，因此 `compile_commands.json` 会出现在配置的构建目录中，可用于 clangd 和 IDE；构建目录保持未跟踪。
 

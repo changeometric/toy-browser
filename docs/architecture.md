@@ -180,6 +180,32 @@ follows the computed weight/style. The initial computed family is `serif`; other
 best-effort through the same character-coverage mechanism (no bidi/RTL reordering and no
 dictionary-based breaking yet).
 
+Performance (M11): the browser is optimised for the interactive path without changing any rendered
+pixel. The default build type is `RelWithDebInfo` when the caller does not choose one, and
+first-party targets compile with `-ffp-contract=off` so layout geometry is byte-identical across
+build types and compilers. `render::Font` keeps private, bounded LRU caches: one reusable
+`hb_font`/`hb_buffer` per font (one `hb_face`, so harfbuzz's shape-plan cache works), a shaped-run
+cache keyed by the exact 26.6 size plus UTF-8 text (16 MiB / 16k entries), and a glyph-coverage
+cache keyed by glyph id plus 26.6 size (32 MiB / 16k entries); allocation failure is a cache miss
+and eviction never changes output. The shell's `Fonts` adds an allocation-free resolved-style fast
+path with stable style ids, a text-metrics LRU (32 MiB / 100k entries) and a run LRU (16 MiB /
+100k entries); the bitmap-degradation path bypasses those caches. `paint` culls the display list to
+the viewport: fills/images by exact destination-rect intersection and text boxes by their box
+expanded with `ceil(2 * font_size_px)` on every side (glyph overhang/italic/anti-aliasing), before
+any style/image/font-run lookup, while keeping one viewport clip pair and command order; the
+rendered pixels are identical to an unculled list. The window loop repaints on Expose without
+re-laying-out, re-lays-out only when the window size actually changed, and the X11 backend
+coalesces consecutive queued Expose/ConfigureNotify bursts (input/close events are never merged,
+dropped or reordered); one `render::Surface` is reused per window size. A frame therefore costs
+O(visible commands + one box-tree walk) instead of O(page) text shaping/rasterization; relayout is
+still a full reflow made cheap by the measurement caches. Rendering remains single-threaded and
+software-only: measurements showed fill rate is not the bottleneck (the same system-font raster
+time at 800x600 and 1600x1000), so there is no GPU backend; the window still presents the whole
+surface with `XPutImage` (XShm/dirty rectangles are future work needing a dependency approval).
+Measured on an 81k-text-box stress page (800x600, automatic system fonts): frame paint 10.6 s ->
+3.5 ms, layout 2.1 s -> 31 ms, page load 2.2 s -> 69 ms, with every pre-M11 fixture screenshot and
+all 33 scrolled reference frames byte-identical.
+
 Navigation (M7): `shell::Browser` owns one browser session: the current page (final URL, DOM, style
 tree, box tree and decoded images), the navigation history, the integer vertical scroll offset and
 painting. The history is a vector of URLs plus an index; every successful load appends an entry

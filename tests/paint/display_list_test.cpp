@@ -548,13 +548,22 @@ void TestFractionalGeometry() {
                  "text geometry rounds with std::lround");
 }
 
+// A background that is partly visible keeps its negative device coordinates so
+// the rasterizer does the clipping (M7 behavior); since M11 a background that is
+// entirely outside the viewport is culled and paints nothing either way.
 void TestNegativeCoordinates() {
   const DisplayList list = BuildPage(
       "<div style=\"background-color: #336699; width: 10px; height: 10px; "
-      "margin-left: -20px\"></div>");
-  ExpectSize(list, 3, "a negative-margin background yields one FillRect");
-  ExpectFillRect(list, 1, -12, 8, 10, 10, 0xFF336699u,
+      "margin-left: -12px\"></div>");
+  ExpectSize(list, 3, "a partially visible negative-margin background yields one FillRect");
+  ExpectFillRect(list, 1, -4, 8, 10, 10, 0xFF336699u,
                  "negative coordinates pass through to the renderer");
+
+  const DisplayList offscreen = BuildPage(
+      "<div style=\"background-color: #336699; width: 10px; height: 10px; "
+      "margin-left: -20px\"></div>");
+  ExpectSize(offscreen, 2, "a fully off-screen negative-margin background is culled");
+  ExpectViewportClip(offscreen, 800, 600, "the culled page keeps the viewport clip pair");
 }
 
 // The same page with scroll_y 40 differs only by the y translation of the page
@@ -674,19 +683,26 @@ void TestImageAfterBackground() {
                   "the image is painted inside its inline ancestor, after its background");
 }
 
-// Scrolling translates the image y by -scroll_y and keeps x (M7 rule).
+// Scrolling translates the image y by -scroll_y and keeps x (M7 rule). An image
+// that is still partly visible keeps its coordinates; one scrolled completely
+// out of the viewport is culled (M11).
 void TestImageScrollTranslation() {
   const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFF0000FFu);
   const std::string html = "<p><img></p>";
   const DisplayList top = BuildImagePage(html, ReplacedSize{16.0f, 8.0f}, image, 320, 200, 0);
-  const DisplayList scrolled = BuildImagePage(html, ReplacedSize{16.0f, 8.0f}, image, 320, 200, 40);
+  const DisplayList scrolled = BuildImagePage(html, ReplacedSize{16.0f, 8.0f}, image, 320, 200, 30);
   ExpectSize(top, 3, "the unscrolled image page has one DrawImage");
-  ExpectSize(scrolled, 3, "the scrolled image page has the same commands");
+  ExpectSize(scrolled, 3, "the partly visible scrolled image page has the same commands");
   ExpectDrawImage(top, 1, 8, 24, 16, 8, image, "the image starts at its page position");
-  ExpectDrawImage(scrolled, 1, 8, -16, 16, 8, image,
+  ExpectDrawImage(scrolled, 1, 8, -6, 16, 8, image,
                   "scrolling translates the image y by -scroll_y and keeps x");
   toy_test::Check(SameCommand(top.commands().front(), scrolled.commands().front()),
                   "the image viewport clip is unchanged by scrolling");
+
+  const DisplayList offscreen =
+      BuildImagePage(html, ReplacedSize{16.0f, 8.0f}, image, 320, 200, 40);
+  ExpectSize(offscreen, 2, "an image scrolled completely out of the viewport is culled");
+  ExpectViewportClip(offscreen, 320, 200, "the culled image page keeps the viewport clip pair");
 }
 
 // Geometry is rounded with std::lround, the same rounding as the box dump.
@@ -1011,6 +1027,330 @@ void TestPerBoxEmptyRunsKeepsBitmap(const std::shared_ptr<const Font>& font) {
                  "the box without runs keeps the frozen bitmap DrawText at the box top");
 }
 
+// --- M11 viewport culling ----------------------------------------------------
+
+// A deterministic tall page, much taller than the viewport, mixing a very tall
+// background (visible at almost every scroll offset), repeated tall background
+// blocks, paragraphs, an image, text whose box starts left of the viewport, an
+// unbreakable word overflowing the right edge and Han text. At any scroll
+// offset most of it is off-screen, so culling has plenty of commands to drop.
+std::string CullingPageHtml() {
+  std::string html =
+      "<!doctype html><html><head><style>"
+      "div.block { height: 120px }"
+      "p { margin: 4px 8px }"
+      "</style></head><body>";
+  // One background taller than several viewports: it must never be culled while
+  // any of its area is visible.
+  html += "<div style=\"background-color: #204060; height: 3600px\"></div>";
+  for (int index = 0; index < 24; ++index) {
+    char color[16];
+    std::snprintf(color, sizeof(color), "#%02x%02x%02x", 0x20 + (index * 11) % 0x60,
+                  0x30 + (index * 7) % 0x60, 0x40 + (index * 5) % 0x60);
+    html += "<div class=\"block\" style=\"background-color: ";
+    html += color;
+    html += "\"></div><p>Row ";
+    html += std::to_string(index);
+    html += " quick brown fox</p>";
+    if (index == 3) {
+      // The text box starts left of the viewport: only part of it is painted.
+      html += "<p style=\"margin-left: -600px\">OffLeft</p>";
+      // One unbreakable word overflowing the right viewport edge.
+      html += "<p style=\"margin-left: 300px\">OverflowingWordABCDEFGHIJKLMNOPQRSTUVWXYZ</p>";
+    }
+    if (index == 5) {
+      html += "<p><img></p>";
+    }
+    if (index == 7) {
+      html += "<p>\u4e2d\u6587\u4f60\u597d</p>";
+    }
+    if (index == 2) {
+      // Real-font overhang cases: italic and bold faces at a larger size, so
+      // anti-aliased ink near the viewport edges is part of the comparison.
+      html += "<p style=\"font-style: italic; font-size: 24px\">Italic edge text</p>";
+    }
+    if (index == 9) {
+      html += "<p style=\"font-weight: 700; font-size: 20px\">Bold edge text</p>";
+    }
+  }
+  html += "</body></html>";
+  return html;
+}
+
+std::size_t CountKind(const DisplayList& list, CommandKind kind) {
+  std::size_t count = 0;
+  for (const Command& command : list.commands()) {
+    if (command.kind == kind) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+// Builds the box tree once, then compares a culled viewport render at many
+// scroll offsets with the same page rendered in one tall reference viewport that
+// contains every command. Any command wrongly culled at a viewport edge (or
+// wrongly kept, though that only changes the list size) shows up as a pixel
+// difference. Also asserts the frozen single viewport clip pair and that culling
+// actually removed commands.
+void CheckCullingMatchesFullPage(const std::string& html, int width, int height,
+                                 const toy::layout::MeasureText& measure,
+                                 const FontRunsProvider& font_runs, bool with_image,
+                                 bool sweep_every_offset = false) {
+  const Document document = toy::dom::ParseDocument(html);
+  const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
+  ReplacedSizes sizes;
+  ImageMap images;
+  if (with_image) {
+    const NodeId image_node = FindImageNode(document);
+    if (image_node != toy::dom::kInvalidNode) {
+      sizes.emplace(image_node, ReplacedSize{40.0f, 30.0f});
+      images.emplace(image_node, MakeImage(40, 30, 0xFF3366CCu));
+    }
+  }
+  LayoutOptions options;
+  options.viewport_width_px = static_cast<float>(width);
+  options.replaced_sizes = &sizes;
+  const BoxTree boxes = LayoutDocument(document, styles, options, measure);
+
+  const float content_height_px = toy::layout::ContentHeight(boxes);
+  const long long rounded_content =
+      static_cast<long long>(std::ceil(static_cast<double>(content_height_px)));
+  // The reference viewport is taller than the page plus the text culling margin,
+  // so every command that can paint is kept in the reference list.
+  const int reference_height = static_cast<int>(std::max<long long>(1, rounded_content) + 512);
+  const DisplayList full = BuildDisplayList(
+      document, styles, boxes, Viewport{width, reference_height, 0}, images, font_runs);
+  toy_test::Check(
+      CountKind(full, CommandKind::kPushClip) == 1 && CountKind(full, CommandKind::kPopClip) == 1,
+      "the full-content reference list has exactly one viewport clip pair");
+  const Surface reference = RenderList(full, width, reference_height);
+
+  const int max_scroll =
+      static_cast<int>(std::max<long long>(0, rounded_content - static_cast<long long>(height)));
+  std::vector<int> offsets = {
+      0, 1, 2, height / 2, height - 1, max_scroll / 2, max_scroll - 1, max_scroll};
+  if (sweep_every_offset) {
+    for (int scroll_y = 0; scroll_y <= max_scroll; ++scroll_y) {
+      offsets.push_back(scroll_y);
+    }
+  } else {
+    for (int scroll_y = 0; scroll_y <= max_scroll; scroll_y += 97) {
+      offsets.push_back(scroll_y);
+    }
+  }
+  std::sort(offsets.begin(), offsets.end());
+  offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+
+  bool compared = false;
+  bool culled = false;
+  for (const int scroll_y : offsets) {
+    if (scroll_y < 0 || scroll_y > max_scroll || scroll_y + height > reference_height) {
+      continue;
+    }
+    const DisplayList list = BuildDisplayList(document, styles, boxes,
+                                              Viewport{width, height, scroll_y}, images, font_runs);
+    toy_test::Check(
+        CountKind(list, CommandKind::kPushClip) == 1 && CountKind(list, CommandKind::kPopClip) == 1,
+        "a culled list keeps exactly one viewport clip pair");
+    ExpectViewportClip(list, width, height, "a culled list keeps the viewport clip pair");
+    toy_test::Check(list.size() <= full.size(), "culling only removes commands");
+    const Surface culled_surface = RenderList(list, width, height);
+    bool identical = true;
+    for (int y = 0; identical && y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        if (culled_surface.At(x, y) != reference.At(x, y + scroll_y)) {
+          identical = false;
+          break;
+        }
+      }
+    }
+    if (!identical) {
+      std::fprintf(stderr,
+                   "paint display list test: the culled render differs from the full-content "
+                   "reference at scroll_y=%d\n",
+                   scroll_y);
+    }
+    toy_test::Check(identical, "a culled render is pixel-identical to the full-content reference");
+    culled = culled || list.size() < full.size();
+    compared = true;
+  }
+  toy_test::Check(compared, "at least one scroll offset of the culling page was compared");
+  toy_test::Check(culled, "culling removes most off-screen commands");
+}
+
+// 1x1 background pixels placed exactly on the viewport edges (column 0 and
+// column width - 1) on consecutive page rows, swept over every scroll offset and
+// compared with a hand-built expected frame. The reference is computed from the
+// known page geometry instead of from another display list, so a wrong visibility
+// rule cannot hide by being applied to both sides: any off-by-one that drops the
+// only visible pixel of an edge command (or keeps a command that paints no
+// pixel) shows up here.
+void TestCullingExactViewportEdges() {
+  constexpr int kWidth = 64;
+  constexpr int kHeight = 40;
+  constexpr int kRows = 120;
+  constexpr std::uint32_t kRed = 0xFFFF0000u;
+  constexpr std::uint32_t kBlue = 0xFF0000FFu;
+  std::string html = "<!doctype html><html><body>";
+  for (int row = 0; row < kRows; ++row) {
+    // The body margin is 8 px, so margin-left -8 puts a 1 px block at x = 0 and a
+    // block at x = width - 1 starts at body content x + (width - 9).
+    html +=
+        "<div style=\"background-color: #ff0000; width: 1px; height: 1px; "
+        "margin-left: -8px\"></div>";
+    html +=
+        "<div style=\"background-color: #0000ff; width: 1px; height: 1px; "
+        "margin-left: ";
+    html += std::to_string(kWidth - 9);
+    html += "px\"></div>";
+  }
+  html += "</body></html>";
+  const Document document = toy::dom::ParseDocument(html);
+  const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
+  LayoutOptions options;
+  options.viewport_width_px = static_cast<float>(kWidth);
+  const BoxTree boxes = LayoutDocument(document, styles, options, MeasureWithBitmapFont);
+  const ImageMap images;
+  const int content_height =
+      static_cast<int>(std::ceil(static_cast<double>(toy::layout::ContentHeight(boxes)) - 1.0e-4));
+
+  // Page row of each 1 px block: the stacked blocks start at the body content
+  // top (8 px) and then advance one row each.
+  const int first_row_y = 8;
+  const int max_scroll = std::max(0, content_height - kHeight);
+  bool compared = false;
+  for (int scroll_y = 0; scroll_y <= max_scroll; ++scroll_y) {
+    const DisplayList list = BuildDisplayList(
+        document, styles, boxes, Viewport{kWidth, kHeight, scroll_y}, images, FontRunsProvider{});
+    ExpectViewportClip(list, kWidth, kHeight, "the edge-pixel page keeps the viewport clip pair");
+    const Surface actual = RenderList(list, kWidth, kHeight);
+
+    Surface expected(kWidth, kHeight);
+    expected.Fill(0xFFFFFFFFu);
+    for (int row = 0; row < 2 * kRows; ++row) {
+      const int view_y = first_row_y + row - scroll_y;
+      if (view_y < 0 || view_y >= kHeight) {
+        continue;
+      }
+      const bool left_edge = row % 2 == 0;
+      expected.FillRect(left_edge ? 0 : kWidth - 1, view_y, 1, 1, left_edge ? kRed : kBlue);
+    }
+    bool identical = true;
+    for (int y = 0; identical && y < kHeight; ++y) {
+      for (int x = 0; x < kWidth; ++x) {
+        if (actual.At(x, y) != expected.At(x, y)) {
+          identical = false;
+          break;
+        }
+      }
+    }
+    if (!identical) {
+      std::fprintf(stderr,
+                   "paint display list test: edge-pixel culling differs from the expected frame "
+                   "at scroll_y=%d\n",
+                   scroll_y);
+    }
+    toy_test::Check(identical, "edge pixels are culled exactly at the viewport boundary");
+    compared = true;
+  }
+  toy_test::Check(compared, "at least one scroll offset of the edge-pixel page was compared");
+}
+
+void TestCullingBitmap() {
+  CheckCullingMatchesFullPage(CullingPageHtml(), 320, 200, MeasureWithBitmapFont,
+                              FontRunsProvider{}, true);
+}
+
+// The fixture face for a computed style, mirroring the shell's automatic
+// selection closely enough to exercise real bold/italic ink: the italic and bold
+// fixture faces are used for the corresponding computed styles, regular
+// otherwise. Layout measurement and painting use the same mapping.
+const std::shared_ptr<const Font>& StyleFace(const std::shared_ptr<const Font>& regular,
+                                             const std::shared_ptr<const Font>& bold,
+                                             const std::shared_ptr<const Font>& italic,
+                                             const toy::style::ComputedStyle& style) {
+  if (style.font_style == toy::style::FontStyle::kItalic) {
+    return italic;
+  }
+  if (style.font_weight >= 700) {
+    return bold;
+  }
+  return regular;
+}
+
+TextMetrics MeasureWithStyleFonts(const std::shared_ptr<const Font>& regular,
+                                  const std::shared_ptr<const Font>& bold,
+                                  const std::shared_ptr<const Font>& italic,
+                                  std::string_view text_utf8,
+                                  const toy::style::ComputedStyle& style) {
+  const float font_size_px = style.font_size_px > 0.0f ? style.font_size_px : 0.0f;
+  const std::shared_ptr<const Font>& font = StyleFace(regular, bold, italic, style);
+  return TextMetrics{font->MeasureTextWidth(text_utf8, font_size_px),
+                     font->LineHeightPx(font_size_px), font->AscentPx(font_size_px)};
+}
+
+FontRunsProvider StyleAwareProvider(const std::shared_ptr<const Font>& regular,
+                                    const std::shared_ptr<const Font>& bold,
+                                    const std::shared_ptr<const Font>& italic) {
+  return
+      [regular, bold, italic](const toy::style::ComputedStyle& style, std::string_view text_utf8) {
+        if (text_utf8.empty()) {
+          return std::vector<FontRun>{};
+        }
+        return std::vector<FontRun>{FontRun{StyleFace(regular, bold, italic, style), text_utf8}};
+      };
+}
+
+void TestCullingRealFont(const std::shared_ptr<const Font>& regular,
+                         const std::shared_ptr<const Font>& bold,
+                         const std::shared_ptr<const Font>& italic) {
+  const toy::layout::MeasureText measure =
+      [regular, bold, italic](std::string_view text_utf8, const toy::style::ComputedStyle& style) {
+        return MeasureWithStyleFonts(regular, bold, italic, text_utf8, style);
+      };
+  CheckCullingMatchesFullPage(CullingPageHtml(), 320, 200, measure,
+                              StyleAwareProvider(regular, bold, italic), true);
+}
+
+void TestCullingTwoFonts(const std::shared_ptr<const Font>& latin,
+                         const std::shared_ptr<const Font>& han) {
+  const toy::layout::MeasureText measure = [latin, han](std::string_view text_utf8,
+                                                        const toy::style::ComputedStyle& style) {
+    return MeasureWithTwoFonts(latin, han, text_utf8, style);
+  };
+  CheckCullingMatchesFullPage(CullingPageHtml(), 320, 200, measure, TwoFontProvider(latin, han),
+                              true);
+}
+
+// A page of stacked tall backgrounds in a short viewport: culling must keep only
+// the few commands that can paint, not one FillRect per background, and the
+// visible output must stay exactly the reference window.
+void TestCullingManyOffscreenBackgrounds() {
+  std::string html = "<!doctype html><html><body>";
+  for (int index = 0; index < 40; ++index) {
+    char color[16];
+    std::snprintf(color, sizeof(color), "#%02x%02x%02x", 0x10 + index, 0x20 + index, 0x30 + index);
+    html += "<div style=\"background-color: ";
+    html += color;
+    html += "; height: 200px\"></div>";
+  }
+  html += "</body></html>";
+  const Document document = toy::dom::ParseDocument(html);
+  const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
+  LayoutOptions options;
+  options.viewport_width_px = 320.0f;
+  const BoxTree boxes = LayoutDocument(document, styles, options, MeasureWithBitmapFont);
+  const ImageMap images;
+  const DisplayList list =
+      BuildDisplayList(document, styles, boxes, Viewport{320, 120, 0}, images, FontRunsProvider{});
+  ExpectViewportClip(list, 320, 120, "the stacked-background page keeps the viewport clip pair");
+  // Only the first 200 px background intersects the 120 px viewport.
+  ExpectSize(list, 3, "culling keeps only the background that intersects the viewport");
+  toy_test::Check(CountKind(list, CommandKind::kFillRect) == 1,
+                  "the off-screen stacked backgrounds are culled");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1037,6 +1377,9 @@ int main(int argc, char** argv) {
   TestBlockReplacedPaintsNoImage();
   TestNullFontMatchesPreM8bList();
   TestEmptyProviderMatchesNullProvider();
+  TestCullingBitmap();
+  TestCullingManyOffscreenBackgrounds();
+  TestCullingExactViewportEdges();
 
   // The real-font tests load the committed self-authored fixture font. CMake
   // passes its directory as argv[1], so no installed font is ever required.
@@ -1052,6 +1395,21 @@ int main(int argc, char** argv) {
                  font_error.c_str());
     return 1;
   }
+  // The style-aware culling page paints real bold/italic ink at the viewport
+  // edges, so those faces are loaded from the same fixture directory.
+  const auto load_face = [](const std::string& path, std::string* error) {
+    return Font::LoadFromFile(path, error);
+  };
+  std::string bold_error;
+  const std::shared_ptr<const Font> bold =
+      load_face(std::string(argv[1]) + "/toy_test_bold.ttf", &bold_error);
+  std::string italic_error;
+  const std::shared_ptr<const Font> italic =
+      load_face(std::string(argv[1]) + "/toy_test_italic.ttf", &italic_error);
+  if (!bold || !italic) {
+    std::fprintf(stderr, "paint display list test: cannot load the bold/italic fixture faces\n");
+    return 1;
+  }
   TestRealFontBaseline(font);
   TestRealFontBaselineRounding(font);
   TestRealFontScrollAndClip(font);
@@ -1059,6 +1417,7 @@ int main(int argc, char** argv) {
   TestRealFontDeterministic(font);
   TestBaselineFromBoxBaselineOffset(font);
   TestPerBoxEmptyRunsKeepsBitmap(font);
+  TestCullingRealFont(font, bold, italic);
 
   // The two-font tests split mixed ASCII/Han text by character coverage, like
   // the shell's system font selection does.
@@ -1071,5 +1430,6 @@ int main(int argc, char** argv) {
     return 1;
   }
   TestMultiRunPenAdvance(font, cjk);
+  TestCullingTwoFonts(font, cjk);
   return toy_test::Finish("paint display list");
 }

@@ -822,6 +822,81 @@ void TestDrawTextWithFontDeterminism(const std::shared_ptr<const Font>& font) {
                   "drawing the same real-font list twice is pixel-identical");
 }
 
+// The render-side caches (M11: shaped runs and glyph coverage) must be
+// invisible in the pixels. Draw a representative set, stress both caches far
+// past their documented entry budgets, then draw the same set again and compare
+// against the first pass and against a freshly loaded Font with empty caches.
+void TestRealFontCachesKeepPixels(const std::string& directory,
+                                  const std::shared_ptr<const Font>& warm) {
+  std::string error;
+  const std::shared_ptr<const Font> fresh = Font::LoadFromFile(directory + "/toy_test.ttf", &error);
+  toy_test::Check(fresh != nullptr, "the fixture font loads a second time for the cache tests");
+  if (fresh == nullptr) {
+    return;
+  }
+
+  struct TextCase {
+    const char* text;
+    float size;
+    int x;
+    int baseline;
+    Argb color;
+  };
+  const TextCase kCases[] = {
+      {"A", 16.0f, 4, 24, kBlack},
+      {"ABC", 21.0f, 2, 30, 0xFF112233u},
+      {"Hello, World!", 12.5f, 1, 20, kBlack},
+      {"0123456789", 16.5f, 3, 26, 0xFFFF8800u},
+      {"\xe4\xbd\xa0\xe5\xa5\xbd", 16.0f, 4, 24, kBlack},
+      {".", 123.5f, -30, 80, kBlack},
+  };
+  constexpr int kWidth = 96;
+  constexpr int kHeight = 64;
+  const auto render_case = [](const std::shared_ptr<const Font>& font, const TextCase& text_case) {
+    DisplayList list;
+    list.DrawTextWithFont(font, text_case.text, text_case.x, text_case.baseline, text_case.size,
+                          text_case.color);
+    return DrawSurface(kWidth, kHeight, kWhite, list);
+  };
+  const std::size_t case_count = sizeof(kCases) / sizeof(kCases[0]);
+  std::vector<std::vector<Argb>> baseline;
+  baseline.reserve(case_count);
+  bool has_ink = false;
+  for (std::size_t i = 0; i < case_count; ++i) {
+    const Surface surface = render_case(warm, kCases[i]);
+    baseline.push_back(CopyPixels(surface));
+    has_ink = has_ink || CountPixels(surface, kWhite) < kWidth * kHeight;
+  }
+  toy_test::Check(has_ink, "the real-font cache test cases paint ink");
+
+  // 1400 distinct sizes times ~12 distinct glyph ids evicts the glyph coverage
+  // entry budget; the sizes also churn shaped runs.
+  const char* kStressText = "AaBbCc012?.";
+  for (int i = 0; i < 1400; ++i) {
+    const float size = 4.0f + static_cast<float>(i) * 0.02f;
+    DisplayList list;
+    list.DrawTextWithFont(warm, kStressText, 3, 60, size, kBlack);
+    (void)DrawSurface(64, 64, kWhite, list);
+  }
+  // 17000 distinct shaped runs evict the shaped-run entry budget.
+  for (int i = 0; i < 17000; ++i) {
+    const std::string text = "stress" + std::to_string(i);
+    DisplayList list;
+    list.DrawTextWithFont(warm, text, 3, 20, 16.0f, kBlack);
+    (void)DrawSurface(32, 32, kWhite, list);
+  }
+
+  bool warm_again_equal = true;
+  bool fresh_equal = true;
+  for (std::size_t i = 0; i < case_count; ++i) {
+    warm_again_equal = warm_again_equal && CopyPixels(render_case(warm, kCases[i])) == baseline[i];
+    fresh_equal = fresh_equal && CopyPixels(render_case(fresh, kCases[i])) == baseline[i];
+  }
+  toy_test::Check(warm_again_equal,
+                  "evicting the render caches does not change the painted pixels");
+  toy_test::Check(fresh_equal, "a fresh Font paints exactly like a cache-warm one");
+}
+
 void TestBitmapTextPathUnchanged(const std::shared_ptr<const Font>& font) {
   DisplayList bitmap_only;
   bitmap_only.DrawText("H", 0, 0, 16.0f, kBlack);
@@ -896,6 +971,7 @@ int main(int argc, char** argv) {
       TestDrawTextWithFontNoOps(font);
       TestDrawTextWithFontSizeClamp(font);
       TestDrawTextWithFontDeterminism(font);
+      TestRealFontCachesKeepPixels(argv[1], font);
       TestBitmapTextPathUnchanged(font);
       TestMissingGlyphUsesNotdef(font);
     }
