@@ -116,8 +116,6 @@ M9 之后：**M10 —— HTTP 代理**（http absolute-form + https `CONNECT`）
 测试。
 
 ## 仓库地图
-## 仓库地图
-## 仓库地图
 
 - `src/<module>/` —— 每个模块一个 CMake 库目标（`base` 尚不存在；模块图与依赖方向见 [architecture.md](architecture.md)）。
 - `src/main.cpp` —— 只做 CLI 解析；`shell` 编排 fetch → parse → style → images → layout → paint →

@@ -130,8 +130,6 @@ After M9: **M10 — HTTP proxy** (http absolute-form + https `CONNECT`) unlocks 
 restricted networks.
 
 ## Map of the repository
-## Map of the repository
-## Map of the repository
 
 - `src/<module>/` — one CMake library target per module (`base` does not exist yet; see
   [architecture.md](architecture.md) for the module map and dependency direction).
