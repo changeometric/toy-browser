@@ -90,11 +90,33 @@ void AppendBackground(const dom::Document& document, const style::StyleTree& sty
   if (!IntersectsViewport(x, y, width, height, viewport)) {
     return;
   }
-  const std::uint32_t background = styles.Get(box.node).background_color;
+  const style::ComputedStyle& style = styles.Get(box.node);
+  // visibility: hidden removes the background but never the layout space; the
+  // pre-order walk still visits descendants, so a visible child paints normally.
+  if (style.visibility == style::Visibility::kHidden) {
+    return;
+  }
+  const std::uint32_t background = style.background_color;
   if ((background >> 24) == 0) {
     return;
   }
   list->FillRect(x, y, width, height, background);
+}
+
+// text-decoration: underline is one device-pixel FillRect one row below the text
+// baseline, emitted after that text box's text command(s). The text culling ran
+// before this call (the same expanded text-box check as the text command), so the
+// underline can only be painted together with its text. Decorations are not
+// painted for hidden text, so callers return before reaching this helper.
+void AppendUnderline(const style::ComputedStyle& style, const layout::Box& box,
+                     const Viewport& viewport, render::DisplayList* list) {
+  if (!style.text_decoration_underline) {
+    return;
+  }
+  const int x = ToDevicePixels(box.x);
+  const int y = TranslatedY(box, viewport.scroll_y) + ToDevicePixels(box.baseline_offset_px) + 1;
+  const int width = ToDevicePixels(box.width);
+  list->FillRect(x, y, width, 1, style.color | 0xFF000000u);
 }
 
 // A text box keeps the inherited computed style; its color is forced opaque
@@ -111,6 +133,11 @@ void AppendBackground(const dom::Document& document, const style::StyleTree& sty
 void AppendText(const style::StyleTree& styles, const layout::Box& box, const Viewport& viewport,
                 const FontRunsProvider& font_runs, render::DisplayList* list) {
   const style::ComputedStyle& style = styles.Get(box.node);
+  // Hidden text paints nothing (and so does its underline); the layout space is
+  // unchanged because layout already ran.
+  if (style.visibility == style::Visibility::kHidden) {
+    return;
+  }
   const float font_size_px = style.font_size_px > 0.0f ? style.font_size_px : 0.0f;
   // Cull before asking the runs provider: resolving/font-shaping a text box that
   // cannot be visible is the dominant per-frame cost on text-heavy pages.
@@ -138,10 +165,12 @@ void AppendText(const style::StyleTree& styles, const layout::Box& box, const Vi
                                color);
         pen_x += run.font->MeasureTextWidth(run.text, font_size_px);
       }
+      AppendUnderline(style, box, viewport, list);
       return;
     }
   }
   list->DrawText(box.text, static_cast<int>(x), static_cast<int>(y), font_size_px, color);
+  AppendUnderline(style, box, viewport, list);
 }
 
 // An inline replaced box paints its image after its own background and before
@@ -150,8 +179,8 @@ void AppendText(const style::StyleTree& styles, const layout::Box& box, const Vi
 // nothing, which keeps image-less pages byte-identical to M7. A null image is
 // treated as absent so the list only carries drawable commands. The destination
 // rect is culled exactly against the viewport (the image only paints inside it).
-void AppendImage(const layout::Box& box, const Viewport& viewport, const ImageMap& images,
-                 render::DisplayList* list) {
+void AppendImage(const style::StyleTree& styles, const layout::Box& box,
+                 const Viewport& viewport, const ImageMap& images, render::DisplayList* list) {
   if (box.kind != layout::BoxKind::kInline || box.node == dom::kInvalidNode) {
     return;
   }
@@ -160,6 +189,9 @@ void AppendImage(const layout::Box& box, const Viewport& viewport, const ImageMa
   const int width = ToDevicePixels(box.width);
   const int height = ToDevicePixels(box.height);
   if (!IntersectsViewport(x, y, width, height, viewport)) {
+    return;
+  }
+  if (styles.Get(box.node).visibility == style::Visibility::kHidden) {
     return;
   }
   const auto entry = images.find(box.node);
@@ -201,7 +233,7 @@ render::DisplayList BuildDisplayList(const dom::Document& document, const style:
       case layout::BoxKind::kBlock:
       case layout::BoxKind::kInline:
         AppendBackground(document, styles, box, viewport, &list);
-        AppendImage(box, viewport, images, &list);
+        AppendImage(styles, box, viewport, images, &list);
         break;
       case layout::BoxKind::kText:
         AppendText(styles, box, viewport, font_runs, &list);

@@ -32,9 +32,11 @@ struct Box {
   float x = 0, y = 0, width = 0, height = 0;  // absolute CSS px, border-box rect
   std::string text;                           // kText only: the word placed on this line
   // kText only: distance from the box top to the text baseline in CSS px. Layout
-  // sets it to the line's ascent (the maximum ascent of the text boxes on that
-  // line), so all text boxes of one line share a baseline; 0 for non-text boxes.
-  // Paint uses it for real-font text; the bitmap path ignores it.
+  // sets it to the line's maximum item baseline (the maximum, over the line's
+  // text items, of half-leading + measured ascent; half-leading is 0 when the
+  // authored line-height is `normal`), so all text boxes of one line share a
+  // baseline; 0 for non-text boxes. Paint uses it for real-font text; the bitmap
+  // path ignores it.
   float baseline_offset_px = 0.0f;
   BoxId parent = kInvalidBox, first_child = kInvalidBox, last_child = kInvalidBox,
         next_sibling = kInvalidBox;
@@ -74,9 +76,10 @@ struct LayoutOptions {
   float viewport_width_px = 800.0f;
   // Intrinsic sizes of replaced elements, or null when the page has none. An
   // entry makes that inline element an atomic inline-level replaced box:
-  // - the box size is CSS width/height (px, already computed) when specified,
-  //   otherwise the intrinsic size; one specified side alone keeps the
-  //   intrinsic aspect ratio;
+  // - the box size is the computed CSS width/height when specified, otherwise
+  //   the intrinsic size; one specified side alone keeps the intrinsic aspect
+  //   ratio. A percentage width resolves against the containing block content
+  //   width; percentage heights are unsupported and behave like auto (M14);
   // - the box is unbreakable, contributes its height to the line height and is
   //   top-aligned on its line like every other inline-level box (no baseline
   //   alignment in this MVP);

@@ -56,6 +56,12 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 
 外部样式表（M12）：`shell` 的私有 `LoadStyledDocument()`（位于 `src/shell/page.h`）拥有全部资源策略：抓取并解析页面后，它按文档顺序遍历一次 DOM，过滤 `<link>` 元素（`rel` token 含 `stylesheet` 且不含 `alternate`、无 `disabled` 属性、`media` 为空/`all`/`screen`、`type` 为空/`text/css`），用 `net::ResolveUrl` 把每个 `href` 相对重定向后的最终页面 URL 解析，用与页面相同的 `net::Fetch` 抓取（默认超时与 16 MiB body 上限），只接受 200..299 的 body，每个适用出现抓取一次（不去重、无缓存，和图片一样），并静默跳过所有被过滤、失败或非 2xx 的样式表。得到的 `style::LinkedStyleSheet` 列表交给 `style::ComputeStyles`，同一条路径由正常页面加载（窗口、`--screenshot`、`--dump-boxes`）与 `--dump-style` 共享；`--dump-dom` 与 `--dump-body` 仍不抓取样式表。只有页面抓取可以让加载失败。媒体查询、`@import`、alternate/disabled 样式表、带参数的 `type` 值与 CSS 图片在本轮刻意不实现。
 
+CSS 值（M14a）：`ComputedStyle` 携带 M14a 值模型：盒长度 `Length {value, unit: px|percent}`（盒属性的百分比保持未解析交给 layout）、`AutoLength` margin、`LineHeight {kind: normal|number|px, value}`、`TextAlign` 与 `Visibility`。style 在存储前解析所有字体相对单位：`em` 相对元素自身最终字号、`%` 字号相对父元素、`rem` 相对根 `<html>` 元素的计算字号（根元素自身的 `rem` 用 16px 初始值）。颜色解析 `#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`、旧式逗号分隔 `rgb()`/`rgba()`/`hsl()`/`hsla()`、完整 CSS Color 4 命名颜色集与 `transparent`；文本颜色保持不透明（丢弃 alpha），背景色保留 alpha。`background` 简写只应用颜色部分。逻辑属性（margin/padding 的 block/inline 长写与简写、`inline-size`/`block-size`、min/max 变体）在 horizontal-tb 下映射到物理字段。`line-height`、`text-align`、`visibility` 与 `text-decoration: underline` 按 MVP 契约继承（text-decoration 传播简化为继承，只表示 underline 标志）。不支持的写法（百分比高度、line-height 的 rem、`justify` 只按 left、空格分隔颜色函数语法、`pt`/`vh`/`vw` 单位）被忽略或作为已知限制记录。`DumpStyleTree()` 保留所有 M14 之前字段并在行尾追加 `min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`。
+
+M14a 布局：`Length::kPercent` 盒长度相对包含块内容宽度解析（width、min/max-width 与四边 margin/padding——CSS 对垂直百分比也用宽度）；百分比高度不支持、按 auto 处理，只有 px 的 min/max-height 在内容/固定高度之后钳制（先 min 后 max）。内容宽度在指定/auto 宽度解析后按 min 后 max 钳制；宽度确定（指定或经钳制解析，这正是常见 `max-width + margin: auto` 包裹盒居中的条件）时水平 `auto` margin 分配剩余空间，auto 宽度与过约束盒保持 0。文本项的 line-height 贡献为计算 px 值、数字×字号或 `normal` 的测量行高；行盒取最大贡献，half-leading 把共享基线定位到 `baseline_offset_px`（`normal` 精确贡献测量行高，因此 M14 之前几何不变）。断行后 `text-align: center/right` 整体平移已定稿行的盒（`justify` 按 left；过长行保持左对齐）。行内/replaced 的百分比 margin/padding 用行宽，replaced 百分比宽度用包含宽度、百分比高度保持 auto。visibility 不影响布局。
+
+M14a 绘制：`visibility` 为 hidden 的盒不输出背景、图片、文本或下划线，但遍历仍进入子节点，因此可见后代正常绘制；布局保留隐藏盒的空间。`text-decoration: underline` 的文本盒在其文本命令之后发出一个设备像素 `FillRect`，x=round(box.x)、y=round(box.y)-scroll_y+round(baseline_offset_px)+1、width=round(box.width)、height=1、颜色为不透明文本色，使用相同的文本裁剪。不使用这两个属性的页面构建与 M14 之前逐字节相同的命令列表。位图路径仍在行盒内顶部对齐字形，因此大 CSS line-height 会显示在字形下方多出空间（real-font 路径通过 half-leading 基线居中）；这是有文档的位图模式简化。
+
 布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型加 `style::ComputedStyle`）；内置等宽位图字体度量位于 `render`，由 `shell` 适配——若为真实字体，则适配该字体的整形 advance、行高与 ascent（M8b/M10），布局本身仍然完全不了解字体。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。M10 起回调会收到文本的计算样式，因此 shell 能按样式选字体；`TextMetrics` 携带 ascent，布局把该行最大的 ascent 写进每个文本盒的 `Box::baseline_offset_px`（同一行不同字体因此在绘制时共享基线）。文本被切成断行单元（`src/layout/text_break.cpp`）：空白分隔单词，非 CJK 文本保持最长词，CJK 字符各自成为断行机会并带简化的标点禁则，因此没有空格的中文也能正常换行。每个单元仍是普通的可度量 word 级文本盒，复用 M5 的适配、行高与基线机制。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。M8a 把 replaced 元素加入同一套布局：`LayoutOptions::replaced_sizes` 把 DOM 节点 id 映射到 shell 提供的固有 CSS 像素尺寸；有条目的行内元素成为原子行内级盒（CSS width/height px 覆盖、只给一侧时保持固有宽高比、整体换行、顶部对齐、抬高行高），而 `layout` 仍然从不读取图片、也不依赖 `render`。M10 的断行单元模型是对 Unicode 断行的简化（没有完整 UAX#14、没有泰语/高棉语/老挝语词典断行、没有连字符断行、不做跨文本节点标点粘连）；拉丁词永不拆开。
 
 绘制（M6）：`paint` 按前序遍历盒树，产出扁平的 `render::DisplayList`：每个计算背景非透明的元素盒变成一条 `FillRect`（背景先于子内容），每个节点 id 有解码图片的行内 replaced 盒变成一条 `DrawImage`（M8a，在背景之后、子内容之前），每个文本盒变成一条或多条 `DrawTextWithFont` run，或（位图模式）一条 `DrawText`，都使用继承的颜色与字号。M10 起 paint 从 shell 接收 `paint::FontRunsProvider` 而不是单一字体：provider 返回该盒文本的有序真实字体 run，绘制器按每个 run 的整形宽度推进 pen，并把所有 run 放在 `box.baseline_offset_px` 上；空 provider（或某盒返回空 run）逐字节复现 M10 之前的位图命令列表。`paint` 从不光栅化，也从不包含 render 的实现头文件。`render` 执行该列表：矩形填充对不透明目标使用冻结的 SrcOver 整数公式；文本使用内置 8x16 ASCII 字形表，按最近邻单元缩放（无抗锯齿）；图片使用冻结的最近邻源映射（见下）；整数矩形裁剪栈约束每条命令（M7 会用视口 `PushClip`/`PopClip` 对包裹页面，并把每条命令按滚动偏移平移）。`shell` 把 canvas 填白、按 surface 宽度布局页面、构建列表并光栅化；窗口与 `--screenshot` 共享完全相同的这条路径。确定性正是重点：相同输入在 GCC 和 Clang 上产出逐字节相同的 PPM，截图测试依赖这一点。
@@ -226,6 +232,17 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
   复用一条 TLS 连接；`shell.resource_loading` 从 loopback server 提供页面 + 样式表 + 重复图片，断言
   一条连接、每个唯一图片 URL 一次抓取、共享解码图片、重复坏图片只抓一次，以及被强制关闭的空闲连接后
   的恢复。
+
+- M14a 的 CSS 值/排版测试离线且确定：提交的 `tests/fixtures/css_compat_site/`（`values.html`、
+  `typography.html`、`boxes.html`、`legacy.html` 加 README，记录每个期望计算值、盒矩形与像素），
+  `style.values` 覆盖单位/颜色/background 简写/逻辑映射/auto margin/约束，`style.typography` 覆盖
+  line-height/text-align/visibility/text-decoration 的继承与 `!important`，`layout.style_properties`
+  用 fake measurer 精确断言百分比解析、钳制、auto margin 居中、line-height 基线与 text-align 平移，
+  `shell.css_compat` 端到端（LoadPage 计算值 + 冻结盒几何 + Browser 像素），
+  `shell.dump_style_css_compat` 检查追加的 dump 字段，`shell.css_compat_screenshot` 检查截图 CLI；
+  扩展后的 `paint.display_list` 覆盖 visibility 与下划线命令的几何/顺序/裁剪以及手写 M14 之前参考
+  列表。`legacy.html` 证明 M14 之前页面保持逐字节盒 dump/PPM；字节兼容门禁只规范化追加的样式字段。
+  手工真实站点检查不进入 CTest，`.tmp/` 证据从不提交。
   `shell.external_css` 覆盖 shell 端到端（含 `Browser`/绘制像素），CLI 检查覆盖带外部样式表的
   `--dump-style`。没有测试使用公网。
 

@@ -55,7 +55,7 @@
 ## 构建
 
 ```sh
-# 快速构建浏览器本体：测试是 opt-in 的，因此不会编译 74 个测试可执行文件。
+# 快速构建浏览器本体：测试是 opt-in 的，因此不会编译 80 个测试可执行文件。
 # 未指定 CMAKE_BUILD_TYPE 时默认使用 RelWithDebInfo（M11）；调试时传
 # -DCMAKE_BUILD_TYPE=Debug。
 cmake -S . -B build

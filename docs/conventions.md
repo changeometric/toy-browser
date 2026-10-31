@@ -89,7 +89,7 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
 ## Build
 
 ```sh
-# Fast browser-only build: tests are opt-in, so this does not compile 74 test executables.
+# Fast browser-only build: tests are opt-in, so this does not compile 80 test executables.
 # Without CMAKE_BUILD_TYPE the build defaults to RelWithDebInfo (M11); pass
 # -DCMAKE_BUILD_TYPE=Debug for unoptimised debugging.
 cmake -S . -B build

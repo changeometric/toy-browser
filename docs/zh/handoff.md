@@ -28,16 +28,25 @@
 | M11 | 性能：默认 RelWithDebInfo 构建 + `-ffp-contract=off`；render 文本缓存（每个字体复用一个 hb_font/hb_buffer，有界 shaped-run 与 glyph 覆盖率 LRU）；shell 字体缓存（无分配的解析样式快速路径、度量与 run LRU）；paint 视口裁剪（文本保守余量）；窗口循环修正（Expose 不重排、resize 仅尺寸变化时重排、合并 X11 Expose/ConfigureNotify burst、复用 surface）；渲染逐字节不变；66 个测试 |
 | M12 | 外部样式表：公开 `style::LinkedStyleSheet` 与双参数 `ComputeStyles(document, linked_sheets)`，按文档顺序合并没有链接的样式表与 `<style>`（单参数重载与 M11 逐字节相同）；shell 私有 `LoadStyledDocument()` 在页面加载与 `--dump-style` 之间共享一条 抓取/解析/发现/过滤/抓取样式表/计算样式 路径；`rel`/`disabled`/`media`/`type` 过滤，`href` 相对重定向后的最终页面 URL 解析，只接受 200..299 body，失败/被过滤样式表静默跳过，每个 `<link>` 出现抓取一次（不去重）；`--dump-dom`/`--dump-body` 仍不抓取样式表；提交 `tests/fixtures/css_site/`、header-only `tests/support/http_server.h` loopback 服务器、`style.external_sheets` + `shell.external_css` + CLI 测试；70 个测试；字节兼容与 GCC/Clang 门禁全绿 |
 | M13 | 资源加载：公开 `net::Client`（pimpl、单线程），每个 origin 最多一条空闲 keep-alive HTTP/1.1 连接并复用；在私有 `Stream` 上增量解析 Content-Length/chunked body 与 trailer，读到的多余字节留给下一请求；遵循 HTTP/1.1/1.0 持久连接规则；用已批准的 zlib 透明解码 gzip（原始与解码后 body 都受限，其他编码是错误）；池化连接在收到任何响应字节前失败时在新连接上重试一次；重定向与 `file://` 走同一个 client；一次性 `Fetch()` 保持完全相同的请求字节/行为。shell `LoadPage` 每次加载创建一个 Client 用于页面 + 样式表 + 图片，并按解析后的图片 URL 在页内去重（重复 URL 共享一次抓取/解码/图片对象；失败 URL 被记住；每个 `<link>` 出现仍各抓一次；无跨加载缓存）。共享 loopback HTTP/TLS 测试服务器增加持久连接模式与连接/请求计数；`net.keep_alive`、`net.gzip`、`net.tls_keep_alive` 与 `shell.resource_loading`；74 个测试；字节兼容、GCC/Clang 与真实页面加载时间门禁全绿 |
+| M14a | CSS 值与排版：`%`/`rem` 单位、`rgb()`/`rgba()`/`hsl()`/`hsla()` 与完整 CSS 命名颜色集、`background` 简写颜色、逻辑属性映射到物理边、min/max-width/height、`margin: auto`、`line-height`、`text-align`、`text-decoration: underline`、`visibility`；新计算值模型 `Length`/`AutoLength`/`LineHeight`/`TextAlign`/`Visibility`（盒属性百分比留给 layout）；样式 dump 追加 `min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`；layout 按包含块内容宽度解析百分比、min/max 钳制、auto margin 居中、line-height half-leading 基线与 text-align 整行平移；paint 支持 visibility 与下划线；提交 `tests/fixtures/css_compat_site/`；`style.values`、`style.typography`、`layout.style_properties`、`shell.css_compat`、`shell.dump_style_css_compat`、`shell.css_compat_screenshot`；80 个测试；字节兼容（样式字段规范化）、GCC/Clang 与真实站点视觉门禁 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-**下一计划里程碑：M14 —— CSS 兼容批次 1（已计划，尚未开始）。** M13（资源加载管线）已交付：
-keep-alive 连接、gzip 与页内图片去重使实测加载墙体时间约减半（800x600 的 python.org：2.07 s -> 0.99 s
-中位数；w3.org：3.88 s -> 1.79 s；截图逐字节相同），真实样式表现在经复用连接抓取。M14 应用真实页面
-依赖的高频 CSS；M15 随后覆盖 flexbox/position/float 子集。HTTP 代理（M16）与 JavaScript 子集保持延后。
+**下一计划里程碑：M14b —— 盒装饰与约束（已计划，尚未开始）。** M14a（CSS 值与排版）已交付：
+真实页面现在会应用 %/rem、rgb/rgba/hsl 与命名颜色、background 简写颜色、逻辑属性、min/max 尺寸、
+auto margin、line-height、text-align、下划线与 visibility。手工真实站点检查显示本批次生效
+（gnu.org 红色导航栏现在会绘制、w3.org 导航行距/居中生效、python.org 应用 275 个居中与 88 个
+line-height 元素）。M14b 补齐剩余高频盒装饰——border/border-*、box-sizing、overflow 裁剪与
+line-through/overline——它们主导了真实站点剩余的视觉差距（调查的样式表中 385 条 border 声明；
+另有 121 条 border-radius 除非单独划范围否则不做）。M15 随后覆盖 flexbox/position/float。
+HTTP 代理（M16）与 JavaScript 子集保持延后。
 
-尚未实现：并行/线程资源加载、跨页面图片缓存与懒加载（M13 只有串行复用与页内去重）、CSS 兼容与现代
-布局（M14/M15）、代理（M16）、JavaScript（已延后）、border、水平滚动/滚动条、hover/active 链接样式与
-表单控件、`@font-face`/webfont 下载、XShm/dirty-rect 呈现与 GPU 渲染（刻意决策，见 roadmap M11）。
+尚未实现：并行/线程资源加载、跨页面图片缓存与懒加载（M13 只有串行复用与页内去重）、
+border/border-radius/box-sizing/overflow 裁剪/box-shadow 与剩余 text-decoration（M14b）、
+position/float/flexbox/grid 与其他 display 值（M15）、代理（M16）、JavaScript（已延后）、水平滚动/
+滚动条、hover/active 链接样式与表单控件、`@font-face`/webfont 下载、XShm/dirty-rect 呈现与 GPU
+渲染（刻意决策，见 roadmap M11）。自 M14a 起 CSS 值层覆盖 `%`/`rem`、颜色函数与完整命名颜色
+（仅旧式逗号语法）、逻辑属性（horizontal-tb）、min/max 尺寸、auto margin、line-height、
+text-align（不含 justify）、下划线与 visibility——已知限制见 [roadmap.md](roadmap.md)。
 keep-alive HTTP/1.1、gzip 解码与页内图片去重自 M13 起可用；外部 `<link rel="stylesheet">` 样式表自
 M12 起可用（按文档顺序发现、过滤、相对最终 URL 解析、抓取，并与 `<style>`、`style` 属性一起级联；
 还没有 `@import`、media queries、alternate/disabled 样式表选择或 CSS 图片）；不带链接的页面与 M11
@@ -69,7 +78,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-预期：74/74 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。`CMakePresets.json` 把同样的命令封装为 `default`/`dev` presets，`.github/workflows/ci.yml` 用 GCC 与 Clang 运行 configure、build、test 与安装冒烟步骤。
+预期：80/80 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。`CMakePresets.json` 把同样的命令封装为 `default`/`dev` presets，`.github/workflows/ci.yml` 用 GCC 与 Clang 运行 configure、build、test 与安装冒烟步骤。
 
 ```sh
 # 外部样式表（M12）：提交的 fixture 站点在两个内联 <style> 之间链接子目录样式表，并包含
@@ -104,6 +113,26 @@ ctest --test-dir "$BUILD" -R '^(net\.keep_alive|net\.gzip|net\.tls_keep_alive|sh
 图片 URL 只抓取一次、过期空闲连接重试一次、gzip 解码）；一次性 `Fetch()` 保持字节兼容，所有 M13 之前
 的 dump/截图不变。在开发机上手工页面从约 2.1 s 降到约 1.0 s 且像素相同（见 M13 轮次报告）；具体数字
 依赖机器/网络，不要写成测试断言。
+
+```sh
+# CSS 值与排版（M14a）：提交的 css_compat_site fixture 覆盖 %/rem、颜色、逻辑属性、min/max 尺寸、
+# auto margin、line-height、text-align、下划线与 visibility；legacy.html 只用 M14 之前的 CSS，
+# 必须保持逐字节不变。
+"$BUILD"/toybrowser --dump-style \
+    "file://$PWD/tests/fixtures/css_compat_site/values.html" | tail -n +2 | head
+"$BUILD"/toybrowser --size 320x200 --dump-boxes \
+    "file://$PWD/tests/fixtures/css_compat_site/boxes.html" | head
+"$BUILD"/toybrowser --size 320x400 --screenshot /tmp/toybrowser-css-compat.ppm \
+    "file://$PWD/tests/fixtures/css_compat_site/typography.html" && file /tmp/toybrowser-css-compat.ppm
+```
+
+预期：每行样式保留 M14 之前字段并在行尾追加 ` min-width= min-height= max-width= max-height=
+line-height= text-align= visibility= text-decoration=`（px 取整、百分比带 `%`、适用时 `auto`/
+`none`、line-height 为 `normal`、去尾数或 `NNpx`）。盒 dump 显示冻结的 M14a 几何（百分比宽度、
+auto 居中、min/max 钳制、line-height 行盒），截图绘制对齐/下划线文本。不使用新属性的页面在
+`--dump-boxes`/截图像素上与 M13 逐字节相同；`--dump-style` 差异只限追加字段（byte-compat 门禁会
+规范化）。测试：`style.values`、`style.typography`、`layout.style_properties`、`shell.css_compat`、
+`shell.dump_style_css_compat`、`shell.css_compat_screenshot`；共 80 个测试。
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -172,26 +201,29 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 # 方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right 前进后退；窗口标题跟随 <title>。
 ```
 
-## 下一轮：M14 —— CSS 兼容批次 1（已计划；等维护者确认后开始）
+## 下一轮：M14b —— 盒装饰与约束（已计划；等维护者确认后开始）
 
-**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M14 代码。M13 已完成且全绿，因此
+**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M14b 代码。M14a 已完成且全绿，因此
 起点就是当前 HEAD。M15 是后续计划轮次；HTTP 代理仍在 M16，JavaScript 子集保持延后。契约在该轮开始时
 冻结。
 
-- 目标：在样式表已能被发现/抓取（M12）并高效加载（M13）之后，应用真实页面依赖的高频 CSS。代表性
-  真实样式表目前会使用（而我们忽略）：`line-height`、`text-align`、`text-decoration`、
-  `border`/`border-*` 颜色、`background` 简写的颜色部分、`max-width`/`min-width`、`margin: auto`、
-  `box-sizing`、逻辑属性（`margin-block-*`、`inline-size` 等）、`overflow: hidden` 裁剪、
-  `rgb()`/`hsl()`、`%`/`rem` 单位，以及 `display: none`/`visibility`。
-- 预期形态（spawn 前冻结）：扩展属性 parser、计算样式，并在需要处扩展 layout/paint，拆成小的、分别
-  测试的切片；保持 cascade/specificity/继承/`!important` 不变量；不使用新属性的页面保持逐字节输出
-  不变。批次过大时拆分（例如先 border，随后逻辑属性与单位）。
-- 在重新划范围之前不做：flexbox/grid/position/float（M15）、CSS 变量、其他 at-rule、webfont。
-- 测试：每个属性都有提交的 fixture 页面、确定性 dump/截图测试、无回归，并做手工真实站点视觉检查；
-  测试不访问公网。
-- 验收：每个属性都有 fixture 覆盖、GCC 与 Clang 全绿、无回归、手工真实站点检查可见地改善排版/配色，
-  且不使用新属性的页面保持逐字节不变。
-- M14 之后：M15 flexbox/position/float 子集。代理（M16）与 JavaScript 在维护者重新确认优先级之前
+- 目标：补齐 M14a 之后主导真实页面的剩余高频盒装饰差距：`border`/`border-*` 的宽度、样式与颜色
+  （长写与简写、绘制四边、把边框宽度计入盒几何/命中测试矩形）；`box-sizing`；`overflow: hidden`
+  裁剪；以及剩余 `text-decoration` 线值（`line-through`、`overline`）。除非单独划范围，
+  `border-radius` 留待以后（圆角光栅化本身是一个 paint/几何项目）。
+- 预期形态（spawn 前冻结）：parser/计算样式加入 border 长写与 border / box-sizing 简写；layout 从
+  内容盒减去边框宽度并扩大 border box；paint 用显示列表填充绘制边框（整数设备像素、冻结 SrcOver）
+  并裁剪 `overflow: hidden` 盒；只有保持确定性时才在 style/paint dump 增加字段，并在同一轮更新
+  字节兼容规范化。不使用新属性的页面保持逐字节输出。
+- 在重新划范围之前不做：flexbox/grid/position/float（M15）、`border-radius`（除非重新划范围）、
+  背景图片/渐变、CSS 变量、at-rule/webfont。
+- 测试：扩展 `tests/fixtures/css_compat_site/`，覆盖四边 border（混合样式/颜色）、box-sizing、
+  overflow 裁剪与 line-through/overline；确定性 dump/截图/像素测试；无回归；在视觉差距主要来自
+  border 的页面上做手工真实站点检查。
+- 验收：所有测试在 GCC/Clang WERROR 下全绿；不使用新属性的页面在 M14b 之前 dump/像素逐字节不变
+  （只对有意新增的 dump 字段做规范化）；每个属性都有 fixture 覆盖；真实站点检查显示 border/裁剪
+  生效；文档更新。
+- M14b 之后：M15 flexbox/position/float 子集。代理（M16）与 JavaScript 在维护者重新确认优先级之前
   保持延后。
 
 ## 仓库地图
@@ -211,7 +243,10 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
   样式表，由 `LoadPage` 与 `--dump-style` 共享；M13 起 `LoadPage` 每次加载创建一个 `net::Client`
   并贯穿页面、样式表与图片抓取，图片在本次加载内按解析后的 URL 去重；`src/style/` 负责选择器匹配与
   级联（UA、作者 `<style>` 与按文档顺序的链接样式表、内联 `style`），外部样式表以
-  `style::LinkedStyleSheet` 条目由 shell 提供，因此 `style` 从不抓取任何东西；
+  `style::LinkedStyleSheet` 条目由 shell 提供，因此 `style` 从不抓取任何东西。自 M14a 起计算值
+  模型携带 `Length`/`AutoLength`/`LineHeight`/`TextAlign`/`Visibility`，值层支持 `%`/`rem`、
+  十六进制/rgb/rgba/hsl/hsla 与 CSS 命名颜色、逻辑属性与 min/max/auto 约束，`--dump-style`
+  追加 M14a 字段（见 dump 契约）；
   `src/render/include/toy/render/image.h` —— `Image` 与基于 libpng 的 `DecodePng`；
   `src/render/include/toy/render/font.h` —— 位图字体度量加真实 `Font` API（加载、度量、整形 advance；
   公开头文件不含 freetype/harfbuzz 类型），实现位于 `src/render/font_ttf.cpp`；显示列表与光栅化器在
@@ -230,8 +265,9 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
   常规、粗体、斜体与一个小汉字 face，度量/字体族有文档；测试从不使用已安装字体）、
   `tests/fixtures/cjk_site/`（从磁盘加载的中文页面，断言逐单元文本盒、换行与绘制像素）、
   `tests/fixtures/css_site/`（M12 外部样式表 fixture 站点：子目录相对样式表、顺序、被过滤/失败/
-  重复链接，以及有文档的期望样式/几何/像素表）、
-  `tests/fixtures/https_site/`（shell 测试通过 TLS 提供的 HTML+PNG 页面）与 `tests/fixtures/tls/`（提交的仅测试用 CA、`localhost` 叶证书与不受信任叶
+  重复链接，以及有文档的期望样式/几何/像素表）、`tests/fixtures/css_compat_site/`（M14a CSS 兼容
+  fixture：values/typography/boxes 页加一个输出与 M13 逐字节相同的 legacy 页；README 记录每个期望
+  计算值、盒矩形与像素）、`tests/fixtures/https_site/`（shell 测试通过 TLS 提供的 HTML+PNG 页面）与 `tests/fixtures/tls/`（提交的仅测试用 CA、`localhost` 叶证书与不受信任叶
   证书/私钥；重新生成方法见其 README）。二进制 fixture 的生成器与 fixture 一起提交：
   `tests/fixtures/fonts/generate_toy_test.py`、`tests/fixtures/fonts/generate_variants.py` 与
   `tests/fixtures/images/generate.py`（只用标准库、输出确定；见各 fixture README）。
@@ -251,9 +287,10 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 ## 冻结契约（不要随意改动）
 
 - CLI 模式、标志与退出码：`0` 成功，`1` 运行时错误，`2` 用法错误。可选的位置参数页面 URL（`toybrowser [options] [url]`）只用于窗口模式和 `--screenshot`；最多一个 URL，不能与 `--dump-*` 模式组合，不给 URL 时保留 M1 占位页。M8b 新增 `--font PATH` 与 `--font-family NAME`：各自需要非空参数，二者互斥，且与 `--dump-body`/`--dump-dom`/`--dump-style` 组合是用法错误（退出码 2）；允许与窗口模式、`--screenshot`、`--dump-boxes` 组合。选中的字体无法加载/解析是运行时错误（退出码 1）。两个标志都不给时浏览器使用自动系统字体（M10：计算出的 CSS 字体族/weight/style 经 fontconfig，带字符回退）；只有没有可用系统字体时才退化到内置位图字体。`--font PATH` 保持单一精确 face、无回退；`--font-family NAME` 强制首选字体族并保留字符回退，且自 M10 起也遵循计算出的 weight/style。
-- Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。style dump 自 M10 起在 `font-style=` 之后有 `font-family=` 字段：项之间用 ", " 连接，匹配 `[A-Za-z0-9_-]+` 的项原样输出，否则用双引号包裹并以反斜杠转义 `\` 与 `"`。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层，格式在 M10/M11 均未改变（CJK 文本只是每个断行单元一个文本盒）。
-- 布局语义通过布局测试与 M5/M8a/M10 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，换行发生在空白处以及 M10 的 CJK 断行单元（每个 CJK 字符一个单元、简化标点禁则；拉丁词永不拆开、没有完整 UAX#14/词典断行）。自 M10 起 `MeasureText` 回调也收到文本的 `style::ComputedStyle`；`TextMetrics` 携带 `ascent_px`，每个文本盒携带 `baseline_offset_px` = 行最大 ascent（只是元数据，不参与 dump）。M8a replaced 元素：`LayoutOptions::replaced_sizes`（DOM 节点 id → 固有 CSS px）把行内元素变成原子行内级盒；CSS `width`/`height` px 覆盖固有尺寸，只指定一侧时保持固有宽高比，盒整体换行、抬高行高并顶部对齐；其 dump 行仍是 `<tag> inline x= y= width= height=`，没有子节点，`display:block` 的 replaced 元素不支持，replaced 盒的 margin/padding 被忽略。没有条目的页面保持原有几何逐字节不变。
-- 绘制语义通过 M6/M7 测试冻结：显示列表命令使用整数设备像素（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）；填充对不透明目标使用 SrcOver 公式 `(src * a + dst * (255 - a) + 127) / 255`；初始裁剪是整个 surface，光栅化工作量受裁剪限制；`shell` 把 canvas 填白；绘制顺序是盒树前序（先背景、再图片、再子节点/文本）；文本使用内置 8x16 ASCII 字形，最近邻缩放、无抗锯齿、非 ASCII 用 `?`、文本像素不透明。
+- Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。style dump 自 M10 起在 `font-style=` 之后有 `font-family=` 字段：项之间用 ", " 连接，匹配 `[A-Za-z0-9_-]+` 的项原样输出，否则用双引号包裹并以反斜杠转义 `\` 与 `"`。自 M14a 起每行样式还在行尾按序追加 ` min-width= min-height= max-width= max-height= line-height= text-align= visibility= text-decoration=`：长度取整为 CSS px（`12px`）或百分比（`50%`），无约束 min/max 打印 `none`，auto 宽高/margin 打印 `auto`，line-height 打印 `normal`、去尾数的无单位数字（最多 3 位小数）或 `NNpx`，text-align 打印 `left|right|center|justify`（细节见 [architecture.md](architecture.md)）。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层，格式在 M10/M11 均未改变（CJK 文本只是每个断行单元一个文本盒）。
+- CSS 值契约（M14a）：`style::Length {value, unit(px/percent)}`、`AutoLength` margin、`LineHeight {kind: normal/number/px, value}` 以及 `TextAlign`/`Visibility` 枚举。字体相对单位在 style 内解析（`em` 相对元素自身最终字号、`%` 字号相对父元素、`rem` 相对根 html 元素的计算字号；根元素自身的 rem 用 16px 初始值）。盒属性 `%` 长度在 `ComputedStyle` 中保持未解析，交给 layout 解析。颜色：`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`、旧式逗号分隔 `rgb()`/`rgba()`/`hsl()`/`hsla()`、完整 CSS Color Level 4 命名颜色集与 `transparent`；文本颜色不透明（丢弃 alpha），背景颜色在 0xAARRGGBB 中保留 alpha。`background` 简写只应用颜色部分（第一个可解析颜色 token；其他组件忽略）。逻辑属性在 horizontal-tb 下映射到物理字段：`margin/padding-block-start|end`、`margin/padding-inline-start|end`、`margin/padding-block|inline` 简写、`inline-size`/`block-size`、`min/max-inline-size`/`min/max-block-size`。`line-height`/`text-align`/`visibility`/`text-decoration: underline` 在本 MVP 中继承（text-decoration 的传播简化为继承；只表示 underline 标志）；`justify` 能解析但按 left 排版；`line-through`/`overline` 能解析但 M14b 之前不绘制。不支持的写法（line-height 的 rem、vh/vw、现代空格分隔颜色函数语法、百分比高度）是 roadmap M14a 记录的已知限制。
+- 布局语义通过布局测试与 M5/M8a/M10 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，换行发生在空白处以及 M10 的 CJK 断行单元（每个 CJK 字符一个单元、简化标点禁则；拉丁词永不拆开、没有完整 UAX#14/词典断行）。自 M10 起 `MeasureText` 回调也收到文本的 `style::ComputedStyle`；`TextMetrics` 携带 `ascent_px`，每个文本盒携带 `baseline_offset_px` = 行最大 ascent（只是元数据，不参与 dump）。M8a replaced 元素：`LayoutOptions::replaced_sizes`（DOM 节点 id → 固有 CSS px）把行内元素变成原子行内级盒；CSS `width`/`height` px 覆盖固有尺寸，只指定一侧时保持固有宽高比，盒整体换行、抬高行高并顶部对齐；其 dump 行仍是 `<tag> inline x= y= width= height=`，没有子节点，`display:block` 的 replaced 元素不支持，replaced 盒的 margin/padding 被忽略。没有条目的页面保持原有几何逐字节不变。M14a 布局契约：`Length::kPercent` 盒长度相对包含块内容宽度解析（width、min/max-width、四边 margin 与 padding；垂直百分比也用宽度，按 CSS）；百分比高度与 min/max-height 不支持、按 auto/无约束处理；内容宽度在指定/auto 宽度解析后按 min 后 max 顺序钳制；宽度确定（指定或经钳制解析）时水平 `auto` margin 分配剩余空间，auto 宽度与过约束时保持 0；px min/max-height 在内容/固定高度之后钳制；文本项的 line-height 贡献为 px 值、数字×字号或 `normal` 的测量行高，行盒取最大贡献，half-leading 定位共享基线（`normal` 精确贡献测量行高，因此 M14 之前几何不变）；`text-align` 在断行后整体平移已定稿行的每个盒（right/center；`justify` 按 left，过长行保持左对齐）；行内/replaced 的百分比 margin/padding 用行宽，replaced 百分比宽度用包含宽度、百分比高度为 auto。visibility 从不改变布局。
+- 绘制语义通过 M6/M7 测试冻结：显示列表命令使用整数设备像素（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）；填充对不透明目标使用 SrcOver 公式 `(src * a + dst * (255 - a) + 127) / 255`；初始裁剪是整个 surface，光栅化工作量受裁剪限制；`shell` 把 canvas 填白；绘制顺序是盒树前序（先背景、再图片、再子节点/文本）；文本使用内置 8x16 ASCII 字形，最近邻缩放、无抗锯齿、非 ASCII 用 `?`、文本像素不透明。M14a 绘制：计算 `visibility` 为 hidden 的盒不输出背景/图片/文本（也不输出下划线），但遍历仍进入其子节点，因此可见后代正常绘制，布局空间不变；计算 `text-decoration: underline` 的文本盒在其文本命令之后发出一个 `FillRect(x = round(box.x), y = round(box.y) - scroll_y + round(box.baseline_offset_px) + 1, width = round(box.width), height = 1, color = 文本颜色)`，使用相同的文本裁剪；不使用这两个属性的页面保持与 M14 之前逐字节相同的命令列表。
   M7 绘制：非空页面恰好被一个 `PushClip(0, 0, viewport)`/`PopClip` 对包裹，每条命令的 y 按
   `-scroll_y`（整数设备像素，x 不变）平移；没有图片的页面在滚动 0 必须与 M6/M7 逐字节一致。
   M8a 图片：节点 id 在 `paint::ImageMap` 中的行内 replaced 盒各发出一条 `DrawImage`，在该盒背景之后；
@@ -576,7 +613,30 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 - 真实页面性能检查是手工的、依赖机器/网络：同一页面比较 before/after 并把数字写进轮次报告；绝不把
   耗时断言加进 CTest。zlib 通过 CMake（`find_package(ZLIB REQUIRED)`）PRIVATE 链接到 `toy_net`；
   保持 zlib 类型不进入公开头文件，也不要硬编码版本/路径。
-- fixture 生成器与它们生成的 fixture 一起提交
+- M14a 的 `--dump-style` 追加字段是冻结格式变更：字节兼容门禁在比较 M14 之前的样式 dump 前会剥掉
+  从 ` min-width=` 到行尾（`sed -E 's/ min-width=.*$//'`），而盒 dump/PPM 仍必须 `cmp` 逐字节相同。
+  再追加行尾样式字段时，要在同一轮更新门禁规范化、样式 dump 契约与 handoff/architecture 文档。
+- M14a 的百分比高度、min/max-height 百分比、line-height 的 rem、`justify`、`line-through`/
+  `overline`、文本 alpha、`border*`、`box-sizing`、`overflow` 裁剪与现代空格分隔 `rgb()`/`hsl()`
+  语法目前都是刻意限制——不要临时“修复”；M14b 负责 border/box-sizing/overflow/剩余装饰，其他范围
+  变更需要更新 roadmap。逻辑属性只支持 horizontal-tb；命名颜色是完整 CSS Color 4 集，但颜色函数只
+  支持旧式逗号语法。
+- M14a 布局不变量：盒属性百分比相对包含块内容宽度解析（含垂直 margin/padding），绝不相对高度；
+  宽度确定（指定或经钳制解析）时 auto margin 才居中，过约束时保持 0；宽度钳制顺序是 min 后 max；
+  `normal` line-height 必须保持 M14 之前几何逐字节不变（half-leading 0）；text-align 只平移已定稿
+  行的盒（绝不影响断行），`justify` 按 left。文本盒的 `baseline_offset_px` 是给 real-font 绘制用的
+  元数据；位图绘制仍在行盒内顶部对齐字形，因此大 line-height 会在位图字形下方留出空间、下划线位于
+  baseline+1（real-font 路径用 half-leading 居中）。不要改盒 dump 格式。
+- M14a paint 不变量：隐藏盒仍必须向下遍历，使可见后代能绘制；下划线几何/颜色/顺序/裁剪由 paint
+  测试冻结；不使用新属性的页面必须保持与 M14 之前逐字节相同的显示列表。
+  `tests/fixtures/css_compat_site/` 在 README 与 `shell.css_compat`/`shell.dump_style_css_compat`
+  中冻结期望计算值、盒几何与像素；改 fixture、布局语义或 paint 公式要一起更新它们（与
+  nav/img/font/css fixtures 规则相同）。
+- 真实站点 CSS 检查保持手工：页面内容/截图放 `.tmp/`，绝不提交或放进 CTest；调查的属性频率
+  （border 约 385 条声明、border-radius 约 121、position/float 约 219、media queries 等）只是范围
+  决策的临时证据，不是契约。
+- 新测试辅助代码要过双编译器：M14a 中 GCC 接受了 `tests/layout/` 匿名命名空间的未使用常量，而
+  Clang `-Werror` 拒绝；始终对整棵测试树跑两个编译器。
 - fixture 生成器与它们生成的 fixture 一起提交（`tests/fixtures/fonts/generate_toy_test.py`、
   `tests/fixtures/fonts/generate_variants.py`、`tests/fixtures/images/generate.py`）。字体生成器逐字节
   复现已提交 TTF；PNG 生成器复现有文档的像素内容（精确 PNG 字节可能随本地 zlib 版本变化）。不要手工

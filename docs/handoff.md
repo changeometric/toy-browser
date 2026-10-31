@@ -27,25 +27,34 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M11 | Performance: default RelWithDebInfo build with `-ffp-contract=off`; render text caches (one reusable hb_font/hb_buffer per font, bounded shaped-run and glyph-coverage LRU caches); shell font caches (allocation-free resolved-style fast path, metrics and run LRUs); paint viewport culling with a conservative text margin; window loop fixes (Expose without relayout, resize only on actual change, coalesced X11 Expose/ConfigureNotify bursts, reused surface); byte-identical rendering; 66 tests |
 | M12 | External stylesheets: public `style::LinkedStyleSheet` + two-arg `ComputeStyles(document, linked_sheets)` merging linked sheets and `<style>` elements by document order (one-arg overload byte-identical to M11); shell-private `LoadStyledDocument()` sharing one fetch/parse/discover/filter/fetch-sheets/style path between page loading and `--dump-style`; `rel`/`disabled`/`media`/`type` filtering, `href` resolved against the final page URL after redirects, 200..299 bodies only, failed/filtered sheets skipped silently, one fetch per `<link>` occurrence (no dedup); `--dump-dom`/`--dump-body` still fetch no sheets; committed `tests/fixtures/css_site/`, header-only `tests/support/http_server.h` loopback server, `style.external_sheets` + `shell.external_css` + CLI tests; 70 tests; byte-compat and GCC/Clang gates green |
 | M13 | Resource loading: public `net::Client` (pimpl, single-threaded) with one idle keep-alive HTTP/1.1 connection per origin, incremental Content-Length/chunked framing with read-ahead for the next request, HTTP/1.1/1.0 persistence rules, transparent gzip via the approved zlib (raw and decoded bodies bounded, other codings are errors), one stale-connection retry before any response byte, redirects and `file://` through the same client; the one-shot `Fetch()` keeps its exact request bytes/behavior. Shell `LoadPage` creates one Client per load for page + stylesheets + images and dedups image URLs per page load (duplicate URLs share one fetch/decode/image object; failed URLs remembered; every `<link>` occurrence still fetched; no cross-load cache). Shared loopback HTTP/TLS test servers gained persistent-connection modes and connection/request counters; `net.keep_alive`, `net.gzip`, `net.tls_keep_alive` and `shell.resource_loading`; 74 tests; byte-compat, GCC/Clang and measured real-page load-time gates |
+| M14a | CSS values & typography: `%`/`rem` units, `rgb()`/`rgba()`/`hsl()`/`hsla()` + full CSS named-color set, `background` shorthand color, logical properties mapped to physical sides, min/max-width/height, `margin: auto`, `line-height`, `text-align`, `text-decoration: underline`, `visibility`; new computed `Length`/`AutoLength`/`LineHeight`/`TextAlign`/`Visibility` model (box percentages unresolved for layout), style dump appends `min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`; layout resolves percentages against the containing content width, clamps min/max, centers with auto margins, applies line-height half-leading baselines and text-align line shifting; paint honors visibility and underlines; committed `tests/fixtures/css_compat_site/`; `style.values`, `style.typography`, `layout.style_properties`, `shell.css_compat`, `shell.dump_style_css_compat`, `shell.css_compat_screenshot`; 80 tests; byte-compat (style-normalized), GCC/Clang and real-site visual gates |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-**Next planned milestone: M14 — CSS compatibility batch 1 (planned, not started).**
-M13 (resource loading) shipped: keep-alive connections, gzip and per-page image deduplication cut
-the measured load wall time roughly in half (python.org at 800x600: 2.07 s -> 0.99 s median;
-w3.org: 3.88 s -> 1.79 s; identical screenshots), and real stylesheets are now fetched over reused
-connections. M14 applies the high-frequency CSS real pages rely on; M15 then covers the
-flexbox/position/float subset. The HTTP proxy (M16) and the JavaScript subset remain deferred.
+**Next planned milestone: M14b — Box decorations & constraints (planned, not started).**
+M14a (CSS values & typography) shipped: real pages now apply percentages/rem, rgb/rgba/hsl and
+named colors, background-shorthand colors, logical properties, min/max sizes, auto margins,
+line-height, text-align, underlines and visibility. Manual real-site checks show the batch working
+(gnu.org's red nav bar now paints, w3.org's nav line-spacing/centering applies, python.org applies
+275 centered and 88 line-height elements). M14b adds the remaining high-frequency box decorations —
+borders/border-*, box-sizing, overflow clipping and line-through/overline — which dominate the
+remaining real-site visual gap (385 border declarations in the surveyed stylesheets, plus 121
+border-radius that stay out unless separately scoped). M15 then covers flexbox/position/float. The
+HTTP proxy (M16) and the JavaScript subset remain deferred.
 
 Not implemented yet: parallel/threaded resource loading, cross-page image caching and lazy loading
-(M13 keeps serial reuse and per-page dedup only), CSS compatibility and modern layout (M14/M15),
-proxies (M16), JavaScript
-(deferred), borders, horizontal scrolling/scrollbars, hover/active link styling and form controls,
-`@font-face`/webfont downloads, XShm/dirty-rect presentation, and GPU rendering (a deliberate
-decision, see roadmap M11). Keep-alive HTTP/1.1, gzip decoding and per-page image deduplication
-work since M13; external `<link rel="stylesheet">` sheets work since M12 (discovered in
-document order, filtered, resolved against the final URL, fetched and cascaded with `<style>` and
-`style` attributes; no `@import`, media queries, alternate/disabled sheet selection or CSS images
-yet); pages without links are byte-identical to M11. Font selection works automatically since M10
+(M13 keeps serial reuse and per-page dedup only), borders/border-radius/box-sizing/overflow
+clipping/box-shadow and the remaining text decorations (M14b), position/float/flexbox/grid and
+other display values (M15), proxies (M16), JavaScript (deferred), horizontal scrolling/scrollbars,
+hover/active link styling and form controls, `@font-face`/webfont downloads, XShm/dirty-rect
+presentation, and GPU rendering (a deliberate decision, see roadmap M11). Since M14a the CSS value
+layer covers `%`/`rem`, color functions and full named colors (legacy comma syntax only), logical
+properties (horizontal-tb), min/max sizes, auto margins, line-height, text-align (not justify),
+underlines and visibility — see the known limits in [roadmap.md](roadmap.md). Keep-alive HTTP/1.1,
+gzip decoding and per-page image deduplication work since M13; external `<link rel="stylesheet">`
+sheets work since M12 (discovered in document order, filtered, resolved against the final URL,
+fetched and cascaded with `<style>` and `style` attributes; no `@import`, media queries,
+alternate/disabled sheet selection or CSS images yet); pages without links are byte-identical to
+M11. Font selection works automatically since M10
 (CSS families/weight/style through fontconfig, character-coverage fallback, CJK line breaking);
 other scripts are best-effort and bidi/RTL plus full Unicode line breaking are not implemented. PNG
 images work since M8a, real fonts since M8b and `https://` since M9 (see the known limits in
@@ -75,7 +84,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 74/74 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 80/80 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
 or newer is required; building needs the X11, libpng, freetype, harfbuzz, fontconfig and OpenSSL
@@ -124,6 +133,28 @@ stale idle connection, gzip decoding); the one-shot `Fetch()` stayed byte-compat
 pre-M13 dump/screenshot is unchanged. On the development machine the manual page dropped from
 ~2.1 s to ~1.0 s with identical pixels (M13 round report); the exact numbers are machine/network
 dependent, so do not turn them into test assertions.
+
+```sh
+# CSS values & typography (M14a): the committed css_compat_site fixture covers percentages/rem,
+# colors, logical properties, min/max sizes, auto margins, line-height, text-align, underline and
+# visibility; its legacy.html page uses only pre-M14 CSS and must stay byte-identical.
+"$BUILD"/toybrowser --dump-style \
+    "file://$PWD/tests/fixtures/css_compat_site/values.html" | tail -n +2 | head
+"$BUILD"/toybrowser --size 320x200 --dump-boxes \
+    "file://$PWD/tests/fixtures/css_compat_site/boxes.html" | head
+"$BUILD"/toybrowser --size 320x400 --screenshot /tmp/toybrowser-css-compat.ppm \
+    "file://$PWD/tests/fixtures/css_compat_site/typography.html" && file /tmp/toybrowser-css-compat.ppm
+```
+
+Expected: every style line keeps the pre-M14 fields and appends ` min-width= min-height=
+max-width= max-height= line-height= text-align= visibility= text-decoration=` (px lengths round,
+percentages print with `%`, `auto`/`none` where applicable, line-height prints `normal`, a trimmed
+unitless number or `NNpx`). The box dump shows the frozen M14a geometry (percentage widths, auto
+centering, min/max clamping, line-height line boxes) and the screenshot paints the aligned/
+underlined text. `--dump-boxes`/screenshots of pages that use none of the new properties are
+byte-identical to M13; a `--dump-style` difference is limited to the appended fields (the byte-compat
+gate normalizes them). Tests: `style.values`, `style.typography`, `layout.style_properties`,
+`shell.css_compat`, `shell.dump_style_css_compat`, `shell.css_compat_screenshot`; 80 tests total.
 
 ```sh
 # Images (M8a): the committed PNG fixtures render end to end.
@@ -201,31 +232,35 @@ Window demo (needs a display):
 # history; the title follows <title>.
 ```
 
-## Next round: M14 — CSS compatibility batch 1 (planned; starts only on the maintainer's go-ahead)
+## Next round: M14b — Box decorations & constraints (planned; starts only on the maintainer's go-ahead)
 
-**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M14 code exists. M13 is complete and
-green, so the starting point is the current HEAD. M15 is the following planned round; the HTTP proxy
-stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when the round starts.
+**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M14b code exists. M14a is complete
+and green, so the starting point is the current HEAD. M15 is the following planned round; the HTTP
+proxy stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when the round
+starts.
 
-- Goal: apply the high-frequency CSS that real pages rely on, now that their stylesheets are
-  discovered/fetched (M12) and loaded efficiently (M13). Representative real stylesheets currently
-  exercise and we ignore: `line-height`, `text-align`, `text-decoration`, `border`/`border-*`
-  colors, the color part of the `background` shorthand, `max-width`/`min-width`, `margin: auto`,
-  `box-sizing`, logical properties (`margin-block-*`, `inline-size`, ...), `overflow: hidden`
-  clipping, `rgb()`/`hsl()`, `%`/`rem` units, and `display: none`/`visibility`.
-- Expected shape (freeze before spawning): extend the property parser and computed style, and where
-  required layout/paint, in small separately tested slices; keep the cascade/specificity/
-  inheritance/`!important` invariants unchanged. Pages that do not use the new properties keep
-  byte-identical output. If the batch grows too large it is split (for example borders first, then
-  logical properties/units).
-- Out of scope until re-scoped: flexbox/grid/position/float (M15), CSS variables, other at-rules,
-  webfonts.
-- Tests: committed fixture pages for each property, deterministic dump/screenshot tests, no
-  regressions, and a manual real-site visual check; no public network in tests.
-- Acceptance: fixture coverage for each property, all tests green on GCC and Clang, no regressions,
-  a manual real-site check visibly improves typography/colors, and pages not using the new
-  properties stay byte-identical.
-- After M14: M15 flexbox/position/float subset. The proxy (M16) and JavaScript stay deferred until
+- Goal: close the remaining high-frequency box-decoration gap that dominates real pages after
+  M14a: `border`/`border-*` width, style and color (longhands and shorthands), painting all four
+  sides and including border widths in the box geometry/hit-test rectangles; `box-sizing`;
+  `overflow: hidden` clipping; and the remaining `text-decoration` line values (`line-through`,
+  `overline`). `border-radius` stays out unless separately scoped (rounded-corner rasterization is
+  a paint/geometry project of its own).
+- Expected shape (freeze before spawning): parser/computed style gains border longhands and the
+  border / box-sizing shorthands; layout subtracts border widths from the content box and grows the
+  border box; paint draws borders as display-list fills (integer device pixels, frozen SrcOver) and
+  clips `overflow: hidden` boxes; style/paint dumps gain fields only if deterministic and the
+  byte-compat normalization is updated in the same round. Pages not using the new properties keep
+  byte-identical output.
+- Out of scope until re-scoped: flexbox/grid/position/float (M15), `border-radius` (unless
+  re-scoped), background images/gradients, CSS variables, at-rules/webfonts.
+- Tests: extend `tests/fixtures/css_compat_site/` with borders on all sides (mixed styles/colors),
+  box-sizing, overflow clipping and line-through/overline; deterministic dump/screenshot/pixel
+  tests; no regressions; manual real-site check on pages whose remaining gaps are dominated by
+  borders.
+- Acceptance: all tests GCC/Clang WERROR green; pre-M14b dumps/pixels byte-identical for pages not
+  using the new properties (normalized only for any intentional dump fields); fixture coverage for
+  every property; real-site check shows borders/clipping applying; docs updated.
+- After M14b: M15 flexbox/position/float subset. The proxy (M16) and JavaScript stay deferred until
   the maintainer prioritises them.
 
 ## Map of the repository
@@ -242,7 +277,10 @@ stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when
   image fetches, and images are deduplicated per resolved URL within the load;
   `src/style/` matches selectors and resolves the wrapper cascade (UA, author `<style>` and linked
   sheets in document order, inline `style`), with `style::LinkedStyleSheet` entries supplied by the
-  shell so `style` never fetches anything;
+  shell so `style` never fetches anything. Since M14a the computed value model carries
+  `Length`/`AutoLength`/`LineHeight`/`TextAlign`/`Visibility`, the value layer supports `%`/`rem`,
+  hex/rgb/rgba/hsl/hsla and the CSS named colors, logical properties and min/max/auto constraints,
+  and `--dump-style` appends the M14a fields (see the dump contract);
   `src/render/include/toy/render/image.h` — `Image` and the libpng-backed `DecodePng`;
   `src/render/include/toy/render/font.h` — bitmap-font metrics plus the real `Font` API (load,
   metrics, shaped advances; no freetype/harfbuzz types in the header), implemented by
@@ -273,7 +311,9 @@ stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when
   use installed fonts), `tests/fixtures/cjk_site/` (Chinese page served from disk, asserting
   per-unit boxes, wrapping and painted ink), `tests/fixtures/css_site/` (M12 external-stylesheet
   fixture site: relative subdirectory sheet, ordering, filtered/failing/duplicate links and a
-  documented expected style/geometry/pixel table), `tests/fixtures/https_site/`
+  documented expected style/geometry/pixel table), `tests/fixtures/css_compat_site/` (M14a CSS
+  compatibility pages for values/typography/boxes plus a legacy page whose output stays M13-identical;
+  its README documents every expected computed value, box rectangle and pixel), `tests/fixtures/https_site/`
   (HTML+PNG page served over TLS by the shell test) and `tests/fixtures/tls/` (committed test-only
   CA, `localhost` leaf and untrusted leaf certificates/keys; see its README for regeneration).
   The binary fixtures ship their generators next to them: `tests/fixtures/fonts/generate_toy_test.py`,
@@ -313,17 +353,54 @@ stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when
 - Dump formats (DOM, style, boxes): deterministic, line-oriented, asserted by tests; any change
   needs tests and docs in the same round. The style dump has a `font-family=` field after
   `font-style=` since M10: items joined with ", ", raw when the item matches `[A-Za-z0-9_-]+`,
-  otherwise double-quoted with `\` and `"` backslash-escaped. The box dump is pre-order lines of
+  otherwise double-quoted with `\` and `"` backslash-escaped. Since M14a every style line also
+  appends, in this order, ` min-width= min-height= max-width= max-height= line-height= text-align=
+  visibility= text-decoration=`: lengths round to integral CSS px (`12px`) or percentages (`50%`),
+  unconstrained min/max print `none`, auto width/height/margins print `auto`, line-height prints
+  `normal`, a trimmed unitless number (up to 3 decimals) or `NNpx`, text-align prints
+  `left|right|center|justify` (details in [architecture.md](architecture.md)). The box dump is
+  pre-order lines of
   `<tag> block|inline`, `anonymous block` or `text "..."` followed by `x= y= width= height=`, all
   integers (`std::lround`) of absolute CSS pixels; indent is two spaces per box depth, capped at 64
   levels, and its format is unchanged by M10/M11 (CJK text simply yields one text box per break unit).
+- CSS values contract (M14a): `style::Length {value, unit(px/percent)}`, `AutoLength` margins,
+  `LineHeight {kind: normal/number/px, value}` and the `TextAlign`/`Visibility` enums. Font-relative
+  units resolve in style (`em` against the element's own final font size, `%` font-size against the
+  parent, `rem` against the root html element's computed font size; the root's own rem uses the
+  16px initial size). Box-property `%` lengths stay unresolved in `ComputedStyle` for layout. Colors:
+  `#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`, legacy comma-separated `rgb()`/`rgba()`/`hsl()`/`hsla()`,
+  the full CSS Color Level 4 named-color set and `transparent`; text color is opaque (alpha
+  dropped), background color keeps alpha in 0xAARRGGBB. The `background` shorthand applies only its
+  color component (the first parseable color token; other components ignored). Logical properties
+  map to physical fields in horizontal-tb: `margin/padding-block-start|end`, `margin/padding-inline-
+  start|end`, the `margin/padding-block|inline` shorthands, `inline-size`/`block-size`,
+  `min/max-inline-size`/`min/max-block-size`. `line-height`/`text-align`/`visibility`/
+  `text-decoration: underline` are inherited in this MVP (text-decoration propagation is simplified
+  to inheritance; only the underline flag is represented); `justify` is parsed but laid out as
+  left; `line-through`/`overline` are parsed but not painted until M14b. Unsupported units
+  (`pt/rem` on line-height, `vh/vw`, ...), modern space-separated color-function syntax and
+  percentage heights are documented limits (roadmap M14a).
 - Layout semantics frozen through the layout tests and the M5/M8a/M10 known limits: viewport width
   from `--size`, no margin collapsing, top-aligned lines, word-level text boxes, and line breaking
   at whitespace plus M10 CJK break units (individual CJK characters, simplified punctuation
   prohibitions; Latin words never split, no full UAX#14/dictionary breaking). Since M10 the
   `MeasureText` callback also receives the text's `style::ComputedStyle`; `TextMetrics` carries
-  `ascent_px` and each text box carries `baseline_offset_px` = the line's maximum ascent (metadata
-  only, not dumped). M8a replaced elements: `LayoutOptions::replaced_sizes` (DOM node id → intrinsic CSS px)
+  `ascent_px` and each text box carries `baseline_offset_px` = the line's maximum text baseline
+  (metadata only, not dumped; since M14a it includes line-height half-leading, and for `normal`
+  line-height it equals the M13 maximum ascent). M14a layout contract: `Length::kPercent` box
+  lengths resolve against the containing block CONTENT WIDTH (width, min/max-width, all four
+  margins and paddings; vertical percentages use the width too, per CSS); percentage heights and
+  min/max-heights are unsupported and behave as auto/no-constraint; content widths are clamped
+  min-then-max after the specified/auto-width resolution; horizontal `auto` margins distribute the
+  remaining space when the width is definite (specified or clamp-resolved), are 0 for an auto width
+  and 0 when over-constrained; px min/max-height clamps apply after the content/fixed height; a text
+  item's line-height contribution is the px value, number*font-size, or the measured line height for
+  `normal`, the line box is as tall as the tallest contribution and half-leading positions the
+  shared baseline (`normal` contributes exactly the measured line height, so pre-M14 geometry is
+  unchanged); `text-align` shifts every box of a finalized line by the right/center offset after
+  line breaking (`justify` lays out as left, overlong lines stay left); inline/replaced percentage
+  margins/paddings use the line width, replaced percentage width uses the containing width and
+  percentage height is auto. Visibility never changes layout. M8a replaced elements: `LayoutOptions::replaced_sizes` (DOM node id → intrinsic CSS px)
   makes an inline element an atomic inline-level box; CSS `width`/`height` px override the
   intrinsic size, one specified side keeps the intrinsic ratio, the box wraps as a whole, raises
   the line height and is top-aligned; its dump line stays `<tag> inline x= y= width= height=`, it
@@ -335,7 +412,13 @@ stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when
   whole surface and rasterizer work is bounded by the clip; the shell fills the canvas white; paint
   order is box-tree pre-order (background, then image, then children/text); text uses the built-in
   8x16 ASCII glyphs with nearest-neighbour scaling, no anti-aliasing, `?` for non-ASCII, and
-  opaque text pixels. M7 painting: a non-empty page is wrapped in exactly one
+  opaque text pixels. M14a painting: a box whose computed `visibility` is hidden emits no
+  background/image/text (and no underline) but the walk still descends into its children, so a
+  visible descendant paints normally, and layout space is unchanged; a text box with
+  `text-decoration: underline` emits one `FillRect(x = round(box.x), y = round(box.y) - scroll_y +
+  round(box.baseline_offset_px) + 1, width = round(box.width), height = 1, color = text color)` right
+  after that box's text commands, under the same text culling; pages using neither property keep the
+  byte-identical pre-M14 command list. M7 painting: a non-empty page is wrapped in exactly one
   `PushClip(0, 0, viewport)`/`PopClip` pair and every command's y is translated by `-scroll_y`
   (integer device pixels, x unchanged); a scroll-0 render must stay byte-identical to M6/M7 when
   the page has no images. M8a images: one `DrawImage` per inline replaced box whose node id is in
@@ -789,6 +872,39 @@ stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when
   the same page and record numbers in the round report; never add wall-time assertions to CTest.
   zlib is linked PRIVATE to `toy_net` through CMake (`find_package(ZLIB REQUIRED)`); keep zlib types
   out of public headers and do not hardcode versions/paths.
+- M14a `--dump-style` appended fields are a frozen format change: the byte-compat gate strips
+  everything from ` min-width=` to end of line before comparing pre-M14 style dumps
+  (`sed -E 's/ min-width=.*$//'`), while box dumps/PPMs must still `cmp` byte-identically. Adding
+  further trailing style fields means updating the gate normalization, the style dump contract and
+  the handoff/architecture docs in the same round.
+- M14a percentage heights, `min/max-height` percentages, `line-height` in `rem`, `justify`,
+  `line-through`/`overline`, text alpha, `border*`, `box-sizing`, `overflow` clipping and modern
+  space-separated `rgb()`/`hsl()` syntax are deliberate limits for now — do not "fix" them ad hoc;
+  M14b owns borders/box-sizing/overflow/remaining decorations, and any other scope change needs the
+  roadmap updated. Logical properties are horizontal-tb only; named colors are the full CSS Color 4
+  set but color functions only support legacy comma syntax.
+- M14a layout invariants: percentages of box properties resolve against the containing block
+  CONTENT WIDTH (including vertical margins/padding), never against height; `auto` margins center
+  only when the width is definite (specified or clamp-resolved) and are 0 when over-constrained;
+  width clamping is min-then-max; `normal` line-height must keep the pre-M14 geometry byte for byte
+  (half-leading 0); text alignment shifts the finalized line's boxes only (never affects line
+  breaking) and `justify` behaves as left. The `baseline_offset_px` of text boxes is metadata used by
+  real-font painting; bitmap painting still top-aligns glyph cells, so a large line-height shows
+  extra space below bitmap glyphs and an underline sits at baseline+1 (real-font path centers via
+  half-leading). Do not change the box dump format.
+- M14a paint invariants: a hidden box must still be descended into so a visible descendant paints;
+  underline geometry/color/order/culling is frozen by the paint tests; pages without the new
+  properties must keep the byte-identical pre-M14 display list. `tests/fixtures/css_compat_site/`
+  freezes expected computed values, box geometry and pixels in its README plus
+  `shell.css_compat`/`shell.dump_style_css_compat`; changing the fixture, layout semantics or paint
+  formulas means updating all of them together (same rule as the nav/img/font/css fixtures).
+- Real-site CSS checks stay manual: keep page content/screenshots in `.tmp/`, never commit them or
+  put them in CTest; the surveyed property frequencies (borders ~385 declarations, border-radius
+  ~121, position/float ~219, media queries, etc.) are scratch evidence for scope decisions, not a
+  contract.
+- Cross-compiler coverage matters for new test helpers: GCC accepted `tests/layout/`'s unused
+  anonymous-namespace constants while Clang `-Werror` rejected them (M14a round); always run both
+  compilers on the full test tree.
 - Fixture generators are committed next to the fixtures they produce (`tests/fixtures/fonts/generate_toy_test.py`,
   `tests/fixtures/fonts/generate_variants.py`, `tests/fixtures/images/generate.py`). The font
   generators reproduce the committed TTFs byte for byte; the PNG generator reproduces the documented

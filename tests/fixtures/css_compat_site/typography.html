@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <title>CSS compatibility: typography</title>
+  <style>
+    /* A unitless line-height multiplies the element's own font size (20 * 1.5). */
+    #lh-number { font-size: 20px; line-height: 1.5; }
+    /* A px line-height is absolute at any font size. */
+    #lh-px { line-height: 24px; }
+    /* normal keeps the font's own line metrics. */
+    #lh-normal { line-height: normal; }
+    /* text-align positions the line boxes inside the block. */
+    #center { text-align: center; }
+    #right { text-align: right; }
+    /* text-decoration: underline on a block inherits to its text boxes. */
+    #underline { text-decoration: underline; }
+    /* visibility: hidden keeps the box and its layout space but hides its
+       background and text; the visible child paints again. */
+    #hidden { visibility: hidden; background-color: #123456; }
+    #hidden-child { visibility: visible; background-color: #abcdef; }
+  </style>
+</head>
+<body>
+  <p id="lh-number">Line height number</p>
+  <p id="lh-px">Line height px</p>
+  <p id="lh-normal">Line height normal</p>
+  <p id="center">Centered</p>
+  <p id="right">Right</p>
+  <p id="underline">Underlined</p>
+  <div id="hidden"><span id="hidden-child">Visible child</span></div>
+  <p id="outside">Outside text</p>
+</body>
+</html>

@@ -44,3 +44,10 @@ add_executable(layout_cjk_line_break_test cjk_line_break_test.cpp)
 toybrowser_set_warnings(layout_cjk_line_break_test)
 target_link_libraries(layout_cjk_line_break_test PRIVATE toy_layout toy_test_support)
 add_test(NAME layout.cjk_line_break COMMAND layout_cjk_line_break_test)
+
+# M14 CSS layout: percentage resolution, min/max constraints, auto margins,
+# line-height and text-align.
+add_executable(layout_style_properties_test style_properties_test.cpp)
+toybrowser_set_warnings(layout_style_properties_test)
+target_link_libraries(layout_style_properties_test PRIVATE toy_layout toy_test_support)
+add_test(NAME layout.style_properties COMMAND layout_style_properties_test)

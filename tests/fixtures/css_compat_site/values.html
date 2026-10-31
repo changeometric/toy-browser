@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <title>CSS compatibility: values</title>
+  <style>
+    /* Percentage lengths resolve against the containing block content width. */
+    #percent { width: 50%; margin-left: 10%; height: 20px; background-color: #eeeeee; }
+    /* rem lengths resolve against the root (initial 16px) font size. */
+    #rem { padding: 1.5rem; margin-top: 0.5rem; background-color: #dddddd; }
+    /* Color functions: rgb() for opaque text, rgba() for an alpha background,
+       hsl() for an opaque background. */
+    #rgb { color: rgb(255, 0, 0); }
+    #rgba { height: 10px; background-color: rgba(0, 0, 255, 0.5); }
+    #hsl { height: 10px; background-color: hsl(120, 100%, 25%); }
+    /* The background shorthand's color part applies. */
+    #shorthand { height: 10px; background: #123456; }
+    /* Logical properties map to physical sides (horizontal writing mode). */
+    #logical { margin-inline: 10px 20px; padding-block: 4px 6px; inline-size: 120px;
+               background-color: #ccddcc; }
+    /* inline-size and max-inline-size behave like width and max-width. */
+    #maxlogical { inline-size: 300px; max-inline-size: 200px; height: 10px;
+                  background-color: #ccccdd; }
+    /* min-width overrides a smaller width; max-width caps a larger one. */
+    #minmax { width: 50px; min-width: 150px; max-width: 200px; height: 10px;
+              background-color: #ddccdd; }
+  </style>
+</head>
+<body>
+  <p id="rgb">RGB text</p>
+  <p id="rgba">RGBA box</p>
+  <p id="hsl">HSL box</p>
+  <p id="shorthand">Shorthand box</p>
+  <div id="percent">Percentage box</div>
+  <div id="rem">REM box</div>
+  <div id="logical">Logical box</div>
+  <div id="maxlogical">Max logical box</div>
+  <div id="minmax">Min/max box</div>
+</body>
+</html>

@@ -208,6 +208,22 @@ StyleTree ComputeStyles(const dom::Document& document,
                        &declaration_order);
   }
 
+  // The root element's computed font size is the `rem` basis for descendants.
+  // The root element's own `rem` values resolve against the 16px initial size,
+  // so this stays 16px while the root's style is computed.
+  const dom::NodeId document_root = document.root();
+  dom::NodeId root_element = dom::kInvalidNode;
+  if (document_root != dom::kInvalidNode) {
+    for (dom::NodeId child = document.Get(document_root).first_child; child != dom::kInvalidNode;
+         child = document.Get(child).next_sibling) {
+      if (document.Get(child).type == dom::NodeType::kElement) {
+        root_element = child;
+        break;
+      }
+    }
+  }
+  float root_font_size_px = 16.0f;
+
   VisitPreOrder(document, [&](dom::NodeId id) {
     const dom::Node& node = document.Get(id);
     if (node.type != dom::NodeType::kElement) {
@@ -262,20 +278,28 @@ StyleTree ComputeStyles(const dom::Document& document,
     style.font_weight = parent_style.font_weight;
     style.font_style = parent_style.font_style;
     style.font_family = parent_style.font_family;
+    style.line_height = parent_style.line_height;
+    style.text_align = parent_style.text_align;
+    style.visibility = parent_style.visibility;
+    style.text_decoration_underline = parent_style.text_decoration_underline;
 
     // Font size first: the other longhands resolve `em` against it.
     for (const CascadeCandidate& candidate : candidates) {
       if (candidate.declaration->property == "font-size") {
-        detail::ApplyFontSizeDeclaration(*candidate.declaration, parent_style.font_size_px, &style);
+        detail::ApplyFontSizeDeclaration(*candidate.declaration, parent_style.font_size_px,
+                                         root_font_size_px, &style);
       }
     }
     for (const CascadeCandidate& candidate : candidates) {
       if (candidate.declaration->property == "font-size") {
         continue;
       }
-      detail::ApplyDeclaration(*candidate.declaration, &style);
+      detail::ApplyDeclaration(*candidate.declaration, root_font_size_px, &style);
     }
     tree.styles_[id] = style;
+    if (id == root_element) {
+      root_font_size_px = style.font_size_px;
+    }
   });
 
   return tree;

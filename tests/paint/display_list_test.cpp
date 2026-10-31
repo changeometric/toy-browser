@@ -1351,6 +1351,150 @@ void TestCullingManyOffscreenBackgrounds() {
                   "the off-screen stacked backgrounds are culled");
 }
 
+
+// --- M14a: visibility and text-decoration -----------------------------------
+//
+// `visibility: hidden` removes painting but keeps layout geometry; the pre-order
+// walk still descends, so a visible descendant of a hidden box paints normally
+// (CSS semantics). `text-decoration: underline` adds one FillRect immediately
+// after that text box's text command(s). A page using neither property must build
+// exactly the pre-M14 list.
+
+// A hidden box paints no background and the text inside it paints nothing; the
+// viewport clip pair is all that remains.
+void TestVisibilityHiddenSkipsPaint() {
+  const DisplayList hidden_block =
+      BuildPage("<div style=\"visibility: hidden; background-color: #112233; width: 100px; "
+                "height: 40px\">Hi</div>");
+  ExpectSize(hidden_block, 2, "a hidden block paints neither its background nor its text");
+  ExpectViewportClip(hidden_block, 800, 600, "the hidden block keeps the viewport clip pair");
+
+  const DisplayList hidden_text = BuildPage("<p style=\"visibility: hidden\">Hi</p>");
+  ExpectSize(hidden_text, 2, "hidden text paints no DrawText");
+
+  const DisplayList hidden_decoration =
+      BuildPage("<p style=\"visibility: hidden; text-decoration: underline\">Hi</p>");
+  ExpectSize(hidden_decoration, 2, "hidden underlined text paints neither text nor underline");
+}
+
+// A visible descendant of a hidden parent paints normally while the hidden
+// parent's own background stays unpainted; the pre-order walk does not prune the
+// subtree.
+void TestVisibilityVisibleChildOfHiddenParentPaints() {
+  const DisplayList list =
+      BuildPage("<div style=\"visibility: hidden; background-color: #112233; width: 100px; "
+                "height: 40px\"><span style=\"visibility: visible; background-color: "
+                "#445566\">A</span></div>");
+  ExpectSize(list, 4, "a visible child of a hidden parent keeps its background and text");
+  ExpectViewportClip(list, 800, 600, "the hidden-parent page keeps the viewport clip pair");
+  ExpectFillRect(list, 1, 8, 8, 8, 16, 0xFF445566u,
+                 "the visible child background is painted inside its hidden parent");
+  ExpectDrawText(list, 2, "A", 8, 8, 16.0f, 0xFF000000u,
+                 "the visible child text is painted inside its hidden parent");
+
+  // A deeper chain stays consistent: two hidden ancestors, one visible leaf.
+  const DisplayList deep =
+      BuildPage("<div style=\"visibility: hidden\"><div style=\"visibility: hidden\">"
+                "<span style=\"visibility: visible\">B</span></div></div>");
+  ExpectSize(deep, 3, "a visible leaf under two hidden ancestors still paints its text");
+  ExpectDrawText(deep, 1, "B", 8, 8, 16.0f, 0xFF000000u,
+                 "the visible leaf text is painted through hidden ancestors");
+}
+
+// A hidden replaced box paints no image (layout still reserved its box).
+void TestVisibilityHiddenImagePaintsNothing() {
+  const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFFFF0000u);
+  const DisplayList list = BuildImagePage("<p><img style=\"visibility: hidden\"></p>",
+                                          ReplacedSize{16.0f, 8.0f}, image);
+  ExpectSize(list, 2, "a hidden replaced box paints no DrawImage");
+  ExpectViewportClip(list, 800, 600, "the hidden-image page keeps the viewport clip pair");
+}
+
+// Bitmap text: one underline FillRect after the text command, one row below the
+// bitmap baseline (the built-in metrics give baseline_offset = line height = 16
+// for 16 px text, so the row is 24 + 16 + 1 = 41).
+void TestUnderlineBitmap() {
+  const DisplayList list =
+      BuildPage("<p style=\"color: #ff0000; text-decoration: underline\">Hi</p>");
+  ExpectSize(list, 4, "underlined bitmap text yields a text command and one underline FillRect");
+  ExpectViewportClip(list, 800, 600, "the underlined page keeps the viewport clip pair");
+  ExpectDrawText(list, 1, "Hi", 8, 24, 16.0f, 0xFFFF0000u,
+                 "the underlined text is painted first");
+  ExpectFillRect(list, 2, 8, 41, 16, 1, 0xFFFF0000u,
+                 "the underline is one device row below the bitmap baseline, in the text color");
+
+  // An underline on an inline element applies to its text box and follows it.
+  const DisplayList inline_list =
+      BuildPage("<p><span style=\"text-decoration: underline\">ab</span></p>");
+  ExpectSize(inline_list, 4, "an underlined inline span yields its text and underline");
+  ExpectDrawText(inline_list, 1, "ab", 8, 24, 16.0f, 0xFF000000u,
+                 "the inline underlined text is painted first");
+  ExpectFillRect(inline_list, 2, 8, 41, 16, 1, 0xFF000000u,
+                 "the inline underline follows its own text box");
+}
+
+// The underline is emitted immediately after its own text box, before the next
+// sibling's commands.
+void TestUnderlineOrderBeforeNextSibling() {
+  const DisplayList list = BuildPage(
+      "<p style=\"text-decoration: underline\">A</p>"
+      "<p style=\"text-decoration: underline\">B</p>");
+  ExpectSize(list, 6, "two underlined paragraphs yield text/underline pairs in box order");
+  ExpectDrawText(list, 1, "A", 8, 24, 16.0f, 0xFF000000u, "the first underlined text is first");
+  ExpectFillRect(list, 2, 8, 41, 8, 1, 0xFF000000u, "the first underline follows its text");
+  ExpectDrawText(list, 3, "B", 8, 72, 16.0f, 0xFF000000u, "the second text follows the first pair");
+  ExpectFillRect(list, 4, 8, 89, 8, 1, 0xFF000000u, "the second underline follows its own text");
+}
+
+// The underline shares the text-box culling: fully off-screen underlined text
+// emits neither the text nor the underline.
+void TestUnderlineCulledWithText() {
+  const std::string html =
+      "<div style=\"height: 1000px\"></div><p style=\"text-decoration: underline\">Hi</p>";
+  const DisplayList list = BuildPage(html, 320, 200, 5000);
+  ExpectSize(list, 2, "culled underlined text emits neither the text nor its underline");
+  ExpectViewportClip(list, 320, 200, "the culled underlined page keeps the viewport clip pair");
+}
+
+// A page without the two new properties builds exactly the pre-M14 command list,
+// command by command (the frozen M7/M8a list shape).
+void TestNoNewPropertiesKeepsPreM14List() {
+  const std::string html =
+      "<div style=\"background-color: #102030; width: 100px; height: 40px\"></div>"
+      "<p style=\"color: #00ff00\">Hi</p>";
+  const DisplayList list = BuildPage(html);
+  DisplayList reference;
+  reference.PushClip(0, 0, 800, 600);
+  reference.FillRect(8, 8, 100, 40, 0xFF102030u);
+  reference.DrawText("Hi", 8, 64, 16.0f, 0xFF00FF00u);
+  reference.PopClip();
+  bool identical = list.size() == reference.size();
+  for (std::size_t index = 0; identical && index < list.size(); ++index) {
+    identical = SameCommand(list.commands()[index], reference.commands()[index]);
+  }
+  if (!identical) {
+    std::fprintf(stderr,
+                 "paint display list test: a page without visibility/underline changed its list\n");
+  }
+  toy_test::Check(identical,
+                  "a page without visibility/underline keeps the pre-M14 command list");
+}
+
+// Real-font text: the underline y uses the rounded box baseline
+// (24 + round(ascent) + 1) and the box width, after all of the box's runs.
+void TestUnderlineRealFont(const std::shared_ptr<const Font>& font) {
+  const DisplayList list =
+      BuildFontPage("<p style=\"color: #00ff00; text-decoration: underline\">Hi</p>", font);
+  ExpectSize(list, 4, "underlined real-font text yields a text command and one underline");
+  ExpectViewportClip(list, 800, 600, "the underlined real-font page keeps the viewport clip pair");
+  const int baseline_y = 24 + static_cast<int>(std::lround(font->AscentPx(16.0f)));
+  ExpectDrawTextWithFont(list, 1, font, "Hi", 8, baseline_y, 16.0f, 0xFF00FF00u,
+                         "the real-font underlined text is painted first");
+  const int width = static_cast<int>(std::lround(font->MeasureTextWidth("Hi", 16.0f)));
+  ExpectFillRect(list, 2, 8, baseline_y + 1, width, 1, 0xFF00FF00u,
+                 "the real-font underline is one row below the rounded baseline");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1380,6 +1524,15 @@ int main(int argc, char** argv) {
   TestCullingBitmap();
   TestCullingManyOffscreenBackgrounds();
   TestCullingExactViewportEdges();
+
+  // M14a: visibility and text-decoration (no real font needed except the last).
+  TestVisibilityHiddenSkipsPaint();
+  TestVisibilityVisibleChildOfHiddenParentPaints();
+  TestVisibilityHiddenImagePaintsNothing();
+  TestUnderlineBitmap();
+  TestUnderlineOrderBeforeNextSibling();
+  TestUnderlineCulledWithText();
+  TestNoNewPropertiesKeepsPreM14List();
 
   // The real-font tests load the committed self-authored fixture font. CMake
   // passes its directory as argv[1], so no installed font is ever required.
@@ -1418,6 +1571,7 @@ int main(int argc, char** argv) {
   TestBaselineFromBoxBaselineOffset(font);
   TestPerBoxEmptyRunsKeepsBitmap(font);
   TestCullingRealFont(font, bold, italic);
+  TestUnderlineRealFont(font);
 
   // The two-font tests split mixed ASCII/Han text by character coverage, like
   // the shell's system font selection does.

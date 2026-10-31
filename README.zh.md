@@ -26,13 +26,17 @@ PNG 图片，可 headless 运行，也可在小型 X11 窗口中浏览。浏览�
 - 资源加载（M13）：每个 origin 复用一条 keep-alive HTTP/1.1 连接来抓取页面、其样式表与图片，
   透明解码 gzip 响应，同一页面内重复的图片 URL 只抓取/解码一次。这让图片较多的真实页面实测加载
   时间大约减半，而像素完全不变。
+- CSS 值与排版（M14a）：`%`/`rem` 长度、`rgb()`/`rgba()`/`hsl()`/`hsla()` 与命名颜色、
+  `background` 简写的颜色部分、逻辑属性、min/max 尺寸、`margin: auto` 居中、`line-height`、
+  `text-align`、`text-decoration: underline` 与 `visibility` 都会参与解析、级联与布局；真实页面
+  现在能保持预期的行距、居中与隐藏内容，而不是让文字重叠塌陷。
 - 真实文本：freetype 光栅化 + harfbuzz 整形，通过 fontconfig 自动选择字体（计算出的
   `font-family`/`font-weight`/`font-style`、字符覆盖回退、CJK 断行单元），并以内置位图字体作为
   最后的确定性回退。
 - 用 libpng 解码 PNG 图片，最近邻缩放绘制。
 - 可导航的 X11 窗口（链接可点击、滚轮/键盘滚动、Alt+Left/Right 历史、窗口标题）与完整的
   headless `--dump-*`/`--screenshot` 调试模式。
-- 一套小而有确定性的测试（74 个 CTest 用例），CI 用 GCC 与 Clang 无警告构建并运行。
+- 一套小而有确定性的测试（80 个 CTest 用例），CI 用 GCC 与 Clang 无警告构建并运行。
 
 中文文本会通过自动字体回退渲染，并在没有空格时正常换行：
 
@@ -146,14 +150,18 @@ docs/               架构、路线图、决策、约定、接管笔记
 
 ## 状态与限制
 
-里程碑 M0–M13 已完成：浏览器能渲染真实页面及其外部样式表、通过复用的 keep-alive 连接与 gzip
-加载资源、支持真实字体与图片、支持 HTTPS，并有可导航窗口。下一个计划里程碑是 CSS 兼容批次 1
-（M14），随后是 flexbox/position/float 子集（M15）。HTTP 代理（M16）与 JavaScript 子集已延后。
+里程碑 M0–M14a 已完成：浏览器能渲染真实页面及其外部样式表、通过复用的 keep-alive 连接与 gzip
+加载资源、应用高频 CSS 值与排版属性（单位、颜色、line-height、text-align、visibility、min/max
+尺寸与 auto margin）、支持真实字体与图片、支持 HTTPS，并有可导航窗口。下一个计划里程碑是 M14b
+（盒装饰与约束：border、box-sizing、overflow 裁剪、line-through/overline），随后是
+flexbox/position/float 子集（M15）。HTTP 代理（M16）与 JavaScript 子集已延后。
 
 当前里程碑集刻意保留的限制：
 
-- HTML/CSS 只支持一个小子集：没有 JavaScript、表单、表格、float、flexbox/grid、border、水平滚动
-  或滚动条；外部样式表只覆盖这个子集（还没有 `@import`、媒体查询、webfont 或 CSS 图片，M14/M15）。
+- HTML/CSS 只支持一个小子集：没有 JavaScript、表单、表格、float、flexbox/grid、border、
+  `border-radius`、`box-sizing`、`overflow` 裁剪、`box-shadow`、`text-decoration` 的
+  line-through/overline、水平滚动或滚动条；外部样式表只覆盖这个子集（还没有 `@import`、媒体查询、
+  webfont 或 CSS 图片，M14b/M15）；百分比高度与 `justify` 对齐尚未实现。
 - 拉丁与中文之外的文字是尽力支持；没有 bidi/RTL 排序，也没有完整的 Unicode 断行。
 - 还没有代理（M16）、HTTP 缓存头或 cookie，也没有并行资源加载、跨页面图片缓存或懒加载；请求仍是
   串行的，只有 keep-alive、gzip 与页面内的图片去重（M13）。

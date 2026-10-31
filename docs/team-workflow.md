@@ -489,3 +489,33 @@ the round when possible. Clean up stale build directories and stray files.
   CTest; record them in the round report and docs.
 - M13: both implementers stress-ran the counter-based tests (15-20 repeats) to check determinism
   before delivery; keep that habit for any test that observes connection/request counts.
+
+- M14a: the roadmap's CSS batch was too large for one round, so intake used a real-site property
+  survey (fetch the stylesheets into `.tmp/`, count declarations with a throwaway script) to pick the
+  highest-impact slice: values & typography first (%, rem, colors, logical properties, line-height,
+  text-align, visibility, min/max sizes, auto margins), box decorations (borders/box-sizing/overflow)
+  to M14b. Scope decisions backed by measured frequency are cheaper to defend and to re-scope.
+- M14a: the frozen header published the whole value model (`Length`/`AutoLength`/`LineHeight`/
+  `TextAlign`/`Visibility`) before spawning, which let style, layout and paint/shell work in parallel
+  against one contract. Layout/paint could compile immediately and run their tests as soon as the
+  style implementation landed; the "compiled, waiting for computed values" checkpoint avoided
+  duplicate work. A full-tree gate only becomes meaningful after all three land.
+- M14a: appending the new style-dump fields at the END of each line (instead of inserting them
+  mid-line) kept every existing regex/golden matching; the byte-compat gate needed only one
+  normalization slice (`sed -E 's/ min-width=.*$//'`) and a committed legacy fixture proved pre-M14
+  box dumps/PPMs are byte-identical. Prefer additive, end-of-line dump changes when a frozen format
+  must grow.
+- M14a: the cross-compiler gate was worth running again — GCC 15 silently accepted unused
+  anonymous-namespace constants in a new layout test that Clang `-Werror` rejected. Any round that
+  adds test helpers must build and run the full suite with both compilers, not just the module
+  subsets.
+- M14a: manual real-site comparison (explicitly allowed by the user) supplied both the acceptance
+  evidence and the next round's scope: gnu.org's red nav bar, w3.org navigation line-spacing and
+  python.org's centered/line-height elements visibly improved, while the unsupported-property
+  frequency (borders ~385 declarations, border-radius ~121, position/float ~219) directly motivated
+  splitting borders into M14b. Keep real-site content/screenshots in `.tmp/` and out of tests/repo.
+- M14a: bitmap and real-font text differ by design — bitmap glyphs stay top-aligned in the line box
+  (paint ignores the baseline for the bitmap path) while real fonts use the half-leading baseline,
+  so line-height/underline screenshots are only representative on real sites (system fonts). Tests
+  pin the deterministic bitmap path and the contract documents the divergence; do not "fix" the
+  bitmap path without a pixel-compat decision.

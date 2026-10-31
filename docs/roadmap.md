@@ -3,9 +3,9 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M13 are done (M13 = resource loading pipeline). M14 (CSS compatibility batch 1)
-is the next planned milestone; M15 (flexbox/position/float subset) follows it. The HTTP proxy (M16)
-and the JavaScript subset are deferred.** For a snapshot and takeover guide, read
+**Current status: M0–M14a are done (M14a = CSS values & typography). M14b (box decorations &
+constraints) is the next planned milestone; M15 (flexbox/position/float subset) follows. The HTTP
+proxy (M16) and the JavaScript subset are deferred.** For a snapshot and takeover guide, read
 [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
@@ -464,21 +464,80 @@ and the JavaScript subset are deferred.** For a snapshot and takeover guide, rea
   retried once, at most one retry) and have no idle timeout (they live until the Client is
   destroyed); `Connection: keep-alive` is sent explicitly.
 
-## M14 — CSS compatibility batch 1 (planned; next milestone)
+## M14a — CSS values & typography ✅ (done)
 
-- Goal: apply the high-frequency CSS that real pages rely on once M12 makes their stylesheets
-  available. Representative real stylesheets currently exercise (and we ignore): `line-height`,
-  `text-align`, `text-decoration`, `border` and `border-*` colors, `background` shorthand (the
-  color part), `max-width`/`min-width`, `margin: auto`, `box-sizing`, logical properties
-  (`margin-block-*`, `inline-size`, ...), `overflow: hidden` clipping, `rgb()`/`hsl()`, `%`/`rem`
-  units, and `display: none`/`visibility`.
-- Expected shape: extend the property parser, computed style and — where required — layout/paint in
-  small, separately tested slices; keep the cascade/specificity/inheritance/`!important` invariants;
-  pages that do not use the new properties keep byte-identical output.
-- Acceptance: fixture pages for each property, dump/screenshot tests, no regressions, and a manual
-  real-site visual check. If the batch grows too large it is split (for example borders first,
-  logical properties and units as a follow-up).
-- Non-goals: flexbox/grid/position/float (M15), CSS variables, other at-rules, webfonts.
+- Goal met: the high-frequency value/typography properties real stylesheets rely on now apply:
+  `%` and `rem` units, `rgb()`/`rgba()`/`hsl()`/`hsla()` and the full CSS named-color set, the
+  color part of the `background` shorthand, logical properties mapped to physical sides
+  (`margin`/`padding` block/inline longhands and shorthands, `inline-size`/`block-size`,
+  `min/max-inline-size`/`min/max-block-size`), `min/max-width`/`min/max-height`,
+  `margin: auto`, `line-height`, `text-align`, `text-decoration: underline` and `visibility`.
+- `style`: the computed value model gained `Length` (px or percent; box percentages stay
+  unresolved for layout), `AutoLength` margins, `LineHeight` (normal/number/px), `TextAlign` and
+  `Visibility`. Font-relative units resolve in style (`em` against the element's own size, `%`
+  font-size against the parent, `rem` against the root's computed size); colors parse from hex,
+  `rgb()`/`rgba()`, `hsl()`/`hsla()` and named values (text alpha dropped, background alpha kept);
+  logical properties map to physical fields in horizontal writing mode; `line-height`,
+  `text-align`, `visibility` and `text-decoration: underline` inherit per the MVP contract. The
+  style dump keeps every existing field and appends ` min-width= min-height= max-width=
+  max-height= line-height= text-align= visibility= text-decoration=`.
+- `layout`: resolves the new lengths (percentages against the containing block content width for
+  width/min-max-width/margins/padding; percentage heights are unsupported and behave like auto),
+  applies min/max-width clamping and CSS 10.4 auto-margin centering (including the common
+  `max-width + margin: auto` wrapper; over-constrained boxes keep 0 auto margins), clamps
+  px min/max-height, places lines with an explicit `line-height` contribution and half-leading
+  baseline (`normal` keeps pre-M14 geometry byte for byte), and aligns lines for
+  `text-align: center/right` after line breaking (`justify` lays out as left). Visibility does not
+  change layout.
+- `paint`: `visibility: hidden` boxes paint no background/image/text but keep their space, and a
+  visible descendant of a hidden box still paints; `text-decoration: underline` emits one
+  device-pixel `FillRect` one row below each text baseline, after that box's text commands and under
+  the same culling. Pages using neither property build the pre-M14 command list byte for byte.
+- Tests/fixtures: committed `tests/fixtures/css_compat_site/` (`values.html`, `typography.html`,
+  `boxes.html`, `legacy.html` + README with expected computed values, box geometry and pixels);
+  new `style.values`, `style.typography`, `layout.style_properties`, `shell.css_compat`,
+  `shell.dump_style_css_compat`, `shell.css_compat_screenshot` and extended paint display-list
+  tests; 80 tests total.
+- Acceptance reached: all 74 pre-M14 tests plus the 6 new tests pass under GCC and Clang with
+  warnings as errors (80 tests); pre-M14 pages keep byte-identical box dumps, screenshots and exit
+  status (25-case gate; style dumps normalized only for the appended M14a fields); GCC/Clang
+  outputs are identical; manual real-site checks show the batch working: on gnu.org the red
+  navigation bar (`background` shorthand + centered nav text) now paints (its red colour-pixel
+  count went 987 -> 66,443), w3.org's left navigation is line-spaced/centered (page height 2440 ->
+  4048 px), python.org applies 275 centered and 88 line-height elements (page 5945 -> 6018 px),
+  and gnu.org applies 274 line-heights plus 76 centered / 4 right-aligned elements. No new
+  dependency.
+- Known limits after M14a: no borders (`border*`), `border-radius`, `box-sizing`, `overflow`
+  clipping, `box-shadow`, `line-through`/`overline`, `%` heights/min-max-heights, `line-height`
+  in rem, modern space-separated `rgb()`/`hsl()` syntax, text alpha, or `justify`; only
+  left/right/center alignment, horizontal-tb logical mapping, and the color part of the
+  `background` shorthand are implemented; display values other than block/inline/none are still
+  ignored (M15); named colors cover the CSS Color 4 set but only legacy comma function syntax is
+  parsed. Real sites remain visually dominated by borders (385 declarations in the surveyed
+  stylesheets, plus 121 `border-radius`) and by position/float (M15).
+
+## M14b — Box decorations & constraints (planned; next milestone)
+
+- Goal: close the remaining high-frequency box-decoration gap: `border`/`border-*` width, style
+  and color (longhands and shorthands, painting all four sides and including border widths in the
+  box geometry and hit-test rectangles), `box-sizing`, `overflow: hidden` clipping, and the
+  remaining `text-decoration` line values (`line-through`, `overline`). `border-radius` stays out
+  unless separately scoped (rounded-corner rasterization is a paint/geometry project of its own).
+- Expected shape: extend the parser/computed style with the border longhands and the border /
+  box-sizing shorthands; layout subtracts border widths from the content box and grows the border
+  box; paint draws border rectangles as display-list fills (integer device pixels, frozen SrcOver)
+  and clips `overflow: hidden` boxes. Style/paint dumps gain fields only if they stay deterministic
+  and byte-compat normalization is updated in the same round. Pages not using the new properties
+  keep byte-identical output.
+- Out of scope: flexbox/grid/position/float (M15), `border-radius` unless re-scoped, background
+  images/gradients, CSS variables, at-rules/webfonts.
+- Tests: extend `tests/fixtures/css_compat_site/` with borders on all sides (mixed styles/colors),
+  box-sizing and overflow clipping plus line-through/overline; dump/screenshot/pixel tests; no
+  regressions; manual real-site check on pages whose visual gaps are dominated by borders.
+- Acceptance: all tests GCC/Clang WERROR green; pre-M14b dumps/pixels byte-identical for pages not
+  using the new properties; fixture coverage for every property; real-site check shows borders and
+  clipping; docs updated.
+- After M14b: M15 flexbox/position/float subset; the proxy (M16) and JavaScript stay deferred.
 
 ## M15 — Flexbox / position / float subset (planned; scope re-confirmed before starting)
 

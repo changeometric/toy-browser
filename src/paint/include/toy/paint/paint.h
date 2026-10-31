@@ -85,6 +85,19 @@ using FontRunsProvider = std::function<std::vector<FontRun>(const style::Compute
 // stops scrolled content from painting outside the viewport; it is frozen paint
 // behavior (M7) and asserted by the paint tests.
 //
+// Since M14a the walk honors the computed `visibility`: a box whose visibility is
+// `hidden` emits no background, no image and no text (and no decoration), but the
+// walk still descends into its children, so a descendant that is visible again
+// paints normally; anonymous boxes have no style and keep passing through. Layout
+// is unaffected: a hidden box keeps its layout space. For a text box whose
+// computed `text-decoration` is `underline`, one FillRect is emitted immediately
+// after that box's text command(s) (after all real-font runs, or after the bitmap
+// DrawText): x = round(box.x), y = round(box.y) - scroll_y +
+// round(box.baseline_offset_px) + 1, width = round(box.width), height = 1 and an
+// opaque text color. The underline uses the same text-box culling as the text and
+// is never painted for hidden text. Pages that use neither property build exactly
+// the pre-M14 command list.
+//
 // Since M11 the list is culled: a background FillRect or DrawImage is emitted
 // only when its device-pixel destination rectangle intersects the viewport, and
 // a text box only when its box expanded by 2 * font_size_px on every side

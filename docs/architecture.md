@@ -116,6 +116,23 @@ raw CSS. Since M12 the author cascade also includes external linked sheets suppl
 (one pre-order walk interleaves it with the document's `<style>` elements). `style` stays free of
 I/O and network code; the one-arg overload keeps the pre-M12 behavior exactly.
 
+CSS values (M14a): `ComputedStyle` carries the M14a value model: `Length {value, unit: px|percent}`
+for box lengths (box percentages stay unresolved for layout), `AutoLength` margins, `LineHeight
+{kind: normal|number|px, value}`, `TextAlign` and `Visibility`. Style resolves every font-relative
+unit before storing: `em` against the element's own final font size, `%` font-size against the
+parent, `rem` against the root `<html>` element's computed font size (the root's own `rem` uses the
+16px initial size). Colors parse from `#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`, legacy comma-separated
+`rgb()`/`rgba()`/`hsl()`/`hsla()`, the full CSS Color 4 named-color set and `transparent`; text
+color stays opaque (alpha dropped) and background color keeps alpha. The `background` shorthand
+applies only its color component. Logical properties (`margin`/`padding` block/inline longhands and
+shorthands, `inline-size`/`block-size`, min/max variants) map to physical fields in horizontal
+writing mode. `line-height`, `text-align`, `visibility` and `text-decoration: underline` inherit
+per the MVP contract (text-decoration propagation is simplified to inheritance, and only the
+underline flag is represented). Unsupported values (`%` heights, `line-height` in rem, `justify` as
+anything but left, space-separated color-function syntax, `pt`/`vh`/`vw` units) are ignored or
+documented limits. `DumpStyleTree()` keeps every pre-M14 field and appends
+`min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`.
+
 External stylesheets (M12): `shell`'s private `LoadStyledDocument()` (in `src/shell/page.h`) owns the
 whole resource policy: after fetching and parsing the page it walks the DOM once in document order,
 filters `<link>` elements (`rel` token list containing `stylesheet` without `alternate`, no
@@ -153,6 +170,22 @@ model is a documented simplification of Unicode line breaking (no full UAX#14, n
 breaking for Thai/Khmer/Lao, no hyphenation, no cross-text-node punctuation gluing); Latin words
 are never split.
 
+M14a layout: `Length::kPercent` box lengths resolve against the containing block CONTENT WIDTH
+(width, min/max-width, and all four margins/paddings — CSS also uses the width for vertical
+percentages); percentage heights are unsupported and behave as auto, and px-only
+min/max-height clamps the content/fixed height (min then max). Content widths are clamped
+min-then-max after the specified/auto-width resolution; horizontal `auto` margins distribute the
+remaining space when the width is definite (specified or made definite by the clamp, which is what
+centers the common `max-width + margin: auto` wrapper) and are 0 for auto-width and
+over-constrained boxes. A text item's line-height contribution is the computed px value, the
+unitless number times its font size, or the measured line height for `normal`; the line box is as
+tall as the tallest contribution and half-leading positions the shared baseline in
+`baseline_offset_px` (`normal` contributes exactly the measured line height, so pre-M14 geometry is
+unchanged). After line breaking, `text-align: center/right` shifts the finalized line's boxes as a
+whole (`justify` lays out as left; overlong lines stay left). Inline/replaced percentage
+margins/paddings use the line width, replaced percentage width uses the containing width and
+percentage height stays auto. Visibility does not affect layout.
+
 Painting (M6): `paint` walks the box tree in pre-order and emits a flat `render::DisplayList`:
 every element box with a non-transparent computed background becomes a `FillRect` (backgrounds
 before children), every inline replaced box whose node id has a decoded image becomes a `DrawImage`
@@ -170,6 +203,16 @@ integer rectangle clip stack bounds every command (M7 wraps the page in a viewpo
 canvas white, lays the page out at the surface width, builds the list and rasterizes it; the window
 and `--screenshot` share exactly this path. Determinism is the point: identical inputs produce
 byte-identical PPMs on GCC and Clang, which the screenshot tests rely on.
+
+M14a paint: a box whose computed `visibility` is hidden emits no background, image, text or
+underline, but the walk still descends into its children so a visible descendant paints normally;
+layout keeps the hidden box's space. A text box with `text-decoration: underline` emits one
+device-pixel `FillRect` at x=round(box.x), y=round(box.y)-scroll_y+round(baseline_offset_px)+1,
+width=round(box.width), height=1 and the opaque text color, immediately after that box's text
+command(s) and under the same text culling. A page using neither property builds the byte-identical
+pre-M14 command list. The bitmap path still top-aligns glyph cells inside the line box, so a large
+CSS line-height shows the extra space below the glyphs (the real-font path centers glyphs via the
+half-leading baseline); this is a documented bitmap-mode simplification.
 
 Images (M8a): `render` owns PNG decoding behind `render::DecodePng()`: the approved libpng
 dependency is wrapped in `src/render/image.cpp`, pixels are converted to straight-alpha ARGB
@@ -445,6 +488,19 @@ can't form ownership cycles. Revisit only if it actually hurts.
   duplicate images from a loopback server and asserts one connection, one fetch per unique image
   URL, shared decoded images, a single fetch for a duplicate broken image, and recovery after a
   force-closed idle connection.
+- M14a CSS-value/typography tests are offline and deterministic: committed
+  `tests/fixtures/css_compat_site/` (`values.html`, `typography.html`, `boxes.html`, `legacy.html`
+  plus a README with every expected computed value, box rectangle and pixel), `style.values` for
+  units/colors/background shorthand/logical mapping/auto margins/constraints, `style.typography`
+  for line-height/text-align/visibility/text-decoration inheritance and `!important`,
+  `layout.style_properties` for percentage resolution, clamps, auto-margin centering, line-height
+  baselines and text-align line shifting (the fake measurer gives exact metrics),
+  `shell.css_compat` end to end (LoadPage computed values + frozen box geometry + Browser pixels),
+  `shell.dump_style_css_compat` for the appended dump fields and `shell.css_compat_screenshot` for
+  the screenshot CLI; extended `paint.display_list` cases cover visibility and underline command
+  geometry/order/culling plus a hand-built pre-M14 reference list. `legacy.html` proves pre-M14
+  pages keep byte-identical box dumps/PPMs; the byte-compat gate normalizes only the appended style
+  fields. Manual real-site checks stay out of CTest and `.tmp/` evidence is never committed.
 
 ## Reference material
 

@@ -4,7 +4,7 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M13 已完成（M13 = 资源加载管线）。M14（CSS 兼容批次 1）是下一个计划里程碑；
+**当前状态：M0–M14a 已完成（M14a = CSS 值与排版）。M14b（盒装饰与约束）是下一个计划里程碑；
 M15（flexbox/position/float 子集）随后进行。HTTP 代理（M16）与 JavaScript 子集已延后。**
 快照与接管指南见 [handoff.md](handoff.md)。
 
@@ -330,18 +330,67 @@ M15（flexbox/position/float 子集）随后进行。HTTP 代理（M16）与 Jav
   gzip 是唯一支持的内容编码；空闲池化连接不会主动探活（过期连接在下一次请求时被发现并最多重试一次），
   也没有空闲超时（连接存活到 Client 销毁）；显式发送 `Connection: keep-alive`。
 
-## M14 — CSS 兼容批次 1（计划中；下一个里程碑）
+## M14a — CSS 值与排版 ✅（已完成）
 
-- 目标：在 M12 让真实样式表可用之后，应用真实页面依赖的高频 CSS。代表性真实样式表目前会使用（而我们
-  忽略）：`line-height`、`text-align`、`text-decoration`、`border` 与 `border-*` 颜色、`background`
-  简写（颜色部分）、`max-width`/`min-width`、`margin: auto`、`box-sizing`、逻辑属性
-  （`margin-block-*`、`inline-size` 等）、`overflow: hidden` 裁剪、`rgb()`/`hsl()`、`%`/`rem` 单位，
-  以及 `display: none`/`visibility`。
-- 预期形态：扩展属性 parser、计算样式，并在需要处扩展 layout/paint，拆成小的、分别测试的切片；保持
-  级联/特异性/继承/`!important` 不变量；不使用新属性的页面保持逐字节输出不变。
-- 验收：每个属性都有 fixture 页面、dump/截图测试、无回归，并做手工真实站点视觉检查。批次过大时拆分
-  （例如先 border，随后逻辑属性与单位）。
-- 非目标：flexbox/grid/position/float（M15）、CSS 变量、其他 at-rule、webfont。
+- 目标已达成：真实样式表依赖的高频值与排版属性现在生效：`%`/`rem` 单位、`rgb()`/`rgba()`/`hsl()`/
+  `hsla()` 与完整 CSS 命名颜色集、`background` 简写的颜色部分、逻辑属性映射到物理边
+  （`margin`/`padding` 的 block/inline 长写与简写、`inline-size`/`block-size`、
+  `min/max-inline-size`/`min/max-block-size`）、`min/max-width`/`min/max-height`、`margin: auto`、
+  `line-height`、`text-align`、`text-decoration: underline` 与 `visibility`。
+- `style`：计算值模型新增 `Length`（px 或百分比；盒属性的百分比保持未解析交给 layout）、
+  `AutoLength` margin、`LineHeight`（normal/number/px）、`TextAlign` 与 `Visibility`。字体相对单位
+  在 style 内解析（`em` 相对元素自身字号、`%` 字号相对父元素、`rem` 相对根元素计算字号）；颜色解析
+  十六进制、`rgb()`/`rgba()`、`hsl()`/`hsla()` 与命名颜色（文本 alpha 丢弃，背景 alpha 保留）；
+  逻辑属性在 horizontal-tb 下映射到物理字段；`line-height`、`text-align`、`visibility` 与
+  `text-decoration: underline` 按 MVP 契约继承。样式 dump 保留所有既有字段并在行尾追加
+  ` min-width= min-height= max-width= max-height= line-height= text-align= visibility=
+  text-decoration=`。
+- `layout`：解析新长度（width/min-max-width/margin/padding 的百分比相对包含块内容宽度；百分比高度
+  不支持、按 auto 处理），应用 min/max-width 钳制与 CSS 10.4 的 auto margin 居中（包括常见的
+  `max-width + margin: auto` 包裹盒；过约束盒的 auto margin 保持 0），钳制 px min/max-height，
+  用显式 `line-height` 贡献与 half-leading 基线排版行（`normal` 保持 M14 之前的逐字节几何），并在
+  断行后按 `text-align: center/right` 平移整行（`justify` 按 left 排版）。visibility 不改变布局。
+- `paint`：`visibility: hidden` 的盒不绘制背景/图片/文本但保留空间，隐藏盒内可见后代仍正常绘制；
+  `text-decoration: underline` 在每个文本盒文本命令之后、同等裁剪下发出一个基线下方一行的设备像素
+  `FillRect`。不使用这两个属性的页面构建与 M14 之前逐字节相同的命令列表。
+- 测试/fixtures：提交 `tests/fixtures/css_compat_site/`（`values.html`、`typography.html`、
+  `boxes.html`、`legacy.html` 加 README，记录期望计算值、盒几何与像素）；新增
+  `style.values`、`style.typography`、`layout.style_properties`、`shell.css_compat`、
+  `shell.dump_style_css_compat`、`shell.css_compat_screenshot` 并扩展 paint 显示列表测试；
+  共 80 个测试。
+- 已达成验收：所有 74 个 M14 之前测试加 6 个新测试在 GCC 与 Clang 下、警告视为错误时通过（共 80 个
+  测试）；M14 之前的页面保持逐字节相同的盒 dump、截图与退出码（25 个用例门禁；style dump 只对追加
+  字段做规范化）；GCC/Clang 输出相同；手工真实站点检查显示本批次生效：gnu.org 的红色导航栏
+  （`background` 简写 + 居中导航文本）现在会绘制（其红色像素数 987 -> 66,443），w3.org 左侧导航
+  获得行距与居中（页面高度 2440 -> 4048 px），python.org 应用了 275 个居中与 88 个 line-height
+  元素（页面 5945 -> 6018 px），gnu.org 应用 274 个 line-height 加 76 个居中/4 个右对齐元素；
+  没有新依赖。
+- M14a 之后的已知限制：没有 border（`border*`）、`border-radius`、`box-sizing`、`overflow` 裁剪、
+  `box-shadow`、`line-through`/`overline`、百分比高度/min-max-height、rem 的 `line-height`、现代
+  空格分隔 `rgb()`/`hsl()` 语法、文本 alpha 或 `justify`；只实现 left/right/center 对齐、
+  horizontal-tb 逻辑映射与 `background` 简写的颜色部分；除 block/inline/none 之外的 display 值仍被
+  忽略（M15）；命名颜色覆盖 CSS Color 4 集，但颜色函数只解析旧式逗号语法。真实站点的剩余视觉差距
+  主要来自 border（调查的样式表中 385 条声明，另有 121 条 `border-radius`）与 position/float
+  （M15）。
+
+## M14b — 盒装饰与约束（计划中；下一个里程碑）
+
+- 目标：补齐剩余的高频盒装饰差距：`border`/`border-*` 的宽度、样式与颜色（长写与简写、绘制四边、
+  把边框宽度计入盒几何与命中测试矩形）、`box-sizing`、`overflow: hidden` 裁剪，以及剩余
+  `text-decoration` 线值（`line-through`、`overline`）。除非单独划范围，`border-radius` 留待以后
+  （圆角光栅化本身是一个 paint/几何项目）。
+- 预期形态：扩展 parser/计算样式加入 border 长写与 border / box-sizing 简写；layout 从内容盒减去
+  边框宽度并扩大 border box；paint 用显示列表填充绘制边框矩形（整数设备像素、冻结 SrcOver），并
+  裁剪 `overflow: hidden` 盒。只有保持确定性时才在 style/paint dump 增加字段，并在同一轮更新字节
+  兼容规范化。不使用新属性的页面保持逐字节输出。
+- 不做：flexbox/grid/position/float（M15）、`border-radius`（除非重新划范围）、背景图片/渐变、
+  CSS 变量、at-rule/webfont。
+- 测试：扩展 `tests/fixtures/css_compat_site/`，覆盖四边 border（混合样式/颜色）、box-sizing、
+  overflow 裁剪与 line-through/overline；dump/截图/像素测试；无回归；在视觉差距主要来自 border 的
+  页面上做手工真实站点检查。
+- 验收：所有测试在 GCC/Clang WERROR 下全绿；不使用新属性的页面在 M14b 之前 dump/像素逐字节不变；
+  每个属性都有 fixture 覆盖；真实站点检查显示 border 与裁剪生效；文档更新。
+- M14b 之后：M15 flexbox/position/float 子集；代理（M16）与 JavaScript 保持延后。
 
 ## M15 — Flexbox / position / float 子集（计划中；开始前重新确认范围）
 

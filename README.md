@@ -33,13 +33,18 @@ well-understood subset of the web and grows one minimal vertical slice at a time
   stylesheets and its images, gzip responses are decoded transparently, and repeated image URLs are
   fetched/decoded once per page. This roughly halves the measured load time of image-heavy real
   pages without changing a pixel.
+- CSS values & typography (M14a): `%`/`rem` lengths, `rgb()`/`rgba()`/`hsl()`/`hsla()` and named
+  colors, the color part of the `background` shorthand, logical properties, min/max sizes,
+  `margin: auto` centering, `line-height`, `text-align`, `text-decoration: underline` and
+  `visibility` are parsed, cascaded and laid out; real pages now keep their intended line spacing,
+  centering and hidden content instead of collapsing into overlapped text.
 - Real text: freetype rasterization and harfbuzz shaping, automatic font selection through
   fontconfig (computed `font-family`/`font-weight`/`font-style`, character-coverage fallback,
   CJK break units) and a built-in bitmap font as the last-resort deterministic fallback.
 - PNG images decoded with libpng and drawn with nearest-neighbour scaling.
 - A navigable X11 window (clickable links, wheel/keyboard scrolling, Alt+Left/Right history, window
   title) and fully headless `--dump-*`/`--screenshot` modes for debugging and tests.
-- A small, deterministic test suite (74 CTest cases) and CI that builds it warning-free with GCC
+- A small, deterministic test suite (80 CTest cases) and CI that builds it warning-free with GCC
   and Clang.
 
 Chinese text is rendered with automatic font fallback and wraps without spaces:
@@ -158,17 +163,21 @@ nothing about HTML/CSS and the platform layer knows nothing about page content.
 
 ## Status and limitations
 
-Milestones M0–M13 are complete: the browser renders real pages with their external stylesheets,
-loads their resources over reused keep-alive connections with gzip, supports real fonts and images,
-speaks HTTPS and has a navigable window. The next planned milestone is CSS compatibility batch 1
-(M14), followed by a flexbox/position/float subset (M15). HTTP proxy support (M16) and the
-JavaScript subset are deferred.
+Milestones M0–M14a are complete: the browser renders real pages with their external stylesheets,
+loads their resources over reused keep-alive connections with gzip, applies the high-frequency CSS
+value/typography properties (units, colors, line-height, text-align, visibility, min/max sizes and
+auto margins), supports real fonts and images, speaks HTTPS and has a navigable window. The next
+planned milestone is M14b (box decorations & constraints: borders, box-sizing, overflow clipping,
+line-through/overline), followed by a flexbox/position/float subset (M15). HTTP proxy support (M16)
+and the JavaScript subset are deferred.
 
 Known limits, by design of the current milestone set:
 
 - HTML/CSS support is a small subset: no JavaScript, forms, tables, floats, flexbox/grid, borders,
-  horizontal scrolling or scrollbars; external stylesheets work their subset only (no `@import`,
-  media queries, webfonts or CSS images yet, M14/M15).
+  `border-radius`, `box-sizing`, `overflow` clipping, `box-shadow`, `text-decoration`
+  line-through/overline, horizontal scrolling or scrollbars; external stylesheets work their
+  subset only (no `@import`, media queries, webfonts or CSS images yet, M14b/M15); percentage
+  heights and `justify` alignment are not implemented.
 - Text support is best-effort for scripts beyond Latin and Chinese; no bidi/RTL ordering and no
   full Unicode line breaking.
 - No proxy support (M16), no HTTP caching headers or cookies, and no parallel resource loading,

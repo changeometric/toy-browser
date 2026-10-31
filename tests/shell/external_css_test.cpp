@@ -164,10 +164,15 @@ void CheckElementStyle(const toy::shell::Page& page, std::string_view id,
   check(style.color == expected.color, "color");
   check(style.background_color == expected.background, "background-color");
   check(NearlyEqual(style.font_size_px, expected.font_size_px), "font-size");
-  check(NearlyEqual(style.margin_top, expected.margin_top), "margin-top");
-  check(NearlyEqual(style.margin_right, expected.margin_right), "margin-right");
-  check(NearlyEqual(style.margin_bottom, expected.margin_bottom), "margin-bottom");
-  check(NearlyEqual(style.margin_left, expected.margin_left), "margin-left");
+  // M14 stores margins as AutoLength; the fixture margins are plain pixels.
+  const auto margin_matches = [](const toy::style::AutoLength& margin, float expected_value) {
+    return !margin.is_auto && margin.length.unit == toy::style::Length::Unit::kPx &&
+           NearlyEqual(margin.length.value, expected_value);
+  };
+  check(margin_matches(style.margin_top, expected.margin_top), "margin-top");
+  check(margin_matches(style.margin_right, expected.margin_right), "margin-right");
+  check(margin_matches(style.margin_bottom, expected.margin_bottom), "margin-bottom");
+  check(margin_matches(style.margin_left, expected.margin_left), "margin-left");
 }
 
 // First block box for a DOM element, or nullptr.

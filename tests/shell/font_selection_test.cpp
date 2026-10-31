@@ -372,7 +372,7 @@ std::vector<Sample> CacheSamples() {
   // Non-font properties must not affect the font selection cache result.
   ComputedStyle decorated = base;
   decorated.color = 0x00FF00;
-  decorated.margin_left = 12.0f;
+  decorated.margin_left.length = toy::style::Length{12.0f, toy::style::Length::Unit::kPx};
   decorated.background_color = 0x11223344;
   add(decorated, "Hello", "");
   return samples;

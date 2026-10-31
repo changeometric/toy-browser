@@ -9,18 +9,62 @@
 
 namespace toy::style {
 
-// The computed `display` value. The MVP only knows these three.
+// The computed `display` value. The MVP only knows these three; author values
+// outside this set (flex, grid, inline-block, ...) are ignored for now (M15).
 enum class Display { kNone, kBlock, kInline };
 
 enum class FontStyle { kNormal, kItalic };
 
-// The computed style of one element. All lengths are CSS pixels; `width` and
-// `height` are std::nullopt when their computed value is `auto`.
+// A computed length: CSS pixels or a percentage of the property's basis. Style
+// resolves font-relative units (`em`, `rem`, `%` font-size) before storing a
+// value here; layout resolves percentages against the containing block content
+// width for box properties (width, min/max-width, margins, padding), as CSS
+// does. Percentage heights are not supported in M14 and are treated as auto by
+// layout.
+struct Length {
+  enum class Unit { kPx, kPercent };
+  float value = 0.0f;
+  Unit unit = Unit::kPx;
+};
+
+// A computed margin value: a Length or the CSS `auto` keyword. Horizontal auto
+// margins center a block box with a specified width (layout); vertical auto
+// margins behave as 0 in this MVP.
+struct AutoLength {
+  bool is_auto = false;
+  Length length;
+};
+
+// The computed line-height. `normal` uses the font's own line metrics; a number
+// is a multiplier of the element's own computed font size; pixels are absolute.
+// Inherited as computed, so a unitless number keeps multiplying a descendant's
+// font size (normal CSS inheritance behavior for number line-heights).
+struct LineHeight {
+  enum class Kind { kNormal, kNumber, kPx };
+  Kind kind = Kind::kNormal;
+  float value = 0.0f;
+};
+
+// Computed text alignment. `justify` is accepted but laid out as left in this
+// MVP; `start`/`end` map to left/right (horizontal writing mode only).
+enum class TextAlign { kLeft, kRight, kCenter, kJustify };
+
+enum class Visibility { kVisible, kHidden };
+
+// The computed style of one element. Lengths are absolute CSS pixels or
+// percentages resolved by layout; `width`/`height` are std::nullopt when auto,
+// and the min/max constraints are std::nullopt when unconstrained (initial
+// `none`). Inherited properties (`line_height`, `text_align`, `visibility`,
+// `text_decoration_underline`) start from the parent style; everything else
+// starts at its initial value. `text_decoration_underline` inherits in this MVP
+// (CSS decorations propagate to descendants) and is the only decoration M14
+// paints.
 struct ComputedStyle {
   Display display = Display::kInline;
-  // 0xRRGGBB; there is no alpha channel for text.
+  // 0xRRGGBB; text is always opaque (rgba()/hsla() alpha is dropped for text).
   std::uint32_t color = 0x000000;
-  // 0xAARRGGBB; alpha 0 means transparent.
+  // 0xAARRGGBB; alpha from rgba()/hsla() colors is kept for backgrounds and
+  // composited by the rasterizer's SrcOver formula.
   std::uint32_t background_color = 0x00000000;
   float font_size_px = 16.0f;
   int font_weight = 400;
@@ -31,16 +75,25 @@ struct ComputedStyle {
   // inherited. The shell maps this list (with font_weight/font_style and the page
   // language) to real fonts through fontconfig.
   std::vector<std::string> font_family{"serif"};
-  float margin_top = 0;
-  float margin_right = 0;
-  float margin_bottom = 0;
-  float margin_left = 0;
-  float padding_top = 0;
-  float padding_right = 0;
-  float padding_bottom = 0;
-  float padding_left = 0;
-  std::optional<float> width;
-  std::optional<float> height;
+  // Minimum/maximum box constraints; std::nullopt means no constraint (`none`).
+  std::optional<Length> min_width;
+  std::optional<Length> max_width;
+  std::optional<Length> min_height;
+  std::optional<Length> max_height;
+  AutoLength margin_top;
+  AutoLength margin_right;
+  AutoLength margin_bottom;
+  AutoLength margin_left;
+  Length padding_top;
+  Length padding_right;
+  Length padding_bottom;
+  Length padding_left;
+  std::optional<Length> width;
+  std::optional<Length> height;
+  LineHeight line_height;
+  TextAlign text_align = TextAlign::kLeft;
+  Visibility visibility = Visibility::kVisible;
+  bool text_decoration_underline = false;
 };
 
 // One external author style sheet fetched from a `<link rel="stylesheet">`
@@ -87,9 +140,15 @@ StyleTree ComputeStyles(const dom::Document& document,
                         const std::vector<LinkedStyleSheet>& linked_sheets);
 
 // Deterministic text dump of the computed styles, one line per element node:
-// indent + "<tag> display=... color=... background-color=... ... width=...".
-// Lengths are rounded to the nearest integer and end in "px". Used by
-// --dump-style and the style tests.
+// indent + "<tag> display=... color=... background-color=... ... width=...
+// height=...". Since M14 the line continues with " min-width=... min-height=...
+// max-width=... max-height=... line-height=... text-align=... visibility=...
+// text-decoration=..." at the end (so pre-M14 regexes still match). Lengths
+// print rounded CSS pixels ("12px"), percentages rounded with "%" ("50%"),
+// "auto" for auto width/height/margins and "none" for unconstrained min/max.
+// line-height prints "normal", a unitless number (up to 3 decimals with trailing
+// zeros trimmed) or "NNpx"; text-decoration prints "none" or "underline". Used
+// by --dump-style and the style tests.
 std::string DumpStyleTree(const dom::Document& document, const StyleTree& styles);
 
 }  // namespace toy::style

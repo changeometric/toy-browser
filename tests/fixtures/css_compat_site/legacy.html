@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+  <title>CSS compatibility: legacy</title>
+  <style>
+    /* Deliberately uses only pre-M14 CSS: no visibility, text-decoration,
+       line-height, text-align, logical properties, min/max constraints, auto
+       margins or color functions. Its box dump and screenshot must stay
+       byte-identical to the pre-M14 engine. */
+    #box { background-color: #112233; width: 100px; height: 20px; }
+    #text { color: #ff0000; font-size: 24px; margin: 4px 8px; padding: 2px 4px; }
+  </style>
+</head>
+<body>
+  <div id="box"></div>
+  <p id="text">Legacy</p>
+</body>
+</html>

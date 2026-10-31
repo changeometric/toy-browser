@@ -368,3 +368,25 @@ Lead 从不只信一份报告。审查：
   数字放进 CTest；写进轮次报告与文档。
 - M13：两位实现者在交付前都对基于计数的测试做了 15–20 次重复压测以确认确定性；任何观察连接/请求
   计数的测试都应保持这个习惯。
+
+- M14a：roadmap 的 CSS 批次对一轮来说过大，因此 intake 用真实站点属性调查（把样式表抓到 `.tmp/`，
+  用临时脚本统计声明）挑出最高影响的切片：先做值与排版（%、rem、颜色、逻辑属性、line-height、
+  text-align、visibility、min/max 尺寸、auto margin），盒装饰（border/box-sizing/overflow）留给
+  M14b。基于实测频率的范围决策更容易辩护，也更容易重新划范围。
+- M14a：在 spawn 前冻结完整值模型头文件（`Length`/`AutoLength`/`LineHeight`/`TextAlign`/
+  `Visibility`），让 style、layout 与 paint/shell 对同一契约并行工作。layout/paint 可立即编译，
+  并在 style 实现落地后马上运行测试；“已编译、等待计算值”的检查点避免了重复工作；只有三块都落地
+  后全树门禁才有意义。
+- M14a：把新样式 dump 字段追加在每行末尾（而不是插在中间）让所有既有正则/golden 仍能匹配；字节兼容
+  门禁只需一段规范化（`sed -E 's/ min-width=.*$//'`），并提交一个 legacy fixture 证明 M14 之前
+  盒 dump/PPM 逐字节不变。冻结格式需要增长时优先采用行尾追加。
+- M14a：再次验证了跨编译器门禁的价值——GCC 15 默默接受新布局测试中匿名命名空间的未使用常量，而
+  Clang `-Werror` 拒绝。任何新增测试辅助代码的轮次都必须用两个编译器构建并运行全量测试，而不只是
+  模块子集。
+- M14a：手工真实站点对比（用户明确允许）同时提供了验收证据和下一轮范围：gnu.org 红色导航栏、
+  w3.org 导航行距与 python.org 的居中/line-height 元素可见改善，而未支持属性的频率（border 约
+  385 条声明、border-radius 约 121、position/float 约 219）直接促成了把 border 拆到 M14b。真实
+  站点内容/截图放 `.tmp/`，不进入测试或仓库。
+- M14a：位图与真实字体文本按设计不同——位图字形在行盒内顶部对齐（paint 对位图路径忽略基线），
+  真实字体使用 half-leading 基线，因此 line-height/下划线截图只在真实站点（系统字体）上有代表性。
+  测试固定确定性位图路径，契约记录该分歧；没有像素兼容决策不要“修复”位图路径。

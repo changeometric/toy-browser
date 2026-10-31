@@ -360,6 +360,44 @@ toybrowser_set_warnings(shell_resource_loading_test)
 add_test(NAME shell.resource_loading
   COMMAND shell_resource_loading_test "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/images")
 
+# M14a CSS compatibility: the committed css_compat_site fixture exercises the
+# batch-1 properties end to end (percent/rem lengths, color functions, the
+# background shorthand, logical properties, min/max-width, auto margins,
+# line-height, text-align, text-decoration and visibility). The C++ test loads
+# the pages through the shell-private page loader with the deterministic bitmap
+# font path and checks computed values, frozen box geometry and painted pixels.
+# legacy.html uses only pre-M14 CSS and is the byte-compatibility fixture.
+set(shell_css_compat_site "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/css_compat_site")
+
+add_executable(shell_css_compat_test css_compat_test.cpp)
+# The test includes the shell-private page loader header on purpose.
+target_include_directories(shell_css_compat_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../src/shell")
+target_link_libraries(shell_css_compat_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(shell_css_compat_test)
+add_test(NAME shell.css_compat
+  COMMAND shell_css_compat_test "${shell_css_compat_site}")
+
+# --dump-style appends the M14a fields at the end of each line; the min/max box
+# of values.html proves min/max-width, and the percentage/rem boxes prove the new
+# length forms. Pre-M14 fields stay in their old positions.
+add_test(NAME shell.dump_style_css_compat
+  COMMAND $<TARGET_FILE:toybrowser> --dump-style
+          "file://${shell_css_compat_site}/values.html")
+set_tests_properties(shell.dump_style_css_compat PROPERTIES
+  PASS_REGULAR_EXPRESSION
+    "<div> display=block color=#000000 background-color=#ddccdd[^\n]*width=50px[^\n]*min-width=150px min-height=none max-width=200px")
+
+# The CLI presentation path over the same fixture: --screenshot must succeed and
+# write one binary PPM of the requested size (pixels are asserted by
+# shell.css_compat).
+add_test(NAME shell.css_compat_screenshot
+  COMMAND ${CMAKE_COMMAND}
+          -DTOYBROWSER=$<TARGET_FILE:toybrowser>
+          -DFIXTURE_DIR=${shell_css_compat_site}
+          -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/css_compat_screenshot.ppm
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/css_compat_screenshot_check.cmake")
+
 # M10: every pre-M10 test that runs toybrowser or a Browser through the automatic
 # system-font selection uses the empty config, which forces the built-in bitmap
 # font. Their outputs are the pre-M10 goldens, so they must stay byte-identical.
@@ -393,6 +431,9 @@ foreach(shell_bitmap_font_test IN ITEMS
     shell.dump_style_external
     shell.dump_style_filtered_only
     shell.resource_loading
+    shell.css_compat
+    shell.dump_style_css_compat
+    shell.css_compat_screenshot
     shell.fonts
     shell.fonts_dump_boxes
     shell.fonts_missing_file

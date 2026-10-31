@@ -17,9 +17,11 @@ namespace {
 using toy::dom::Document;
 using toy::dom::NodeId;
 using toy::dom::NodeType;
+using toy::style::AutoLength;
 using toy::style::ComputedStyle;
 using toy::style::Display;
 using toy::style::FontStyle;
+using toy::style::Length;
 using toy::style::StyleTree;
 
 int g_failures = 0;
@@ -85,8 +87,8 @@ NodeId FindFirstElementByTag(const Document& document, std::string_view tag) {
   return toy::dom::kInvalidNode;
 }
 
-void ExpectLength(const StyleTree& styles, NodeId id, float ComputedStyle::* member, float expected,
-                  const char* description) {
+void ExpectPx(const StyleTree& styles, NodeId id, float ComputedStyle::* member, float expected,
+              const char* description) {
   const float actual = styles.Get(id).*member;
   if (std::fabs(actual - expected) > 0.01f) {
     std::fprintf(stderr, "style cascade test failed: %s (expected %g, got %g)\n", description,
@@ -95,20 +97,55 @@ void ExpectLength(const StyleTree& styles, NodeId id, float ComputedStyle::* mem
   }
 }
 
-void ExpectOptionalLength(const StyleTree& styles, NodeId id,
-                          std::optional<float> ComputedStyle::* member, float expected,
-                          const char* description) {
-  const std::optional<float>& actual = styles.Get(id).*member;
-  if (!actual || std::fabs(*actual - expected) > 0.01f) {
-    std::fprintf(stderr, "style cascade test failed: %s (expected %g)\n", description, expected);
+void ExpectLength(const StyleTree& styles, NodeId id, Length ComputedStyle::* member,
+                  Length::Unit unit, float expected, const char* description) {
+  const Length& actual = styles.Get(id).*member;
+  if (actual.unit != unit || std::fabs(actual.value - expected) > 0.01f) {
+    std::fprintf(stderr, "style cascade test failed: %s (expected %g, got %g, unit %d vs %d)\n",
+                 description, expected, actual.value, static_cast<int>(unit),
+                 static_cast<int>(actual.unit));
     ++g_failures;
   }
 }
 
-void ExpectAuto(const StyleTree& styles, NodeId id, std::optional<float> ComputedStyle::* member,
-                const char* description) {
-  if ((styles.Get(id).*member).has_value()) {
-    std::fprintf(stderr, "style cascade test failed: %s (expected auto)\n", description);
+void ExpectPxLength(const StyleTree& styles, NodeId id, Length ComputedStyle::* member,
+                    float expected, const char* description) {
+  ExpectLength(styles, id, member, Length::Unit::kPx, expected, description);
+}
+
+void ExpectPercentLength(const StyleTree& styles, NodeId id, Length ComputedStyle::* member,
+                         float expected, const char* description) {
+  ExpectLength(styles, id, member, Length::Unit::kPercent, expected, description);
+}
+
+void ExpectMargin(const StyleTree& styles, NodeId id, AutoLength ComputedStyle::* member,
+                  float expected, const char* description) {
+  const AutoLength& actual = styles.Get(id).*member;
+  if (actual.is_auto || actual.length.unit != Length::Unit::kPx ||
+      std::fabs(actual.length.value - expected) > 0.01f) {
+    std::fprintf(stderr, "style cascade test failed: %s (expected %g px)\n", description, expected);
+    ++g_failures;
+  }
+}
+
+void ExpectOptionalLength(const StyleTree& styles, NodeId id,
+                          std::optional<Length> ComputedStyle::* member, float expected,
+                          const char* description) {
+  const std::optional<Length>& actual = styles.Get(id).*member;
+  if (!actual || actual->unit != Length::Unit::kPx ||
+      std::fabs(actual->value - expected) > 0.01f) {
+    std::fprintf(stderr, "style cascade test failed: %s (expected %g px)\n", description, expected);
+    ++g_failures;
+  }
+}
+
+void ExpectOptionalPercentLength(const StyleTree& styles, NodeId id,
+                                 std::optional<Length> ComputedStyle::* member, float expected,
+                                 const char* description) {
+  const std::optional<Length>& actual = styles.Get(id).*member;
+  if (!actual || actual->unit != Length::Unit::kPercent ||
+      std::fabs(actual->value - expected) > 0.01f) {
+    std::fprintf(stderr, "style cascade test failed: %s (expected %g%%)\n", description, expected);
     ++g_failures;
   }
 }
@@ -162,7 +199,7 @@ void TestUserAgentDefaults() {
 
   ExpectColor(styles, html, 0x000000u, "the default text color is black");
   ExpectColor(styles, anchor, 0x0000eeu, "the UA sheet makes links #0000ee");
-  ExpectLength(styles, html, &ComputedStyle::font_size_px, 16.0f, "the initial font size is 16px");
+  ExpectPx(styles, html, &ComputedStyle::font_size_px, 16.0f, "the initial font size is 16px");
   if (styles.Get(html).font_weight != 400) {
     Check(false, "the initial font weight is 400");
   }
@@ -173,27 +210,27 @@ void TestUserAgentDefaults() {
     Check(false, "the initial width is auto");
   }
 
-  ExpectLength(styles, body, &ComputedStyle::margin_top, 8.0f,
+  ExpectMargin(styles, body, &ComputedStyle::margin_top, 8.0f,
                "the UA sheet gives body an 8px margin");
-  ExpectLength(styles, body, &ComputedStyle::margin_right, 8.0f, "body margin-right is 8px");
-  ExpectLength(styles, body, &ComputedStyle::margin_bottom, 8.0f, "body margin-bottom is 8px");
-  ExpectLength(styles, body, &ComputedStyle::margin_left, 8.0f, "body margin-left is 8px");
+  ExpectMargin(styles, body, &ComputedStyle::margin_right, 8.0f, "body margin-right is 8px");
+  ExpectMargin(styles, body, &ComputedStyle::margin_bottom, 8.0f, "body margin-bottom is 8px");
+  ExpectMargin(styles, body, &ComputedStyle::margin_left, 8.0f, "body margin-left is 8px");
 
-  ExpectLength(styles, p, &ComputedStyle::margin_top, 16.0f,
+  ExpectMargin(styles, p, &ComputedStyle::margin_top, 16.0f,
                "the UA sheet gives p a 16px top margin");
-  ExpectLength(styles, p, &ComputedStyle::margin_right, 0.0f, "p margin-right is 0");
-  ExpectLength(styles, p, &ComputedStyle::margin_bottom, 16.0f, "p has a 16px bottom margin");
-  ExpectLength(styles, p, &ComputedStyle::margin_left, 0.0f, "p margin-left is 0");
+  ExpectMargin(styles, p, &ComputedStyle::margin_right, 0.0f, "p margin-right is 0");
+  ExpectMargin(styles, p, &ComputedStyle::margin_bottom, 16.0f, "p has a 16px bottom margin");
+  ExpectMargin(styles, p, &ComputedStyle::margin_left, 0.0f, "p margin-left is 0");
 
-  ExpectLength(styles, h1, &ComputedStyle::font_size_px, 32.0f, "h1 is 32px");
+  ExpectPx(styles, h1, &ComputedStyle::font_size_px, 32.0f, "h1 is 32px");
   if (styles.Get(h1).font_weight != 700) {
     Check(false, "h1 is bold");
   }
-  ExpectLength(styles, h1, &ComputedStyle::margin_top, 16.0f, "h1 top margin is 16px");
-  ExpectLength(styles, h2, &ComputedStyle::font_size_px, 24.0f, "h2 is 24px");
-  ExpectLength(styles, h2, &ComputedStyle::margin_top, 12.0f, "h2 top margin is 12px");
-  ExpectLength(styles, h3, &ComputedStyle::font_size_px, 20.0f, "h3 is 20px");
-  ExpectLength(styles, h3, &ComputedStyle::margin_top, 12.0f, "h3 top margin is 12px");
+  ExpectMargin(styles, h1, &ComputedStyle::margin_top, 16.0f, "h1 top margin is 16px");
+  ExpectPx(styles, h2, &ComputedStyle::font_size_px, 24.0f, "h2 is 24px");
+  ExpectMargin(styles, h2, &ComputedStyle::margin_top, 12.0f, "h2 top margin is 12px");
+  ExpectPx(styles, h3, &ComputedStyle::font_size_px, 20.0f, "h3 is 20px");
+  ExpectMargin(styles, h3, &ComputedStyle::margin_top, 12.0f, "h3 top margin is 12px");
 }
 
 void TestInheritance() {
@@ -206,7 +243,7 @@ void TestInheritance() {
 
   ExpectColor(styles, outer, 0xff0000u, "the inline style colors the parent");
   ExpectColor(styles, inner, 0xff0000u, "color inherits");
-  ExpectLength(styles, inner, &ComputedStyle::font_size_px, 20.0f, "font-size inherits");
+  ExpectPx(styles, inner, &ComputedStyle::font_size_px, 20.0f, "font-size inherits");
   if (styles.Get(inner).font_weight != 700) {
     Check(false, "font-weight inherits");
   }
@@ -224,10 +261,10 @@ void TestInheritance() {
   const StyleTree nested_styles = toy::style::ComputeStyles(nested);
   const NodeId html = FindFirstElementByTag(nested, "html");
   const NodeId child = FindElementById(nested, "child");
-  ExpectLength(nested_styles, html, &ComputedStyle::font_size_px, 16.0f,
+  ExpectPx(nested_styles, html, &ComputedStyle::font_size_px, 16.0f,
                "the root inherits the initial font size");
   ExpectColor(nested_styles, html, 0x000000u, "the root inherits the initial color");
-  ExpectLength(nested_styles, child, &ComputedStyle::font_size_px, 30.0f,
+  ExpectPx(nested_styles, child, &ComputedStyle::font_size_px, 30.0f,
                "descendants inherit from body");
   ExpectColor(nested_styles, child, 0x0000ffu, "descendants inherit body color");
 }
@@ -400,45 +437,45 @@ void TestShorthands() {
   const StyleTree styles = toy::style::ComputeStyles(document);
 
   const NodeId one = FindElementById(document, "one");
-  ExpectLength(styles, one, &ComputedStyle::margin_top, 5.0f, "one-value shorthand sets top");
-  ExpectLength(styles, one, &ComputedStyle::margin_right, 5.0f, "one-value shorthand sets right");
-  ExpectLength(styles, one, &ComputedStyle::margin_bottom, 5.0f, "one-value shorthand sets bottom");
-  ExpectLength(styles, one, &ComputedStyle::margin_left, 5.0f, "one-value shorthand sets left");
+  ExpectMargin(styles, one, &ComputedStyle::margin_top, 5.0f, "one-value shorthand sets top");
+  ExpectMargin(styles, one, &ComputedStyle::margin_right, 5.0f, "one-value shorthand sets right");
+  ExpectMargin(styles, one, &ComputedStyle::margin_bottom, 5.0f, "one-value shorthand sets bottom");
+  ExpectMargin(styles, one, &ComputedStyle::margin_left, 5.0f, "one-value shorthand sets left");
 
   const NodeId two = FindElementById(document, "two");
-  ExpectLength(styles, two, &ComputedStyle::margin_top, 1.0f, "two-value shorthand top");
-  ExpectLength(styles, two, &ComputedStyle::margin_right, 2.0f, "two-value shorthand right");
-  ExpectLength(styles, two, &ComputedStyle::margin_bottom, 1.0f, "two-value shorthand bottom");
-  ExpectLength(styles, two, &ComputedStyle::margin_left, 2.0f, "two-value shorthand left");
+  ExpectMargin(styles, two, &ComputedStyle::margin_top, 1.0f, "two-value shorthand top");
+  ExpectMargin(styles, two, &ComputedStyle::margin_right, 2.0f, "two-value shorthand right");
+  ExpectMargin(styles, two, &ComputedStyle::margin_bottom, 1.0f, "two-value shorthand bottom");
+  ExpectMargin(styles, two, &ComputedStyle::margin_left, 2.0f, "two-value shorthand left");
 
   const NodeId three = FindElementById(document, "three");
-  ExpectLength(styles, three, &ComputedStyle::margin_top, 1.0f, "three-value shorthand top");
-  ExpectLength(styles, three, &ComputedStyle::margin_right, 2.0f, "three-value shorthand right");
-  ExpectLength(styles, three, &ComputedStyle::margin_bottom, 3.0f, "three-value shorthand bottom");
-  ExpectLength(styles, three, &ComputedStyle::margin_left, 2.0f, "three-value shorthand left");
+  ExpectMargin(styles, three, &ComputedStyle::margin_top, 1.0f, "three-value shorthand top");
+  ExpectMargin(styles, three, &ComputedStyle::margin_right, 2.0f, "three-value shorthand right");
+  ExpectMargin(styles, three, &ComputedStyle::margin_bottom, 3.0f, "three-value shorthand bottom");
+  ExpectMargin(styles, three, &ComputedStyle::margin_left, 2.0f, "three-value shorthand left");
 
   const NodeId four = FindElementById(document, "four");
-  ExpectLength(styles, four, &ComputedStyle::margin_top, 1.0f, "four-value shorthand top");
-  ExpectLength(styles, four, &ComputedStyle::margin_right, 2.0f, "four-value shorthand right");
-  ExpectLength(styles, four, &ComputedStyle::margin_bottom, 3.0f, "four-value shorthand bottom");
-  ExpectLength(styles, four, &ComputedStyle::margin_left, 4.0f, "four-value shorthand left");
+  ExpectMargin(styles, four, &ComputedStyle::margin_top, 1.0f, "four-value shorthand top");
+  ExpectMargin(styles, four, &ComputedStyle::margin_right, 2.0f, "four-value shorthand right");
+  ExpectMargin(styles, four, &ComputedStyle::margin_bottom, 3.0f, "four-value shorthand bottom");
+  ExpectMargin(styles, four, &ComputedStyle::margin_left, 4.0f, "four-value shorthand left");
 
   const NodeId padding = FindElementById(document, "padding");
-  ExpectLength(styles, padding, &ComputedStyle::padding_top, 1.0f, "padding shorthand top");
-  ExpectLength(styles, padding, &ComputedStyle::padding_right, 2.0f, "padding shorthand right");
-  ExpectLength(styles, padding, &ComputedStyle::padding_bottom, 3.0f, "padding shorthand bottom");
-  ExpectLength(styles, padding, &ComputedStyle::padding_left, 4.0f, "padding shorthand left");
+  ExpectPxLength(styles, padding, &ComputedStyle::padding_top, 1.0f, "padding shorthand top");
+  ExpectPxLength(styles, padding, &ComputedStyle::padding_right, 2.0f, "padding shorthand right");
+  ExpectPxLength(styles, padding, &ComputedStyle::padding_bottom, 3.0f, "padding shorthand bottom");
+  ExpectPxLength(styles, padding, &ComputedStyle::padding_left, 4.0f, "padding shorthand left");
 
   const NodeId override = FindElementById(document, "override");
-  ExpectLength(styles, override, &ComputedStyle::margin_top, 5.0f,
+  ExpectMargin(styles, override, &ComputedStyle::margin_top, 5.0f,
                "later longhand beats shorthand");
-  ExpectLength(styles, override, &ComputedStyle::margin_left, 9.0f, "longhand overrides shorthand");
+  ExpectMargin(styles, override, &ComputedStyle::margin_left, 9.0f, "longhand overrides shorthand");
 
   const NodeId later = FindElementById(document, "later");
-  ExpectLength(styles, later, &ComputedStyle::margin_left, 5.0f, "later shorthand beats longhand");
+  ExpectMargin(styles, later, &ComputedStyle::margin_left, 5.0f, "later shorthand beats longhand");
 
   const NodeId invalid = FindElementById(document, "invalid");
-  ExpectLength(styles, invalid, &ComputedStyle::margin_left, 3.0f,
+  ExpectMargin(styles, invalid, &ComputedStyle::margin_left, 3.0f,
                "an invalid shorthand leaves the property unchanged");
 }
 
@@ -448,7 +485,7 @@ void TestEmUnits() {
     const Document document = toy::dom::ParseDocument(
         "<div style=\"font-size: 20px\"><p id=p style=\"font-size: 1.5em\">text</p></div>");
     const StyleTree styles = toy::style::ComputeStyles(document);
-    ExpectLength(styles, FindElementById(document, "p"), &ComputedStyle::font_size_px, 30.0f,
+    ExpectPx(styles, FindElementById(document, "p"), &ComputedStyle::font_size_px, 30.0f,
                  "em font-size is relative to the parent");
   }
   // Other em lengths are relative to the element's own computed font size.
@@ -458,10 +495,10 @@ void TestEmUnits() {
         "width: 2em\">text</p></div>");
     const StyleTree styles = toy::style::ComputeStyles(document);
     const NodeId p = FindElementById(document, "p");
-    ExpectLength(styles, p, &ComputedStyle::font_size_px, 20.0f, "2em font-size is 20px");
-    ExpectLength(styles, p, &ComputedStyle::margin_top, 20.0f,
+    ExpectPx(styles, p, &ComputedStyle::font_size_px, 20.0f, "2em font-size is 20px");
+    ExpectMargin(styles, p, &ComputedStyle::margin_top, 20.0f,
                  "em margins use the element's own font size");
-    ExpectLength(styles, p, &ComputedStyle::margin_left, 20.0f,
+    ExpectMargin(styles, p, &ComputedStyle::margin_left, 20.0f,
                  "em margins use the element's own font size");
     ExpectOptionalLength(styles, p, &ComputedStyle::width, 40.0f,
                          "em width uses the element's own font size");
@@ -472,7 +509,7 @@ void TestEmUnits() {
         "<style>div { font-size: 20px; } div p { margin-left: 2em; }</style>"
         "<div><p id=p>text</p></div>");
     const StyleTree styles = toy::style::ComputeStyles(document);
-    ExpectLength(styles, FindElementById(document, "p"), &ComputedStyle::margin_left, 40.0f,
+    ExpectMargin(styles, FindElementById(document, "p"), &ComputedStyle::margin_left, 40.0f,
                  "em in a rule uses the inherited font size");
   }
   // Length units are case-insensitive.
@@ -481,8 +518,8 @@ void TestEmUnits() {
         toy::dom::ParseDocument("<p id=p style=\"font-size: 2EM; margin-top: 3PX\">text</p>");
     const StyleTree styles = toy::style::ComputeStyles(document);
     const NodeId p = FindElementById(document, "p");
-    ExpectLength(styles, p, &ComputedStyle::font_size_px, 32.0f, "EM is case-insensitive");
-    ExpectLength(styles, p, &ComputedStyle::margin_top, 3.0f, "PX is case-insensitive");
+    ExpectPx(styles, p, &ComputedStyle::font_size_px, 32.0f, "EM is case-insensitive");
+    ExpectMargin(styles, p, &ComputedStyle::margin_top, 3.0f, "PX is case-insensitive");
   }
 }
 
@@ -496,9 +533,16 @@ void TestUnknownValuesIgnored() {
   const NodeId div = FindElementById(document, "d");
   ExpectColor(styles, div, 0x000000u, "an unknown color is ignored");
   ExpectDisplay(styles, div, Display::kBlock, "an unsupported display value is ignored");
-  ExpectAuto(styles, div, &ComputedStyle::width, "a percentage width is ignored");
-  ExpectLength(styles, div, &ComputedStyle::padding_top, 0.0f,
-               "a padding shorthand with a percentage is ignored");
+  ExpectOptionalPercentLength(styles, div, &ComputedStyle::width, 50.0f,
+                              "a percentage width is stored unresolved in style");
+  ExpectPxLength(styles, div, &ComputedStyle::padding_top, 1.0f,
+                 "a padding shorthand with a percentage keeps its px component");
+  ExpectPercentLength(styles, div, &ComputedStyle::padding_right, 2.0f,
+                      "a padding shorthand percentage is stored unresolved");
+  ExpectPxLength(styles, div, &ComputedStyle::padding_bottom, 1.0f,
+                 "the two-value padding shorthand repeats the first value");
+  ExpectPercentLength(styles, div, &ComputedStyle::padding_left, 2.0f,
+                      "the two-value padding shorthand repeats the second value");
   if (styles.Get(div).font_weight != 400) {
     Check(false, "a font-weight outside 100..900 is ignored");
   }
@@ -514,9 +558,10 @@ void TestUnknownValuesIgnored() {
       "<div id=n style=\"margin-top: 4px; margin-top: nonsense; width: 12rem\">text</div>");
   const StyleTree nested_styles = toy::style::ComputeStyles(nested);
   const NodeId n = FindElementById(nested, "n");
-  ExpectLength(nested_styles, n, &ComputedStyle::margin_top, 4.0f,
+  ExpectMargin(nested_styles, n, &ComputedStyle::margin_top, 4.0f,
                "an invalid value does not reset the property");
-  ExpectAuto(nested_styles, n, &ComputedStyle::width, "other units are ignored");
+  ExpectOptionalLength(nested_styles, n, &ComputedStyle::width, 192.0f,
+                       "12rem resolves against the 16px initial root font size");
 
   // Colors: #rgb expands, named colors and background-color work.
   const Document colored = toy::dom::ParseDocument(

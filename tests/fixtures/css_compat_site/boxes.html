@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <title>CSS compatibility: boxes</title>
+  <style>
+    /* auto horizontal margins center a specified-width block. */
+    #auto-center { width: 120px; margin: 0 auto; height: 12px; background-color: #e0e0e0; }
+    /* A percentage width resolves against the containing block content width. */
+    #pct-width { width: 25%; height: 12px; background-color: #d0d0d0; }
+    /* min-width overrides a smaller width. */
+    #min-width { width: 50px; min-width: 150px; height: 12px; background-color: #c0c0c0; }
+    /* max-width caps a larger width. */
+    #max-width { width: 500px; max-width: 200px; height: 12px; background-color: #b0b0b0; }
+    /* A percentage height is treated as auto in M14: the text line gives 16px. */
+    #height-pct { height: 50%; background-color: #a0a0a0; }
+    /* A replaced box with a CSS width keeps the intrinsic 2:1 ratio
+       (flag_16x8.png is 16x8, so width 32 gives height 16). */
+    #replaced-image { width: 32px; }
+  </style>
+</head>
+<body>
+  <div id="auto-center"></div>
+  <div id="pct-width"></div>
+  <div id="min-width"></div>
+  <div id="max-width"></div>
+  <div id="height-pct">Height percent</div>
+  <p id="replaced"><img id="replaced-image" src="../images/flag_16x8.png"></p>
+</body>
+</html>
