@@ -16,6 +16,11 @@ CMakeUserPresets.json
 # The directory is created on demand and must stay untracked.
 /.tmp/
 
+# Python caches from the committed fixture generators
+__pycache__/
+*.pyc
+*.pyo
+
 # Editor and tool state
 .vscode/
 .idea/

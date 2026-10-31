@@ -202,6 +202,9 @@ user priorities.
   per-unit boxes, wrapping and painted ink), `tests/fixtures/https_site/`
   (HTML+PNG page served over TLS by the shell test) and `tests/fixtures/tls/` (committed test-only
   CA, `localhost` leaf and untrusted leaf certificates/keys; see its README for regeneration).
+  The binary fixtures ship their generators next to them: `tests/fixtures/fonts/generate_toy_test.py`,
+  `tests/fixtures/fonts/generate_variants.py` and `tests/fixtures/images/generate.py` (stdlib-only,
+  deterministic; see the fixture READMEs).
   `tests/support/tls_server.h` is the header-only in-process TLS loopback server shared by
   `net.tls`/`net.http`/`shell.https`; no test ever contacts the public network.
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
@@ -598,3 +601,9 @@ user priorities.
   (system-font raster time was identical at 800x600 and 1600x1000); revisit only if rasterization
   still exceeds the frame budget after the caches/culling, and treat any GPU/XShm work as a new
   dependency decision requiring the user's approval.
+- Fixture generators are committed next to the fixtures they produce (`tests/fixtures/fonts/generate_toy_test.py`,
+  `tests/fixtures/fonts/generate_variants.py`, `tests/fixtures/images/generate.py`). The font
+  generators reproduce the committed TTFs byte for byte; the PNG generator reproduces the documented
+  pixel content (exact PNG bytes may follow the local zlib version). Never hand-edit a binary fixture:
+  change the generator, regenerate, run the full suite, and update the fixture README/tests in the
+  same change. `__pycache__` is gitignored by the root `.gitignore`.

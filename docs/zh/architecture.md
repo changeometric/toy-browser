@@ -170,7 +170,9 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
 └── tests/
     ├── CMakeLists.txt
     ├── toolchain_smoke.cpp
-    └── <module>/                    # one executable per test subject
+    ├── fixtures/                    # 提交的 fixture；二进制 fixture 随附生成器
+    │   └── <kind>/{README.md,generate*.py,<fixture files>}
+    └── <module>/                    # 每个测试主题一个可执行文件
 ```
 
 - 没有占位目录：模块目录与其第一个文件一起创建。

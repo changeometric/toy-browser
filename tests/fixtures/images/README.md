@@ -2,9 +2,9 @@
 
 Hand-generated, self-authored PNG files used by the renderer and the shell tests.
 They contain no third-party data and are small enough to review pixel by pixel.
-Each file was produced once by a throwaway script in `.tmp/` (never committed) and
-is checked in as a fixture so tests need no encoder, no network and no installed
-image library.
+Each file is checked in as a fixture so tests need no encoder, no network and no
+installed image library. The generator is committed next to the fixtures as
+`generate.py` (Python standard library only); running it rewrites the PNGs.
 
 | File | Format | Pixel content |
 | --- | --- | --- |
@@ -15,4 +15,7 @@ image library.
 
 Tests address pixels with the documented values instead of comparing whole files,
 so a fixture may be regenerated with the same content if the format ever needs
-fixing. Keep the dimensions and pixel values above in sync with the tests.
+fixing. The generator reproduces the committed files byte for byte here; on another
+machine the exact PNG bytes may differ with the Python/zlib version, so compare the
+documented pixel content instead. Keep the dimensions and pixel values above in
+sync with the tests and the generator.

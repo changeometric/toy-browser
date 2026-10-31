@@ -4,8 +4,10 @@ Self-authored fonts used by the real-text tests (M8b explicit fonts, M10 automat
 They contain no third-party font data and are small enough to keep in the repository, so the tests
 never depend on fonts installed on the machine.
 
-All fixtures were generated once by throwaway Python scripts in `.tmp/` (never committed; only the
-generated fonts are checked in). The designs are documented below and in the fonts themselves.
+The fixtures are checked in, and their stdlib-only Python generators are committed next to them:
+`generate_toy_test.py` (M8b regular face), `generate_variants.py` (M10 bold/italic/Han faces) and
+this README. Regenerating overwrites the checked-in fonts; the generators reproduce the committed
+files byte for byte on this toolchain, and the designs/metrics are documented below.
 
 ## Files
 
@@ -64,12 +66,22 @@ The tests never read the machine's font configuration. Each test that needs real
   finds no font, the resolver degrades to the built-in bitmap font, and all pre-M10 geometry is
   reproduced byte for byte.
 
-## Regenerating
+## Generating / regenerating
 
-The generators are intentionally not committed: these are tiny fixtures, and reproducing them means
-re-running the same one-off scripts (the table structure and glyph grids are described above and in
-the generated fonts). If a fixture ever changes, update this file and the tests that assert its
-metrics.
+Run from anywhere (the scripts write next to themselves):
+
+```sh
+python3 tests/fixtures/fonts/generate_toy_test.py
+python3 tests/fixtures/fonts/generate_variants.py
+```
+
+Both scripts use only the Python standard library, contain no machine-specific paths and are
+deterministic for a given Python version; they produce the same bytes as the committed fonts on the
+machine they were created with. `generate_toy_test.py` writes only `toy_test.ttf`;
+`generate_variants.py` writes `toy_test_bold.ttf`, `toy_test_italic.ttf` and `toy_cjk.ttf` and never
+touches the M8b regular face. If a fixture changes, update this file and the tests that assert its
+metrics (the table structure and glyph grids are described above and in the generated fonts);
+regenerate and check that the committed fonts are reproducible, or explain the difference.
 
 ## Manual demos
 

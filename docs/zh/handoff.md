@@ -170,8 +170,11 @@ bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
   常规、粗体、斜体与一个小汉字 face，度量/字体族有文档；测试从不使用已安装字体）、
   `tests/fixtures/cjk_site/`（从磁盘加载的中文页面，断言逐单元文本盒、换行与绘制像素）、
   `tests/fixtures/https_site/`（shell 测试通过 TLS 提供的 HTML+PNG 页面）与 `tests/fixtures/tls/`（提交的仅测试用 CA、`localhost` 叶证书与不受信任叶
-  证书/私钥；重新生成方法见其 README）。`tests/support/tls_server.h` 是 `net.tls`/`net.http`/
-  `shell.https` 共用的 header-only 进程内 TLS loopback 服务器；没有任何测试访问公网。
+  证书/私钥；重新生成方法见其 README）。二进制 fixture 的生成器与 fixture 一起提交：
+  `tests/fixtures/fonts/generate_toy_test.py`、`tests/fixtures/fonts/generate_variants.py` 与
+  `tests/fixtures/images/generate.py`（只用标准库、输出确定；见各 fixture README）。
+  `tests/support/tls_server.h` 是 `net.tls`/`net.http`/`shell.https` 共用的 header-only 进程内 TLS
+  loopback 服务器；没有任何测试访问公网。
 - `docs/` —— 架构、路线图、约定、团队流程、决策、依赖、待决问题（本文件是快照）。
 - 共享任务板 —— 由 agent 运行时提供（任务 create/claim/update，带 revision）；如果运行时没有，则用 `docs/tasks/<milestone>.md`，字段相同。见 [team-workflow.md](team-workflow.md)。
 - `README.md` / `README.zh.md` 与 `docs/zh/` —— 面向用户的入口（英语为权威）。
@@ -425,3 +428,8 @@ bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
 - M11 刻意没有加 GPU 后端：实测填充率不是瓶颈（系统字体光栅化在 800×600 与 1600×1000 下耗时
   相同）；只有在缓存/裁剪之后光栅化仍超帧预算时才重新评估，且 GPU/XShm 工作都算新依赖决策，需要
   用户批准。
+- fixture 生成器与它们生成的 fixture 一起提交（`tests/fixtures/fonts/generate_toy_test.py`、
+  `tests/fixtures/fonts/generate_variants.py`、`tests/fixtures/images/generate.py`）。字体生成器逐字节
+  复现已提交 TTF；PNG 生成器复现有文档的像素内容（精确 PNG 字节可能随本地 zlib 版本变化）。不要手工
+  编辑二进制 fixture：改生成器、重新生成、跑全量测试，并在同一改动中更新 fixture README/测试。根
+  `.gitignore` 已忽略 `__pycache__`。

@@ -65,6 +65,12 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
   the `net` tests and the header-only TLS server `tests/support/tls_server.h` (committed test-only
   certificates under `tests/fixtures/tls/`, trust supplied through the CTest `ENVIRONMENT`
   property). No test may contact the public network or use installed certificate stores.
+- Fixtures that are binary or otherwise non-obvious come with their generator committed next to
+  them (`tests/fixtures/<kind>/generate*.py`): Python standard library only, English, paths relative
+  to the script directory, deterministic output, and a README section documenting the regeneration
+  command and the properties the tests rely on. Regenerating must reproduce the committed content
+  (font fixtures byte-identically; PNG bytes may follow the local zlib) or the README and tests must
+  be updated in the same change.
 - Font-dependent code is tested with the committed self-authored fixtures in
   `tests/fixtures/fonts/` and generated fontconfig configs; tests set `FONTCONFIG_FILE` through the
   CTest `ENVIRONMENT` property: the fixture config for automatic selection/fallback tests, or an

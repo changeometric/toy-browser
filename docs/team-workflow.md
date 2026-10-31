@@ -397,7 +397,8 @@ the round when possible. Clean up stale build directories and stray files.
   diagnosis (the new TTFs' hhea table had one extra field, so `numberOfHMetrics` read as 0 and every
   shaped advance was 0). `fc-query` parsing a font does not prove its metrics are right: validate
   generated fixtures through real shaping/metrics, and re-validate after fixing the generator
-  (hhea length 36, correct `numberOfHMetrics`).
+  (hhea length 36, correct `numberOfHMetrics`); the generators are now committed next to the fonts
+  so this validation is repeatable.
 - M10: plan review found that font fallback alone would not make Chinese readable: layout broke
   lines only at ASCII whitespace, so a space-less Chinese paragraph was one unbreakable "word"
   overflowing the viewport. Two follow-up tasks (M10-D CJK break units + punctuation rules, M10-E

@@ -323,6 +323,8 @@ can't form ownership cycles. Revisit only if it actually hurts.
 └── tests/
     ├── CMakeLists.txt
     ├── toolchain_smoke.cpp
+    ├── fixtures/                    # committed fixtures; binary ones ship their generator
+    │   └── <kind>/{README.md,generate*.py,<fixture files>}
     └── <module>/                    # one executable per test subject
 ```
 
