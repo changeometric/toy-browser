@@ -14,8 +14,10 @@ what is still being requested.
   (M8b). Discovered with `find_package(Freetype REQUIRED)`.
 - **harfbuzz (MIT)**, used by `render` for OpenType text shaping (M8b). Discovered with
   `find_package(harfbuzz CONFIG REQUIRED)`.
-- **fontconfig (MIT-style)**, used by `shell` for installed-font discovery and matching when a page
-  is rendered with `--font-family` (M8b). Discovered with `find_package(Fontconfig REQUIRED)`.
+- **fontconfig (MIT-style)**, used by `shell` for installed-font discovery and matching: the
+  explicit `--font-family` path since M8b, and since M10 the automatic selection of the computed CSS
+  font properties with language hints and character-coverage fallback. Discovered with
+  `find_package(Fontconfig REQUIRED)`.
 - **OpenSSL (libssl + libcrypto, Apache-2.0)**, used by `net` for TLS/`https://` fetching (M9).
   Discovered with `find_package(OpenSSL REQUIRED)` and linked PRIVATE to `toy_net`; certificate
   verification is always on against the default trust store and there is no insecure mode.
@@ -79,7 +81,7 @@ without a display.
 | libpng + zlib | PNG decoding | Own inflate + PNG filters/decoder | ~600–900 lines | **Approved, linked since M8a** (used by `render::DecodePng`) |
 | freetype | TTF glyph rasterization and metrics | Own subset TTF loader (cmap/glyf/hmtx, no hinting) | Medium | **Approved, linked since M8b** (used by `render::Font`) |
 | harfbuzz | OpenType shaping (ligatures, glyph selection, positioning) | Basic Latin shaping only | High | **Approved, linked since M8b** (used by `render::Font`) |
-| fontconfig | Installed-font discovery and matching | Hardcoded font path / no discovery | Medium | **Approved, linked since M8b** (used by `shell` for `--font-family`) |
+| fontconfig | Installed-font discovery and matching, including automatic CSS/property matching since M10 | Hardcoded font path / no discovery | Medium | **Approved, linked since M8b** (used by `shell` for `--font-family` and the M10 automatic selection/fallback) |
 | OpenSSL | TLS, i.e. `https://` | Not realistic from scratch | High | **Approved on 2026-10-31, linked since M9** (always-on certificate/hostname verification, default trust store) |
 | stb_truetype / stb_image | Drop-in single-header implementations | Own implementations | Low | **Not approved** — conflicts with the project's spirit |
 | icu | Unicode data and full internationalization | Small ASCII/Latin subset first | High | **Not planned** |
@@ -108,6 +110,7 @@ be completed first.
   `render`) and fontconfig (the shell's `--font-family` path). These are required build
   dependencies; a build needs their development headers.
 - Do not assume what fonts, window manager, GPU or packages a machine has. Tests use the committed
-  self-authored font fixture (`tests/fixtures/fonts/`), never installed fonts, and the M9 TLS tests
-  use committed self-signed test certificates (`tests/fixtures/tls/`), never public CAs or public
-  sites.
+  self-authored font fixtures (`tests/fixtures/fonts/`), never installed fonts (M10 also generates
+  test fontconfig configs; the system font configuration is never used by tests), and the M9 TLS
+  tests use committed self-signed test certificates (`tests/fixtures/tls/`), never public CAs or
+  public sites.

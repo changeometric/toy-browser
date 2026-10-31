@@ -224,6 +224,7 @@ StyleTree ComputeStyles(const dom::Document& document) {
     style.font_size_px = parent_style.font_size_px;
     style.font_weight = parent_style.font_weight;
     style.font_style = parent_style.font_style;
+    style.font_family = parent_style.font_family;
 
     // Font size first: the other longhands resolve `em` against it.
     for (const CascadeCandidate& candidate : candidates) {

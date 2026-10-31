@@ -184,16 +184,47 @@ add_test(NAME shell.images_screenshot
 set(shell_font_file "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/fonts/toy_test.ttf")
 set(shell_font_site "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/font_site")
 
+# M10 deterministic fontconfig configurations. Automatic system-font selection is
+# the default now, so tests must never read the machine's font configuration or
+# installed fonts. Two configs are generated in the build tree at configure time:
+#
+# - the fixture config: `tests/fixtures/fonts` is the only <dir>, and pattern
+#   rules map the generic CSS families to the Latin fixture family. With it,
+#   `serif`, `sans`, `sans-serif` and `monospace` resolve to "Toy Test Font"
+#   (Bold for font-weight: 700, Italic for font-style: italic) while "Toy CJK"
+#   stays the character-coverage fallback for Han text. fontconfig normalizes
+#   `sans-serif` to the family `sans`, so both names need a rule.
+# - the empty config: its only <dir> does not exist, so fontconfig finds no font
+#   and the shell degrades to the frozen built-in bitmap font. Every pre-M10 test
+#   that goes through the automatic selection runs with this config, keeping all
+#   pre-M10 goldens byte-identical.
 set(shell_fontconfig_dir "${CMAKE_CURRENT_BINARY_DIR}/fontconfig")
-set(shell_fontconfig_cache "${shell_fontconfig_dir}/cache")
-set(shell_fontconfig_file "${shell_fontconfig_dir}/fonts.conf")
-file(MAKE_DIRECTORY "${shell_fontconfig_cache}")
-file(WRITE "${shell_fontconfig_file}"
+set(shell_fontconfig_fixture_file "${shell_fontconfig_dir}/fonts.conf")
+set(shell_fontconfig_empty_file "${shell_fontconfig_dir}/empty-fonts.conf")
+file(MAKE_DIRECTORY "${shell_fontconfig_dir}/cache")
+file(MAKE_DIRECTORY "${shell_fontconfig_dir}/empty-cache")
+set(shell_fontconfig_rules "")
+foreach(shell_generic_family serif sans sans-serif monospace)
+  string(APPEND shell_fontconfig_rules
+    "  <match target=\"pattern\">\n"
+    "    <test name=\"family\" qual=\"any\" compare=\"eq\"><string>${shell_generic_family}</string></test>\n"
+    "    <edit name=\"family\" mode=\"assign\" binding=\"same\"><string>Toy Test Font</string></edit>\n"
+    "  </match>\n")
+endforeach()
+file(WRITE "${shell_fontconfig_fixture_file}"
   "<?xml version=\"1.0\"?>\n"
   "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n"
   "<fontconfig>\n"
   "  <dir>${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/fonts</dir>\n"
-  "  <cachedir>${shell_fontconfig_cache}</cachedir>\n"
+  "  <cachedir>${shell_fontconfig_dir}/cache</cachedir>\n"
+  "${shell_fontconfig_rules}"
+  "</fontconfig>\n")
+file(WRITE "${shell_fontconfig_empty_file}"
+  "<?xml version=\"1.0\"?>\n"
+  "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n"
+  "<fontconfig>\n"
+  "  <dir>${shell_fontconfig_dir}/nonexistent-fonts</dir>\n"
+  "  <cachedir>${shell_fontconfig_dir}/empty-cache</cachedir>\n"
   "</fontconfig>\n")
 
 add_executable(fonts_test fonts_test.cpp)
@@ -211,15 +242,18 @@ set_tests_properties(shell.fonts_dump_boxes PROPERTIES
   PASS_REGULAR_EXPRESSION
     "    <h1> block x=8 y=24 width=304 height=32\n      text \"ABC\" x=8 y=24 width=58 height=32\n    <p> block x=8 y=88 width=304 height=16\n      text \"AB\" x=8 y=88 width=19 height=16\n      text \"Cab\" x=37 y=88 width=29 height=16\n")
 
-# The same geometry must come out of a fontconfig family lookup: the test-local
-# config only sees the committed fixture fonts, so "Toy Test Font" is unambiguous.
+# A fontconfig family lookup sees the committed fixture fonts only, so "Toy Test
+# Font" is unambiguous. Unlike --font (one face for all text), the M10
+# --font-family path follows the computed CSS weight: the UA rule
+# `h1 { font-weight: 700 }` selects the bold fixture face, so "ABC" at 32 px is
+# 62 px wide (three 0.65 em advances) instead of the regular 58 px.
 add_test(NAME shell.fonts_dump_boxes_family
   COMMAND $<TARGET_FILE:toybrowser> --font-family "Toy Test Font" --size 320x200 --dump-boxes
           "file://${shell_font_site}/index.html")
 set_tests_properties(shell.fonts_dump_boxes_family PROPERTIES
-  ENVIRONMENT "FONTCONFIG_FILE=${shell_fontconfig_file}"
+  ENVIRONMENT "FONTCONFIG_FILE=${shell_fontconfig_fixture_file}"
   PASS_REGULAR_EXPRESSION
-    "    <h1> block x=8 y=24 width=304 height=32\n      text \"ABC\" x=8 y=24 width=58 height=32\n    <p> block x=8 y=88 width=304 height=16\n      text \"AB\" x=8 y=88 width=19 height=16\n      text \"Cab\" x=37 y=88 width=29 height=16\n")
+    "    <h1> block x=8 y=24 width=304 height=32\n      text \"ABC\" x=8 y=24 width=62 height=32\n    <p> block x=8 y=88 width=304 height=16\n      text \"AB\" x=8 y=88 width=19 height=16\n      text \"Cab\" x=37 y=88 width=29 height=16\n")
 
 # A font that cannot be loaded is a runtime error (exit 1), not a usage error and
 # never a silent bitmap fallback.
@@ -274,3 +308,142 @@ add_test(NAME shell.https
   COMMAND shell_https_test "${shell_https_site}" "${shell_tls_fixtures}")
 set_tests_properties(shell.https PROPERTIES
   ENVIRONMENT "SSL_CERT_FILE=${shell_tls_fixtures}/test_ca.pem")
+
+# M10: every pre-M10 test that runs toybrowser or a Browser through the automatic
+# system-font selection uses the empty config, which forces the built-in bitmap
+# font. Their outputs are the pre-M10 goldens, so they must stay byte-identical.
+# Tests that need real fonts set the fixture config explicitly (shell.fonts_*,
+# shell.font_selection, shell.cjk_*); the --font tests are unaffected because
+# FromFile never consults fontconfig.
+foreach(shell_bitmap_font_test IN ITEMS
+    shell.headless_screenshot
+    shell.navigation
+    shell.dump_body_file
+    shell.dump_body_missing_file
+    shell.dump_dom_file
+    shell.dump_dom_missing_file
+    shell.size_limit
+    shell.dump_style_file
+    shell.dump_style_missing_file
+    shell.dump_boxes_file
+    shell.dump_boxes_missing_file
+    shell.dump_boxes_size
+    shell.dump_boxes_missing_url
+    shell.dump_boxes_conflict
+    shell.screenshot_page
+    shell.cli_positional_url_twice
+    shell.cli_positional_url_with_dump_dom
+    shell.cli_screenshot_missing_page
+    shell.images
+    shell.images_dump_boxes
+    shell.images_dump_boxes_missing_image
+    shell.images_screenshot
+    shell.fonts
+    shell.fonts_dump_boxes
+    shell.fonts_missing_file
+    shell.fonts_with_dump_dom
+    shell.fonts_flags_conflict
+    shell.fonts_missing_argument
+    shell.fonts_screenshot)
+  set_tests_properties("${shell_bitmap_font_test}" PROPERTIES
+    ENVIRONMENT "FONTCONFIG_FILE=${shell_fontconfig_empty_file}")
+endforeach()
+
+# M10 automatic font selection: Fonts::SystemDefault resolves the computed font
+# family/weight/style and the page language through the generated fixture config,
+# selects the committed fixture faces and splits mixed Latin/Han text into
+# coverage runs. Deterministic on any machine (only tests/fixtures/fonts is
+# visible to fontconfig).
+add_executable(font_selection_test font_selection_test.cpp)
+target_link_libraries(font_selection_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(font_selection_test)
+add_test(NAME shell.font_selection
+  COMMAND font_selection_test "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/fonts")
+set_tests_properties(shell.font_selection PROPERTIES
+  ENVIRONMENT "FONTCONFIG_FILE=${shell_fontconfig_fixture_file}")
+
+# The same executable with the generated empty config proves the documented
+# bitmap degradation: fontconfig has no font, so automatic selection returns the
+# built-in bitmap metrics and no runs, while FromFile keeps working.
+add_test(NAME shell.font_selection_bitmap
+  COMMAND font_selection_test "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/fonts" bitmap)
+set_tests_properties(shell.font_selection_bitmap PROPERTIES
+  ENVIRONMENT "FONTCONFIG_FILE=${shell_fontconfig_empty_file}")
+
+# M10 end-to-end CJK page: the committed cjk_site fixture has <html lang="zh-CN">
+# and mixed Latin/Han text styled through CSS. The box dump proves automatic
+# font selection/fallback geometry AND the post-CJK-line-breaking segmentation:
+# every Han code point is its own word-level text box, so the heading lists three
+# 22 px boxes (32 px, 0.7 em advance), "Hello 中文" lists the Latin word plus two
+# 11 px Han boxes, and the 35-character long paragraph wraps into two lines
+# (27 units ending at x=299, then 8 units on the next line at y=248, block height
+# 32 px). The Latin anchors pin the total advances independently. Geometry and
+# expected pixels are documented in tests/fixtures/cjk_site/README.md; the exact
+# per-unit text contents are asserted by shell.cjk_layout.
+set(shell_cjk_site "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/cjk_site")
+
+add_test(NAME shell.cjk_dump_boxes
+  COMMAND $<TARGET_FILE:toybrowser> --size 320x288 --dump-boxes
+          "file://${shell_cjk_site}/index.html")
+set_tests_properties(shell.cjk_dump_boxes PROPERTIES
+  ENVIRONMENT "FONTCONFIG_FILE=${shell_fontconfig_fixture_file}"
+  PASS_REGULAR_EXPRESSION
+    "    <h1> block x=8 y=24 width=304 height=32\n      text \"[^\"]*\" x=8 y=24 width=22 height=32\n      text \"[^\"]*\" x=30 y=24 width=22 height=32\n      text \"[^\"]*\" x=53 y=24 width=22 height=32\n    <p> block x=8 y=88 width=304 height=16\n      text \"Hello\" x=8 y=88 width=48 height=16\n      text \"[^\"]*\" x=66 y=88 width=11 height=16\n      text \"[^\"]*\" x=77 y=88 width=11 height=16\n    <p> block x=8 y=136 width=304 height=16\n      text \"ABC\" x=8 y=136 width=31 height=16\n      text \"[^\"]*\" x=50 y=136 width=11 height=16\n    <p> block x=8 y=184 width=304 height=16\n      text \"abc\" x=8 y=184 width=30 height=16\n      text \"[^\"]*\" x=48 y=184 width=11 height=16\n      text \"Hello\" x=69 y=184 width=50 height=16\n    <p> block x=8 y=232 width=304 height=32\n      text \"[^\"]*\" x=8 y=232 width=11 height=16\n([^\n]*\n)*      text \"[^\"]*\" x=299 y=232 width=11 height=16\n      text \"[^\"]*\" x=8 y=248 width=11 height=16\n([^\n]*\n)*      text \"[^\"]*\" x=86 y=248 width=11 height=16")
+
+# Per-unit text-content assertion for the same page: the CLI regex above freezes
+# positions/widths but cannot spell out the Han characters, so this C++ test loads
+# the fixture through the shell-private loader and checks the exact text-box
+# sequence (one Han code point per box, Latin words grouped), the wrapped paragraph
+# line break and the per-line baseline offsets.
+add_executable(shell_cjk_layout_test cjk_layout_test.cpp)
+# The test includes the shell-private page loader header on purpose.
+target_include_directories(shell_cjk_layout_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../src/shell")
+target_link_libraries(shell_cjk_layout_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(shell_cjk_layout_test)
+add_test(NAME shell.cjk_layout
+  COMMAND shell_cjk_layout_test "${shell_cjk_site}")
+set_tests_properties(shell.cjk_layout PROPERTIES
+  ENVIRONMENT "FONTCONFIG_FILE=${shell_fontconfig_fixture_file}")
+
+# The screenshot check renders the same page at 320x288 (the full page height) and
+# verifies the PPM header/size plus ink presence and real-font anti-aliasing in
+# the frozen text regions, including both wrapped lines of the long Han paragraph
+# (the synthetic fixture glyphs are block art, so exact AA bytes are not asserted).
+add_test(NAME shell.cjk_screenshot
+  COMMAND ${CMAKE_COMMAND}
+          -DTOYBROWSER=$<TARGET_FILE:toybrowser>
+          -DFIXTURE_DIR=${shell_cjk_site}
+          -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/cjk_screenshot.ppm
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cjk_screenshot_check.cmake")
+set_tests_properties(shell.cjk_screenshot PROPERTIES
+  ENVIRONMENT "FONTCONFIG_FILE=${shell_fontconfig_fixture_file}")
+
+# M10 page language hint: the shell-private loader extracts the root <html lang>
+# value (trimmed, first attribute) for fontconfig. The fixtures are generated in
+# the build tree; the test drives the private loader directly because the hint is
+# not observable through the public Browser API with the fixture fonts. No fonts,
+# network or display are involved.
+set(shell_language_fixtures_dir "${CMAKE_CURRENT_BINARY_DIR}/page_language_fixtures")
+file(MAKE_DIRECTORY "${shell_language_fixtures_dir}")
+file(WRITE "${shell_language_fixtures_dir}/zh.html"
+  "<!doctype html><html lang=\"zh-CN\"><body><p>x</p></body></html>\n")
+file(WRITE "${shell_language_fixtures_dir}/trimmed.html"
+  "<!doctype html><html lang=\"  zh-CN  \"><body><p>x</p></body></html>\n")
+file(WRITE "${shell_language_fixtures_dir}/first_attribute.html"
+  "<!doctype html><html lang=\"en\" lang=\"de\"><body><p>x</p></body></html>\n")
+file(WRITE "${shell_language_fixtures_dir}/absent.html"
+  "<!doctype html><html><body><p>x</p></body></html>\n")
+file(WRITE "${shell_language_fixtures_dir}/body_language.html"
+  "<!doctype html><html><body lang=\"fr\"><p lang=\"de\">x</p></body></html>\n")
+file(WRITE "${shell_language_fixtures_dir}/empty_language.html"
+  "<!doctype html><html lang=\"\"><body><p>x</p></body></html>\n")
+
+add_executable(shell_page_language_test page_language_test.cpp)
+# The test includes the shell-private page loader header on purpose.
+target_include_directories(shell_page_language_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../src/shell")
+target_link_libraries(shell_page_language_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(shell_page_language_test)
+add_test(NAME shell.page_language
+  COMMAND shell_page_language_test "${shell_language_fixtures_dir}")

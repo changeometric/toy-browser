@@ -1,7 +1,8 @@
-// M8b end-to-end real-font test: shell font selection -> layout metrics through
-// the shell MeasureText adapter -> paint with DrawTextWithFont, plus the built-in
-// bitmap fallback. Everything runs against the committed file:// fixture font and
-// font site; no display, no network and no installed font are needed.
+// M8b/M10 end-to-end real-font test: an explicit --font equivalent
+// (Fonts::FromFile) -> layout metrics through the shell MeasureText adapter ->
+// paint with DrawTextWithFont runs, plus the built-in bitmap fallback. Everything runs against the
+// committed file:// fixture font and font site; no display, no network and no installed font are
+// needed.
 //
 // Geometry is frozen from `toybrowser --font <fixture> --size 320x200
 // --dump-boxes tests/fixtures/font_site/index.html` (1 CSS px = 1 device px).
@@ -22,12 +23,13 @@
 //     text "AB" x=34 y=184 width=19 height=16
 //   ... filler paragraphs; the page is taller than the 200 px viewport.
 
+#include "toy/shell/fonts.h"
+
 #include <cstdio>
 #include <memory>
 #include <string>
 
 #include "support/check.h"
-#include "toy/render/font.h"
 #include "toy/render/surface.h"
 #include "toy/shell/browser.h"
 
@@ -129,17 +131,17 @@ int main(int argc, char** argv) {
   const std::string font_path = site + "/../fonts/toy_test.ttf";
 
   std::string error;
-  const std::shared_ptr<const toy::render::Font> font =
-      toy::render::Font::LoadFromFile(font_path, &error);
-  toy_test::Check(font != nullptr, "the committed fixture font loads");
-  if (!font) {
+  const std::shared_ptr<const toy::shell::Fonts> fonts =
+      toy::shell::Fonts::FromFile(font_path, &error);
+  toy_test::Check(fonts != nullptr, "the committed fixture font loads through FromFile");
+  if (!fonts) {
     std::fprintf(stderr, "  cannot load '%s': %s\n", font_path.c_str(), error.c_str());
     return toy_test::Finish("shell fonts test");
   }
   toy_test::Check(error.empty(), "a successful font load clears the error");
 
   // --- Real font: layout metrics and anti-aliased painting -------------------
-  toy::shell::Browser browser(kViewportWidth, kViewportHeight, font);
+  toy::shell::Browser browser(kViewportWidth, kViewportHeight, fonts);
   toy_test::Check(browser.Open(index_url, &error), "Open(font_site/index.html) succeeds");
   toy_test::Check(error.empty(), "a successful load clears the error");
   toy_test::Check(browser.has_page(), "the font fixture page is current");

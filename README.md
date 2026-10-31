@@ -2,16 +2,22 @@
 
 A toy web browser built from scratch: C++20, CMake, and no ready-made browser components.
 
-**Status: M9 — most-basic HTTPS.** The browser fetches `http://`, `https://` and `file://` URLs;
-`https://` uses the approved OpenSSL library with certificate and hostname verification always on
-and no insecure mode. The window and `--headless --screenshot` render the page given by an optional
-URL, including `<img src="...png">` images (approved libpng) and, when a real font is selected with
-`--font PATH` or `--font-family NAME` (approved freetype/harfbuzz/fontconfig), anti-aliased
-true-type text; without a font flag the built-in bitmap font is used and all pre-M8b output is
-byte-identical. In the window, links are clickable, the wheel and keyboard scroll, Alt+Left/Right
-move through history and the title follows `<title>`. **Next planned milestone: M10 — HTTP proxy**
-(design sketch in the [roadmap](docs/roadmap.md)). Committed demos:
-[`tests/fixtures/font_site/`](tests/fixtures/font_site/) for real text + images,
+**Status: M10 — automatic font selection.** The browser fetches `http://`, `https://` and
+`file://` URLs (`https://` uses the approved OpenSSL library with certificate and hostname
+verification always on, no insecure mode) and renders pages headlessly or in an X11 window. Without
+any font flag it picks fonts the way a normal browser does: the computed CSS
+`font-family`/`font-weight`/`font-style` are matched through the approved fontconfig library (the
+initial family is `serif`), and text whose preferred face lacks characters falls back to an
+installed face that has them. Layout splits text into runs and gives CJK text individual break
+units, so Chinese pages are readable without spaces and wrap normally. `--font PATH` and
+`--font-family NAME` remain explicit overrides; when no usable system font exists the browser
+degrades to the built-in bitmap font. Real text is anti-aliased (freetype + harfbuzz), `<img
+src="...png">` images are decoded with libpng, links are clickable in the window, the wheel and
+keyboard scroll, Alt+Left/Right move through history and the title follows `<title>`. **Next
+planned milestone: M11 — HTTP proxy** (deprioritized by the user; design sketch in the
+[roadmap](docs/roadmap.md)). Committed demos:
+[`tests/fixtures/cjk_site/`](tests/fixtures/cjk_site/) for automatic fonts + readable Chinese,
+[`tests/fixtures/font_site/`](tests/fixtures/font_site/) for explicit real text + images,
 [`tests/fixtures/img_site/`](tests/fixtures/img_site/) for images,
 [`tests/fixtures/nav_site/`](tests/fixtures/nav_site/) for navigation and
 [`tests/fixtures/https_site/`](tests/fixtures/https_site/) for the HTTPS pipeline. The `--dump-*`
@@ -39,7 +45,9 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/font_site/index.html" \
     --font tests/fixtures/fonts/toy_test.ttf   # real TTF text + image demo (fixture font)
 ./build/toybrowser --size 400x200 --font-family "sans-serif" \
-    "file://$PWD/tests/fixtures/nav_site/index.html"   # any installed font family
+    "file://$PWD/tests/fixtures/nav_site/index.html"   # force an installed font family
+./build/toybrowser --size 400x240 "file://$PWD/tests/fixtures/cjk_site/index.html"  # automatic fonts + Chinese wrapping
+./build/toybrowser --size 800x900 --screenshot /tmp/zh.ppm https://www.gov.cn/  # real Chinese page (system fonts)
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"   # images demo
 ./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # the committed nav demo site
 ./build/toybrowser --dump-body https://example.com/   # fetch an https URL (TLS, always verified)
@@ -51,10 +59,10 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --dump-boxes file:///etc/hostname # fetch, style, lay out, dump the box tree
 ```
 
-The window backend links libX11, image decoding links libpng, real-font rendering links freetype and
-harfbuzz, family lookup links fontconfig and `https://` links OpenSSL (all approved; see
-[dependencies](docs/dependencies.md)), so those development headers are build-time requirements
-even when only headless modes are used. Headless runs need no display and are the
+The window backend links libX11, image decoding links libpng, text rendering/shaping links freetype
+and harfbuzz, automatic font selection links fontconfig and `https://` links OpenSSL (all approved;
+see [dependencies](docs/dependencies.md)), so those development headers are build-time
+requirements even when only headless modes are used. Headless runs need no display and are the
 primary mode for testing and debugging: every rendered result can be inspected without opening a
 window.
 
@@ -89,7 +97,7 @@ JS engine, layout or rendering engine).
 | libpng + zlib | PNG image decoding | libpng license / zlib license | linked since M8a |
 | freetype | font metrics and glyph rasterization | FreeType License | linked since M8b |
 | harfbuzz | OpenType text shaping | MIT | linked since M8b |
-| fontconfig | installed-font discovery and matching | MIT-style | linked since M8b |
+| fontconfig | automatic font discovery/matching, language hints and character fallback | MIT-style | linked since M8b (the automatic selection since M10) |
 | OpenSSL | TLS for `https://` | Apache-2.0 | linked since M9 |
 
 The policy, the approval log and from-scratch alternatives live in

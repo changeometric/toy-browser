@@ -34,10 +34,10 @@ void TestDumpCases() {
   // A minimal page: only element nodes are dumped, with DOM-depth indentation.
   ExpectDump(
       "<p>hi</p>",
-      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-      <p> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=16px margin-right=0px margin-bottom=16px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      <p> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=16px margin-right=0px margin-bottom=16px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
 )dom",
       "a minimal page dumps only element nodes");
 
@@ -47,12 +47,12 @@ void TestDumpCases() {
       ".wide { width: 10em; padding: 1px; background-color: #abc; }</style></head>"
       "<body><div class=\"wide\"><p id=\"t\" style=\"margin-left: 3px\">x</p></div></body>"
       "</html>",
-      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-      <style> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-      <div> display=block color=#000000 background-color=#aabbcc font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=1px padding-right=1px padding-bottom=1px padding-left=1px width=160px height=auto
-        <p> display=block color=#ff0000 background-color=transparent font-size=20px font-weight=400 font-style=normal margin-top=2px margin-right=4px margin-bottom=2px margin-left=3px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      <style> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      <div> display=block color=#000000 background-color=#aabbcc font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=1px padding-right=1px padding-bottom=1px padding-left=1px width=160px height=auto
+        <p> display=block color=#ff0000 background-color=transparent font-size=20px font-weight=400 font-style=normal font-family=serif margin-top=2px margin-right=4px margin-bottom=2px margin-left=3px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
 )dom",
       "author rules, inline style and em lengths are dumped");
 
@@ -60,34 +60,71 @@ void TestDumpCases() {
   ExpectDump(
       "<div style=\"width: 10.4px; margin-top: 2.5px; margin-bottom: 2.4px; "
       "font-size: 15.5px; color: #123; background-color: #abc\">x</div>",
-      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-      <div> display=block color=#112233 background-color=#aabbcc font-size=16px font-weight=400 font-style=normal margin-top=3px margin-right=0px margin-bottom=2px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=10px height=auto
+      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      <div> display=block color=#112233 background-color=#aabbcc font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=3px margin-right=0px margin-bottom=2px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=10px height=auto
 )dom",
       "lengths are rounded and colors normalized");
 
   // Nested elements at normal depth keep their exact, uncapped indentation.
   ExpectDump(
       "<div><div><p>x</p></div></div>",
-      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-      <div> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-        <div> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-          <p> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=16px margin-right=0px margin-bottom=16px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      <div> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+        <div> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+          <p> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=16px margin-right=0px margin-bottom=16px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
 )dom",
       "nested elements at normal depth keep exact indentation");
 
   // Inline elements and the UA link color.
   ExpectDump(
       "<a href=\"/x\">link</a>",
-      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
-      <a> display=inline color=#0000ee background-color=transparent font-size=16px font-weight=400 font-style=normal margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      R"dom(  <html> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <head> display=none color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+    <body> display=block color=#000000 background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=8px margin-right=8px margin-bottom=8px margin-left=8px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
+      <a> display=inline color=#0000ee background-color=transparent font-size=16px font-weight=400 font-style=normal font-family=serif margin-top=0px margin-right=0px margin-bottom=0px margin-left=0px padding-top=0px padding-right=0px padding-bottom=0px padding-left=0px width=auto height=auto
 )dom",
       "inline elements and the UA link color are dumped");
+}
+
+// The font-family field: raw for plain [A-Za-z0-9_-] names, double-quoted with
+// backslash escapes for everything else, items joined with ", ".
+std::string DivFontFamilyField(const char* html) {
+  const toy::dom::Document document = toy::dom::ParseDocument(html);
+  const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
+  const std::string dump = toy::style::DumpStyleTree(document, styles);
+  const std::size_t line = dump.find("<div> display=");
+  const std::string marker = " font-family=";
+  if (line == std::string::npos) {
+    return "<missing div line>";
+  }
+  const std::size_t begin = dump.find(marker, line);
+  if (begin == std::string::npos) {
+    return "<missing font-family field>";
+  }
+  const std::size_t value_begin = begin + marker.size();
+  const std::size_t value_end = dump.find(" margin-top=", value_begin);
+  if (value_end == std::string::npos) {
+    return "<missing field end>";
+  }
+  return dump.substr(value_begin, value_end - value_begin);
+}
+
+void TestFontFamilyDump() {
+  Check(DivFontFamilyField("<div>x</div>") == "serif",
+        "the initial font-family dumps as the raw generic name");
+  Check(DivFontFamilyField("<div style='font-family: ToyFont'>x</div>") == "ToyFont",
+        "a plain family name dumps raw");
+  Check(DivFontFamilyField("<div style='font-family: \"Toy Test Font\", sans-serif'>x</div>") ==
+            "\"Toy Test Font\", sans-serif",
+        "a name with spaces is quoted, the list is joined with a comma and a space");
+  Check(DivFontFamilyField("<div style='font-family: \"A\\\"B\"'>x</div>") == "\"A\\\"B\"",
+        "a double quote inside a family name is escaped in the dump");
+  Check(DivFontFamilyField("<div style='font-family: \"A\\\\B\"'>x</div>") == "\"A\\\\B\"",
+        "a backslash inside a family name is escaped in the dump");
 }
 
 // Regression: the capped indent keeps the dump linear for deep nesting.
@@ -130,6 +167,7 @@ void TestDeepNestingDump() {
 
 int main() {
   TestDumpCases();
+  TestFontFamilyDump();
   TestDeepNestingDump();
   if (g_failures != 0) {
     std::fprintf(stderr, "style dump test: %d failure(s)\n", g_failures);

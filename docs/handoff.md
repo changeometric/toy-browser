@@ -20,23 +20,26 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M8a | PNG images: `render::Image` + libpng decoder behind `render::DecodePng`, `DrawImage` display-list command/rasterizer, replaced inline `<img>` layout from caller-supplied intrinsic sizes, private shell page loader (fetch/resolve/decode/skip failures), image fixtures and `tests/fixtures/img_site/`, 46 tests |
 | M8b | Real fonts: `render::Font` (freetype metrics/rasterization + harfbuzz shaping, 4096 px effective size cap) behind a frozen pimpl, anti-aliased `DrawTextWithFont` with baseline placement, `--font PATH` / `--font-family NAME` (fontconfig) selection, self-authored font fixture and `tests/fixtures/font_site/`, 55 tests; the bitmap path stayed byte-identical |
 | M9 | `https://` fetching: `net` URL layer accepts https (default port 443), OpenSSL-backed TLS transport behind the unchanged blocking `Fetch()` sharing the HTTP/1.1 code through a private byte-stream abstraction, always-on certificate + hostname verification against OpenSSL's default trust store (no insecure mode), SNI, existing timeouts, redirects resolved with `net::ResolveUrl` (relative/protocol-relative, http<->https), committed test CA/leaf certs, in-process TLS loopback server, `net.tls` + `shell.https` end-to-end tests, 57 tests; http/file output stayed byte-identical |
+| M10 | Automatic font selection: CSS `font-family`/`font-weight`/`font-style` matched through the approved fontconfig library with initial family `serif`, per-code-point character-coverage fallback runs (Han text on Latin pages and vice versa), root `<html lang>` as a fontconfig language hint; a shared `shell::Fonts` object drives layout measurement and painting (`TextMetrics::ascent_px`, `Box::baseline_offset_px`, `paint::FontRunsProvider`); simplified CJK break units in layout so Chinese paragraphs wrap; committed regular/bold/italic/Han fixture fonts and deterministic fixture/empty fontconfig test configs; `--font`/`--font-family` overrides kept; bitmap path remains the byte-identical degradation path; 66 tests |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-**Next planned milestone: M10 — HTTP proxy (planned, not started).** M9 (most-basic HTTPS) shipped;
-the user approved OpenSSL for TLS on 2026-10-31 and it is linked since M9 (recorded in
-[dependencies.md](dependencies.md)). M10 adds an HTTP proxy (absolute-form for `http`, `CONNECT`
-for `https`) behind `FetchOptions`, which is what makes real-site testing practical on restricted
-networks. The JavaScript subset was shelved by the user.
+**Next planned milestone: M11 — HTTP proxy (planned, not started; deprioritized by the user).**
+M10 (automatic font selection, including readable Chinese text) shipped. M11 adds an HTTP proxy
+(absolute-form for `http`, `CONNECT` for `https`) behind `FetchOptions`; the user said the proxy is
+not important right now, so the remaining work is prioritised by them. The JavaScript subset is
+deferred.
 
-Not implemented yet: proxies (planned M10), JavaScript (deferred),
-external stylesheets, borders, horizontal scrolling/scrollbars, hover/active link styling and form
-controls, and CSS-driven font selection (`font-family`/`font-weight`/`font-style`, fallback chains,
-`@font-face`). PNG images work since M8a, real TTF text since M8b (opt-in) and `https://` since M9
-(see the known limits in [roadmap.md](roadmap.md)); `http://` and `file://` remain supported. The
-window and `--screenshot` paint a real page when a URL is given and
+Not implemented yet: proxies (planned M11), JavaScript (deferred), external stylesheets, borders,
+horizontal scrolling/scrollbars, hover/active link styling and form controls, and `@font-face`/
+webfont downloads. Font selection works automatically since M10 (CSS families/weight/style through
+fontconfig, character-coverage fallback, CJK line breaking); other scripts are best-effort and
+bidi/RTL plus full Unicode line breaking are not implemented. PNG images work since M8a, real fonts
+since M8b and `https://` since M9 (see the known limits in [roadmap.md](roadmap.md)); `http://` and
+`file://` remain supported. The window and `--screenshot` paint a real page when a URL is given and
 the M1 placeholder page otherwise; with a page URL the window is also browsable (links,
 wheel/keyboard scrolling, Alt+Left/Right history, `<title>`). The `--dump-*` modes remain the
-primary debugging path.
+primary debugging path; with system fonts their text output is machine-dependent by design (tests
+pin `FONTCONFIG_FILE`).
 
 ## Verify the current state (no context needed)
 
@@ -58,7 +61,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 57/57 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 66/66 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
 or newer is required; building needs the X11, libpng, freetype, harfbuzz, fontconfig and OpenSSL
@@ -83,8 +86,11 @@ development headers (all approved dependencies); only windowed mode needs a runn
 
 Expected: the image screenshot renders the committed PNG fixtures (flags, alpha, gray, palette) and
 the box dump contains `<img> inline` boxes with their intrinsic/CSS sizes; `missing.png` reserves
-no box. The fixture-font box dump shows real-font metrics (e.g. `<h1>` text "ABC" width 58 at 32 px
-instead of the bitmap font's 48); without a font flag every page keeps the bitmap output.
+no box. The `--font` fixture dump keeps the M8b metrics (e.g. `<h1>` text "ABC" width 58 at 32 px).
+`--font-family` now follows the computed weight/style, so the UA bold h1 renders a bold face (the
+`shell.fonts_dump_boxes_family` test pins that). Without a font flag, pages now use automatic system
+fonts (machine-dependent by design); tests pin `FONTCONFIG_FILE` to deterministic fixture/empty
+configs, and the empty config keeps the built-in bitmap output for all pre-M10 goldens.
 
 ```sh
 # HTTPS (M9): deterministic TLS tests use the committed test certificates
@@ -102,6 +108,24 @@ hostname and timeout failures are ordinary fetch errors (CLI exit 1 for page mod
 always on and there is no insecure mode.
 
 ```sh
+# Font selection (M10): deterministic tests with the committed fixture fonts and test fontconfig
+# configs; the Chinese fixture page is served from disk (file://) and laid out/painted with the
+# fixture Han face and real per-character fallback runs.
+ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_break|shell\.font_selection|shell\.page_language|shell\.cjk_.*|shell\.fonts.*)$' --output-on-failure
+
+# Manual system-font check: no font flags at all. Text uses installed fonts (serif default,
+# weight/style, per-character fallback) and is machine-dependent. Chinese sites render with a
+# Han fallback face and wrap because CJK text has break units.
+"$BUILD"/toybrowser --size 800x900 --screenshot /tmp/toybrowser-zh.ppm https://www.gov.cn/
+"$BUILD"/toybrowser --size 800x600 --dump-boxes https://example.com/ | grep 'text "'
+```
+
+Expected: all font tests pass deterministically (fixture config: default serif, bold/italic faces,
+mixed Latin+Han runs, the committed Chinese page with per-unit boxes, wrapping and painted ink;
+empty config: the byte-identical bitmap path). The manual page shows real system text, including
+readable Chinese with wrapping.
+
+```sh
 "$BUILD"/toybrowser --size 400x200 --screenshot /tmp/toybrowser-nav.ppm \
     "file://$PWD/tests/fixtures/nav_site/index.html" && file /tmp/toybrowser-nav.ppm
 ```
@@ -117,10 +141,11 @@ Window demo (needs a display):
 # history; the title follows <title>.
 ```
 
-## Next round: M10 — HTTP proxy (planned; starts only on the user's go-ahead)
+## Next round: M11 — HTTP proxy (planned; starts only on the user's go-ahead)
 
-**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M10 code exists. M9 is complete and
-green, so the starting point is the current HEAD.
+**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M11 code exists. M10 is complete and
+green, so the starting point is the current HEAD; the user deprioritized the proxy, so confirm the
+priority before starting it.
 
 - Goal: fetch `http://` through an HTTP proxy using absolute-form request targets, and `https://`
   through a proxy `CONNECT` tunnel followed by the normal TLS handshake. The browser's own proxy
@@ -131,8 +156,9 @@ green, so the starting point is the current HEAD.
   public network) and byte-identical output when no proxy is configured.
 - Non-goals until re-scoped: SOCKS proxies, proxy authentication, bypass lists, PAC.
 
-After M10 the umbrella roadmap is green; the remaining work is the documented backlog (more image
-formats, CSS font selection, external stylesheets, etc.) and any new user priorities.
+After M11 the umbrella roadmap is green; the remaining work is the documented backlog (webfonts,
+more image formats, external stylesheets, bidi/RTL and full Unicode line breaking, etc.) and any new
+user priorities.
 
 ## Map of the repository
 
@@ -160,8 +186,10 @@ formats, CSS font selection, external stylesheets, etc.) and any new user priori
   navigation demo; its "Unsupported page" link is a deliberate unsupported-scheme case so no test
   touches the public network), `tests/fixtures/img_site/` (image pipeline demo),
   `tests/fixtures/font_site/` (real-font + image demo), `tests/fixtures/images/` (hand-generated
-  PNGs with documented pixel content), `tests/fixtures/fonts/` (self-authored minimal TTF with
-  documented metrics/family; the tests never use installed fonts), `tests/fixtures/https_site/`
+  PNGs with documented pixel content), `tests/fixtures/fonts/` (self-authored minimal TTFs:
+  regular, bold, italic and a tiny Han face, all with documented metrics/family; the tests never
+  use installed fonts), `tests/fixtures/cjk_site/` (Chinese page served from disk, asserting
+  per-unit boxes, wrapping and painted ink), `tests/fixtures/https_site/`
   (HTML+PNG page served over TLS by the shell test) and `tests/fixtures/tls/` (committed test-only
   CA, `localhost` leaf and untrusted leaf certificates/keys; see its README for regeneration).
   `tests/support/tls_server.h` is the header-only in-process TLS loopback server shared by
@@ -182,16 +210,26 @@ formats, CSS font selection, external stylesheets, etc.) and any new user priori
   the M1 placeholder page. M8b adds `--font PATH` and `--font-family NAME`: each needs a non-empty
   argument, they are mutually exclusive, and both are usage errors (exit 2) with
   `--dump-body`/`--dump-dom`/`--dump-style`; they are allowed with window mode, `--screenshot` and
-  `--dump-boxes`. A selected font that cannot be loaded/resolved is a runtime error (exit 1);
-  without either flag the built-in bitmap font is used (the pre-M8b behavior).
+  `--dump-boxes`. A selected font that cannot be loaded/resolved is a runtime error (exit 1).
+  Without either flag the browser uses automatic system fonts (M10: computed CSS
+  family/weight/style through fontconfig, with character fallback); only when no usable system font
+  exists does it degrade to the built-in bitmap font. `--font PATH` keeps one exact face with no
+  fallback; `--font-family NAME` forces the preferred family and still allows character fallback,
+  and since M10 it also follows the computed weight/style.
 - Dump formats (DOM, style, boxes): deterministic, line-oriented, asserted by tests; any change
-  needs tests and docs in the same round. The box dump is pre-order lines of
+  needs tests and docs in the same round. The style dump has a `font-family=` field after
+  `font-style=` since M10: items joined with ", ", raw when the item matches `[A-Za-z0-9_-]+`,
+  otherwise double-quoted with `\` and `"` backslash-escaped. The box dump is pre-order lines of
   `<tag> block|inline`, `anonymous block` or `text "..."` followed by `x= y= width= height=`, all
   integers (`std::lround`) of absolute CSS pixels; indent is two spaces per box depth, capped at 64
-  levels.
-- Layout semantics frozen through the layout tests and the M5/M8a known limits: viewport width from
-  `--size`, no margin collapsing, top-aligned lines, word-level text boxes, ASCII-only line
-  breaking. M8a replaced elements: `LayoutOptions::replaced_sizes` (DOM node id → intrinsic CSS px)
+  levels, and its format is unchanged by M10 (CJK text simply yields one text box per break unit).
+- Layout semantics frozen through the layout tests and the M5/M8a/M10 known limits: viewport width
+  from `--size`, no margin collapsing, top-aligned lines, word-level text boxes, and line breaking
+  at whitespace plus M10 CJK break units (individual CJK characters, simplified punctuation
+  prohibitions; Latin words never split, no full UAX#14/dictionary breaking). Since M10 the
+  `MeasureText` callback also receives the text's `style::ComputedStyle`; `TextMetrics` carries
+  `ascent_px` and each text box carries `baseline_offset_px` = the line's maximum ascent (metadata
+  only, not dumped). M8a replaced elements: `LayoutOptions::replaced_sizes` (DOM node id → intrinsic CSS px)
   makes an inline element an atomic inline-level box; CSS `width`/`height` px override the
   intrinsic size, one specified side keeps the intrinsic ratio, the box wraps as a whole, raises
   the line height and is top-aligned; its dump line stays `<tag> inline x= y= width= height=`, it
@@ -212,23 +250,43 @@ formats, CSS font selection, external stylesheets, etc.) and any new user priori
   `((dx - x) * image.width / width, (dy - y) * image.height / height)` with integer floor division
   (nearest-neighbour, no interpolation/AA), composited with the same SrcOver formula (alpha 0 no-op,
   alpha 255 writes `0xFF000000 | rgb`, result opaque); an empty image map reproduces the pre-M8a
-  command list exactly. M8b real-font text: when the session selected a font, each text box becomes
-  a `DrawTextWithFont` command (x = pen origin, y = baseline in device pixels, baseline =
-  `round(box.y) - scroll_y + round(font->AscentPx(size))`), the font is kept by shared reference,
+  command list exactly. M10 real-font text: paint receives a `paint::FontRunsProvider`; for each
+  text box it asks for ordered, non-empty runs concatenating exactly to the box text. Each run
+  becomes a `DrawTextWithFont` command at x = `round(pen_x)` (pen starts at box.x and advances by
+  `font->MeasureTextWidth(run.text, style.font_size_px)` CSS px) and y =
+  `round(box.y) - scroll_y + round(box.baseline_offset_px)`; the font is kept by shared reference;
   glyphs are shaped by harfbuzz and rasterized by freetype as 8-bit coverage, placed with the frozen
   per-glyph integer formula (26.6 pen rounded to device pixels, ties away from zero, plus freetype
   bitmap_left/top), composited with the same SrcOver formula using coverage as alpha (result
   opaque), clipped to the current clip rectangle, and the effective size is clamped to
-  `kMaxRealFontSizePx` (4096 px). With no font selected the frozen bitmap command list is emitted
-  unchanged (`DrawText`, top-of-cell y, opaque unaliased pixels).
+  `kMaxRealFontSizePx` (4096 px). A null/empty provider, or an empty run vector for a box, emits the
+  frozen M10-pre bitmap command (`DrawText`, top-of-cell y, opaque unaliased pixels) and must
+  reproduce the pre-M10 command list byte for byte.
 
-- Real-font contract (M8b): `render::Font` is immutable after loading (pimpl, no freetype/harfbuzz
-  type in a public header), loading failures are ordinary errors, face 0 only, metrics are design
-  units scaled by `size / unitsPerEm`, advance widths are harfbuzz-shaped 26.6 sums. The shell
-  resolves one font per run (`--font` file or fontconfig's best match for `--font-family`, with
-  fallback for unknown families) and shares it with layout metrics and painting; one face applies
-  to the whole session (no per-element CSS font selection yet). Fontconfig is a shell-only
-  dependency; freetype/harfbuzz are private to `render`.
+- Font engine contract (M8b): `render::Font` is immutable after loading (pimpl, no
+  freetype/harfbuzz type in a public header), loading failures are ordinary errors, face 0 only,
+  metrics are design units scaled by `size / unitsPerEm`, advance widths are harfbuzz-shaped 26.6
+  sums.
+- Font selection contract (M10): `toy/shell/fonts.h` `Fonts` (pimpl) is created once per session as
+  `SystemDefault`, `FromFile` or `FromFamily`. `SystemDefault` maps the computed `font_family`
+  (initial `serif`)/`font_weight`/`font_style` plus the page language hint (root `<html lang>`) to
+  fontconfig, splits a text box's UTF-8 into runs by code-point character coverage (first candidate
+  whose charset covers it; uncovered code points use the primary face's `.notdef`), caches candidate
+  lists per (families, weight, slant, language) and faces per file, and is shared by the layout
+  measurement adapter and the paint run provider so measurement and painting always agree.
+  `FromFile` is one exact face (no fallback); `FromFamily` forces the preferred family with
+  character fallback and fails with a readable error when unusable. With no usable system font
+  (fontconfig init failure, no candidates, no loadable file) `SystemDefault` operates in bitmap
+  mode: bitmap metrics and empty runs, so pages still load. Fontconfig stays shell-only;
+  freetype/harfbuzz stay private to `render`; the default browser behavior and the automatic
+  selection were introduced in M10 only.
+- Font determinism contract (M10): tests never use installed fonts or the machine font
+  configuration. They set `FONTCONFIG_FILE` via CTest `ENVIRONMENT` to one of two generated configs:
+  a fixture config (`<dir>` = `tests/fixtures/fonts/`, generic families mapped to `Toy Test Font`)
+  for automatic selection/fallback tests, and an empty config (no font directories) that forces the
+  bitmap path and must reproduce every pre-M10 dump/screenshot byte for byte. `Fonts` caches mean a
+  fixed fontconfig configuration and font set produce deterministic runs/metrics; do not add an
+  in-code trust/override hook.
 - Image decoding contract (`render::DecodePng`): PNG only, via the approved libpng dependency behind
   the interface, output straight-alpha ARGB `render::Image`; accepted sizes are each side at most
   8192 px and at most 16,777,216 pixels in total (inclusive maxima), rejected before allocation;
@@ -401,13 +459,17 @@ formats, CSS font selection, external stylesheets, etc.) and any new user priori
 - Image loading has no cache and no lazy loading: every `<img>` occurrence is fetched, even one
   hidden by `display:none` or far below the viewport. That is a documented M8a MVP limit, not a
   bug; only add caching/lazy loading with a contract change.
-- M8b adds a hard byte-compatibility gate: without `--font`/`--font-family`, every pre-M8b dump and
-  screenshot must stay `cmp`-identical to the M8a baseline; the real-font path is entirely opt-in.
-  Rerun a `git worktree` baseline of the previous commit after any painting/font change.
-- Real-font tests must use the committed self-authored fixture `tests/fixtures/fonts/toy_test.ttf`
-  and never installed fonts; the fontconfig CLI test points `FONTCONFIG_FILE` at a generated config
-  whose only `<dir>` is the fixture fonts. Installed fonts are for manual demos only (any
-  fontconfig family works, e.g. `sans-serif`).
+- M10 keeps the hard byte-compatibility gate through the bitmap path: with `FONTCONFIG_FILE`
+  pointing at the generated empty config (no fonts), every pre-M10 dump and screenshot must stay
+  `cmp`-identical to the M9 baseline; the only intentional difference is the new `font-family=`
+  field in the style dump, which the gate normalizes away before comparing. Rerun a `git worktree`
+  baseline of the previous commit after any painting/font/layout change.
+- Font tests must use the committed self-authored fixtures (`tests/fixtures/fonts/`: regular,
+  bold, italic, Han) and never installed fonts. Automatic-selection tests set `FONTCONFIG_FILE` to
+  the generated fixture config (only the fixture fonts, generic families mapped to `Toy Test Font`);
+  the bitmap-compatibility tests set it to an empty config. Installed fonts are for manual demos
+  only. `tests/fixtures/fonts/README.md` documents the exact config recipe (including the
+  fontconfig normalization of `sans-serif` to the family `sans`).
 - Do not assert exact freetype coverage bytes in tests: anti-aliased pixels are library-version
   dependent. `render.paint` asserts ink regions, AA presence, clip bounds, no-ops and determinism;
   `shell.fonts` asserts page regions and the frozen layout geometry. GCC and Clang must still
@@ -422,9 +484,11 @@ formats, CSS font selection, external stylesheets, etc.) and any new user priori
   `toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x200 --dump-boxes`; changing the
   fixture, its metrics or the font pipeline means updating those constants in the same change, as
   with the M7/M8a fixture geometry.
-- `--font-family` uses fontconfig's normal semantics: an unknown family returns its best match and
-  does not error, face 0 of the matched file is used, and TTC/face index is ignored. The M8b MVP
-  supports one font per session; per-element CSS `font-family`/weight/style is future work.
+- `--font-family` forces the preferred family for every text (character fallback still applies)
+  and since M10 also follows the computed `font-weight`/`font-style`, so the UA bold `h1` gets the
+  bold face under `--font-family` (the M8b expectation moved accordingly). Unknown families fall
+  back through fontconfig instead of erroring; face 0 of the matched file is used and TTC/face index
+  is ignored. `--font PATH` remains one exact face with no fallback.
 - `src/render/CMakeLists.txt` now `find_package`s freetype (config/module) and harfbuzz (CONFIG,
   target `harfbuzz::harfbuzz`); `src/shell/CMakeLists.txt` finds fontconfig (target
   `Fontconfig::Fontconfig`). All stay PRIVATE, no versions/paths are hardcoded.
@@ -433,3 +497,34 @@ formats, CSS font selection, external stylesheets, etc.) and any new user priori
   in-process test server; the fixture paths they pass are derived from `CMAKE_CURRENT_SOURCE_DIR`
   (CMake-generated, never hardcoded). Keep OpenSSL out of public headers and do not add versions,
   paths or vendoring.
+- M10 automatic font selection depends on process-global fontconfig state created on first use:
+  `FONTCONFIG_FILE`/`FONTCONFIG_PATH` are read when `Fonts` first resolves a style, so tests set
+  the CTest `ENVIRONMENT` property before the process starts. Do not switch font configuration
+  mid-process; do not add an in-code trust/override hook.
+- `Fonts` caches candidate faces per (families, weight, slant, language) and loaded faces per file
+  path, and is shared by layout measurement and painting: never share one `Fonts` across threads
+  (single-threaded MVP) and never build a second selection for the same page, or measurement and
+  paint can disagree. `--font`/`--font-family` selection failures are runtime errors (exit 1);
+  automatic system-font failure degrades to the bitmap path instead of failing the page.
+- The layout text tokenizer (`src/layout/text_break.cpp`) is a simplified line-break model: CJK
+  code points are individual break units with closing/opening punctuation glued per small rules;
+  there is no full UAX#14, no dictionary breaking for Thai/Khmer/Lao, no hyphenation, and
+  punctuation in a different text node cannot glue to the previous unit. Latin words never split.
+  Extending this needs tests and a roadmap/doc update.
+- One CJK break unit means one kText box: a Chinese page produces many boxes (one per character),
+  which is fine for the MVP (bounded by the 16 MiB body cap) but do not treat box counts as
+  word counts in tests or documentation. Box dumps of CJK pages are large by design.
+- CJK fixtures (`tests/fixtures/cjk_site/`, `layout.cjk_line_break`) freeze per-unit geometry and
+  painted ink; `tests/fixtures/fonts/toy_cjk.ttf` contains synthetic block-art Han glyphs, not real
+  glyph designs, and the M10 fixture fonts' italic face has italic metadata but un-sheared outlines.
+- With system fonts (no font flags) the browser's text output is machine-dependent by design: dumps
+  and screenshots are not reproducible across machines unless `FONTCONFIG_FILE` is pinned. That is
+  expected for a real browser; tests must always pin it.
+- `paint::BuildDisplayList` takes a `FontRunsProvider`; an empty/null provider must still produce
+  the frozen pre-M10 bitmap command list (tests assert this). Real-font runs must concatenate
+  exactly to the box text and be placed with the frozen pen/rounding rules, otherwise layout
+  measurement and painting disagree.
+- Fontconfig is already an approved dependency; M10 adds no new dependency. It is used only by
+  `src/shell/fonts.cpp`; keep `fontconfig/*.h` out of every public header and do not add versions,
+  paths or vendoring. The fixture fontconfig configs live in the build tree (generated by
+  `tests/shell/CMakeLists.txt`); the committed font fixtures are the only font files tests may use.

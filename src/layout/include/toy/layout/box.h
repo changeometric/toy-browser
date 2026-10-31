@@ -31,22 +31,32 @@ struct Box {
   dom::NodeId node = dom::kInvalidNode;       // source element/text; kInvalidNode for anonymous
   float x = 0, y = 0, width = 0, height = 0;  // absolute CSS px, border-box rect
   std::string text;                           // kText only: the word placed on this line
+  // kText only: distance from the box top to the text baseline in CSS px. Layout
+  // sets it to the line's ascent (the maximum ascent of the text boxes on that
+  // line), so all text boxes of one line share a baseline; 0 for non-text boxes.
+  // Paint uses it for real-font text; the bitmap path ignores it.
+  float baseline_offset_px = 0.0f;
   BoxId parent = kInvalidBox, first_child = kInvalidBox, last_child = kInvalidBox,
         next_sibling = kInvalidBox;
 };
 
-// Metrics for one string at one font size. `advance_px` is the width of the
-// text, `line_height_px` the height of a line containing it.
+// Metrics for one string at one computed text style. `advance_px` is the width
+// of the text, `line_height_px` the height of a line containing it, and
+// `ascent_px` its distance above the baseline (used for per-line baseline
+// alignment; line_height_px >= ascent_px). All values are CSS pixels.
 struct TextMetrics {
   float advance_px = 0.0f;
   float line_height_px = 0.0f;
+  float ascent_px = 0.0f;
 };
 
-// Supplied by the caller (shell adapts the font); layout never depends on
-// render. Must be deterministic and return finite non-negative values. Text is
-// UTF-8; layout calls it for words, for the single space " " and for empty text
-// "" (which must return advance 0 and the line height).
-using MeasureText = std::function<TextMetrics(std::string_view text_utf8, float font_size_px)>;
+// Supplied by the caller (shell resolves the computed style to a font or to the
+// built-in bitmap metrics); layout never depends on render. Must be deterministic
+// and return finite non-negative values. Text is UTF-8; layout calls it for
+// words, for the single space " " and for empty text "" (which must return
+// advance 0 and the line height/ascent of the style's font).
+using MeasureText =
+    std::function<TextMetrics(std::string_view text_utf8, const style::ComputedStyle& style)>;
 
 // Intrinsic size of a replaced element (currently an <img>) in CSS pixels, as
 // reported by the caller from decoded image metadata. Layout consumes it only

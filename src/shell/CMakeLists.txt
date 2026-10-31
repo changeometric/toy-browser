@@ -6,6 +6,7 @@ find_package(Fontconfig REQUIRED)
 add_library(toy_shell STATIC
   application.cpp
   browser.cpp
+  fonts.cpp
   page.cpp
 )
 

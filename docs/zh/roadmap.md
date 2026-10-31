@@ -4,8 +4,8 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M9 已完成（M9 = 最基础 HTTPS）。下一个计划里程碑是 M10（HTTP 代理）；JavaScript
-子集已暂缓。** 快照与接管指南见 [handoff.md](handoff.md)。
+**当前状态：M0–M10 已完成（M10 = 自动字体选择与中文可读的断行）。M11（HTTP 代理）是下一个计划
+里程碑，但已被用户降低优先级；JavaScript 子集已暂缓。** 快照与接管指南见 [handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
 
@@ -172,34 +172,69 @@
   （共 57 个测试）；本地 HTTPS 页面（含图片）可 headless 渲染；证书、主机名与超时失败给出明确错误；
   所有 M9 之前的 `http`/`file` dump 与截图与 M8b 基线逐字节相同，GCC/Clang 的 PPM 也逐字节相同；
   手工公网站点检查（原始 body、DOM dump、截图）可用。真实站点检查是手动的、依赖网络；受限网络仍需
-  M10 代理。
+  M11 代理。
 - M9 已知限制：只有 HTTP/1.1（无 ALPN/HTTP/2）、无压缩（不发送 `Accept-Encoding`）、无
-  cookie/会话、HSTS、混合内容拦截、客户端证书、TLS 会话复用或 HTTP 缓存；无代理（M10）；IPv6 字面量
+  cookie/会话、HSTS、混合内容拦截、客户端证书、TLS 会话复用或 HTTP 缓存；无代理（M11）；IPv6 字面量
   https URL 仍不被 URL 解析器支持；信任策略就是 OpenSSL 默认信任库加标准环境变量覆盖（无 pinning，
   也没有 insecure 模式）；TLS context 每个进程惰性创建一次；真实站点渲染仍受现有 HTML/CSS 子集限制；
   公网细节从不提交，真实站点检查保持手工。
 
-## M10 — HTTP 代理（M9 之后计划）
+## M10 — 自动字体选择 ✅（已完成）
 
-- `http://` 通过 HTTP 代理的 absolute-form 请求抓取；`https://` 通过代理 `CONNECT` 隧道后再做 TLS
-  握手。
-- CLI `--proxy host:port` 加标准 `http_proxy`/`https_proxy` 环境变量回退；进程内假代理测试。这是在
-  直连受限网络上测试真实站点的关键。
-- 范围与契约在那一轮开始时冻结；预计不需要新依赖。
+- 目标已达成：不传任何字体标志时，浏览器像普通浏览器一样自己选择字体。计算出的 CSS
+  `font-family` 列表、`font-weight` 与 `font-style` 通过已批准的 fontconfig 库匹配；初始字体族为
+  `serif`；文本盒按字符覆盖切成 run，首选字体缺少的字符（拉丁页面里的汉字，或汉字页面里的拉丁词）
+  回退到字符集覆盖它的已安装字体；页面语言（`<html lang>`）作为 fontconfig 的语言提示传入。
+- `style`：`font-family` 成为可解析、可继承的计算属性（逗号列表、带引号族名、通用族规范化）；UA
+  样式表增加 `b/strong` 粗体、`i/em` 斜体与 `code/kbd/samp/pre` 等宽字体；`--dump-style` 增加
+  `font-family=` 字段。
+- 布局与绘制共享同一个会话级 `Fonts` 对象，因此文本盒在度量与绘制中选中的字体一致：
+  `TextMetrics` 增加 `ascent_px`；度量回调收到文本的计算样式；文本盒携带 `baseline_offset_px`
+  （行 ascent，使同一行不同字体共享基线）；paint 接收 `FontRunsProvider`，返回每个 run 的真实
+  字体，或返回空以走内置位图路径。
+- 中文/可读文本支持：layout 现在把文本切成断行单元：ASCII/U+3000 空白照旧分隔单词，非 CJK 文本
+  仍按词分组，CJK 字符各自成为断行机会（汉字、假名、谚文、注音、CJK 标点、全角形式），并实现简化
+  禁则（收尾标点不出现在行首、起始标点不出现在行尾）。因此无空格的中文段落会换行、可阅读。非法
+  UTF-8 宽松处理，不会崩溃或死循环。
+- `--font PATH`（单一精确 face，无回退）与 `--font-family NAME`（首选字体族，现在也遵循计算出的
+  weight/style，并保留字符回退）仍是显式覆盖。没有可用系统字体或 fontconfig 失败时，浏览器退化到
+  内置位图字体；页面加载不会因为缺字体失败。
+- 测试保持确定性：提交的自造 fixture 字体（`tests/fixtures/fonts/`：M8b 的常规 face 加新的粗体、
+  斜体 face 和一个小汉字 face，均有文档）与生成的测试 fontconfig 配置。空 fontconfig 配置逐字节
+  复现所有 M10 之前的位图 golden；fixture 配置覆盖自动选择（默认 serif、通用族、weight/style、
+  未知族回退）与汉字回退；`shell.cjk_*` 提供提交的中文页面并断言逐单元文本盒、换行与绘制像素；
+  `layout.cjk_line_break` 覆盖分词与标点禁则。
+- 已达成验收：所有 M10 之前的测试加新的 style/layout/paint/shell 测试在 GCC 与 Clang 下、警告视为
+  错误时通过（共 66 个测试）；不传字体标志的页面用系统 serif/粗体/斜体渲染英文、用汉字回退字体并
+  换行渲染中文；空 fontconfig 的位图路径与 M10 之前基线逐字节相同，GCC/Clang 在两条路径上的 PPM
+  也逐字节相同；手工检查可用系统字体渲染拉丁与中文页面。
+- 已知限制：没有 `@font-face`/webfont 下载（只用已安装字体）；跨文本节点的标点不能粘连
+  （`中<b>文</b>。` 里的 `。` 仍可能出现在行首）；每个 CJK 断行单元一个文本盒（MVP 可接受，受
+  16 MiB body 上限约束）；只实现简化 UAX#14 子集（无完整断行、无泰语/高棉语/老挝语词典断行、无
+  连字符断行）；没有 bidi/RTL 排版（阿拉伯语/希伯来语按逻辑顺序渲染，不做视觉重排），复杂脚本
+  除 harfbuzz 默认逐 run 整形外无额外处理；其他语言通过通用 fontconfig 字符覆盖尽力支持（英文与
+  中文是明确支持的语言）；不做合成粗体/斜体（缺粗/斜 face 时回退常规）；只支持 TTC face 0；没有
+  `font-stretch`/`font-variant`/`font-feature-settings`；语言只取根 `<html lang>`；系统字体输出
+  按设计依赖机器（测试通过 `FONTCONFIG_FILE` 固定）。
+
+## M11 — HTTP 代理（计划中；用户要求 M9 之后延后）
+
+（与英文原版相同的代理计划：`http://` absolute-form、`https://` `CONNECT`、`--proxy` 与环境变量回退、
+进程内假代理测试；范围与契约在该轮开始时冻结。）
 
 ## 暂缓 —— JavaScript 子集
 
 - 用户于 2026-10-31 暂缓 JavaScript 子集；它不是下一个里程碑。它仍是一个大的可选里程碑（词法
   分析器、解析器、小型解释器、DOM 绑定与事件处理器）；没有用户明确的优先级决定不要开始。
 
-## M11+ — 机会性工作
+## M12+ — 机会性工作
 
 更多 CSS（flex、表格）、表单、更好的文本处理、性能、一致性测试套件。每一项都只在前一个切片干净、且用户同意优先级之后才开始。
 
 ## Backlog — 计划中的后续工作
 
 - **更多图片格式与背景图**——JPEG/GIF/WebP、`background-image`、`srcset`、图片缓存与懒加载；这些都在 M8a 之后按需排期，不阻塞任何里程碑。
-- **CSS 字体选择与更丰富的文本**——把 CSS `font-family`/`font-weight`/`font-style` 映射到字体栈，加入 fallback 链、`@font-face`/字体下载与更丰富的整形；M8b 的 CLI 选择刻意是每会话一个 face。
+- **Web 字体与更丰富的文本**——`@font-face`/字体下载、合成粗体/斜体、可变字体实例、bidi/RTL 与完整 Unicode 断行（UAX#14）、泰语/高棉语/老挝语词典断行与复杂脚本细化；M10 刻意先覆盖英文与中文，其他语言通过 fontconfig 字符覆盖尽力支持。
 - **测试辅助代码合并**——较旧的测试可执行文件里仍然重复着每个文件各自的 `Check`/`g_failures` 测试支架。header-only 的 `tests/support/check.h`（接口目标 `toy_test_support`）已在 M5 引入，新测试都在使用；旧文件只在被改动时迁移。不引入框架依赖。
 
 ## 规则

@@ -25,6 +25,12 @@ struct ComputedStyle {
   float font_size_px = 16.0f;
   int font_weight = 400;
   FontStyle font_style = FontStyle::kNormal;
+  // Computed `font-family` list in cascade order. Generic families (serif,
+  // sans-serif, monospace) stay lowercase; font family names keep their spelling.
+  // The initial value is the user-agent standard font "serif"; the property is
+  // inherited. The shell maps this list (with font_weight/font_style and the page
+  // language) to real fonts through fontconfig.
+  std::vector<std::string> font_family{"serif"};
   float margin_top = 0;
   float margin_right = 0;
   float margin_bottom = 0;

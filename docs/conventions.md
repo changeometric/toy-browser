@@ -65,12 +65,18 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
   the `net` tests and the header-only TLS server `tests/support/tls_server.h` (committed test-only
   certificates under `tests/fixtures/tls/`, trust supplied through the CTest `ENVIRONMENT`
   property). No test may contact the public network or use installed certificate stores.
+- Font-dependent code is tested with the committed self-authored fixtures in
+  `tests/fixtures/fonts/` and generated fontconfig configs; tests set `FONTCONFIG_FILE` through the
+  CTest `ENVIRONMENT` property: the fixture config for automatic selection/fallback tests, or an
+  empty config (no font directories) to force the built-in bitmap path. No test may use installed
+  fonts or the machine's font configuration. CJK layout/paint tests use
+  `tests/fixtures/cjk_site/` and the `layout.cjk_line_break` tokenizer tests.
 - A bug fix without a regression test is not done unless the user explicitly waives it.
 
 ## Build
 
 ```sh
-# Fast browser-only build: tests are opt-in, so this does not compile 57 test executables.
+# Fast browser-only build: tests are opt-in, so this does not compile 66 test executables.
 cmake -S . -B build
 cmake --build build
 

@@ -1,5 +1,12 @@
 // Deterministic computed-style dump: one line per element node.
 //
+// Field order: "<tag> display=... color=... background-color=... font-size=...
+// font-weight=... font-style=... font-family=... margin-*... padding-*...
+// width=... height=...". The font-family list is joined with ", "; an item that
+// is not made only of [A-Za-z0-9_-] is double-quoted with '\' and '"' escaped by
+// a backslash (e.g. font-family="Toy Test Font", sans-serif), so the line stays
+// unambiguous and deterministic.
+//
 // Indentation is capped at kMaxIndentDepth levels, like the DOM dump. Without
 // the cap a deeply nested document would make the dump grow quadratically
 // (10k nested elements would mean ~100 MB of spaces). Normal pages stay far
@@ -71,6 +78,44 @@ std::string FormatBackgroundColor(std::uint32_t color) {
   return FormatColor(color & 0xFFFFFFu);
 }
 
+// An item is printed raw only when it is a non-empty run of [A-Za-z0-9_-].
+bool IsPlainFontFamilyItem(const std::string& family) {
+  if (family.empty()) {
+    return false;
+  }
+  for (const char character : family) {
+    const bool plain =
+        (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+        (character >= '0' && character <= '9') || character == '-' || character == '_';
+    if (!plain) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string FormatFontFamily(const std::vector<std::string>& families) {
+  std::string text;
+  for (std::size_t index = 0; index < families.size(); ++index) {
+    if (index != 0) {
+      text.append(", ");
+    }
+    if (IsPlainFontFamilyItem(families[index])) {
+      text.append(families[index]);
+      continue;
+    }
+    text.push_back('"');
+    for (const char character : families[index]) {
+      if (character == '\\' || character == '"') {
+        text.push_back('\\');
+      }
+      text.push_back(character);
+    }
+    text.push_back('"');
+  }
+  return text;
+}
+
 std::string StyleLine(const dom::Node& node, const ComputedStyle& style) {
   std::string line;
   line.reserve(256);
@@ -88,6 +133,8 @@ std::string StyleLine(const dom::Node& node, const ComputedStyle& style) {
   line.append(std::to_string(style.font_weight));
   line.append(" font-style=");
   line.append(FontStyleName(style.font_style));
+  line.append(" font-family=");
+  line.append(FormatFontFamily(style.font_family));
   line.append(" margin-top=");
   line.append(FormatLength(style.margin_top));
   line.append(" margin-right=");

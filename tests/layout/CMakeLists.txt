@@ -34,3 +34,13 @@ add_executable(layout_replaced_test replaced_test.cpp)
 toybrowser_set_warnings(layout_replaced_test)
 target_link_libraries(layout_replaced_test PRIVATE toy_layout toy_test_support)
 add_test(NAME layout.replaced COMMAND layout_replaced_test)
+
+add_executable(layout_baseline_test baseline_test.cpp)
+toybrowser_set_warnings(layout_baseline_test)
+target_link_libraries(layout_baseline_test PRIVATE toy_layout toy_test_support)
+add_test(NAME layout.baseline COMMAND layout_baseline_test)
+
+add_executable(layout_cjk_line_break_test cjk_line_break_test.cpp)
+toybrowser_set_warnings(layout_cjk_line_break_test)
+target_link_libraries(layout_cjk_line_break_test PRIVATE toy_layout toy_test_support)
+add_test(NAME layout.cjk_line_break COMMAND layout_cjk_line_break_test)

@@ -15,7 +15,7 @@
 | `dom` | HTML tokenizer（词法分析器）、树构建器、DOM arena（区域分配器） | `base` | M3 |
 | `css` | CSS tokenizer、规则/声明解析器、选择器 | `base` | M4 |
 | `style` | 层叠与计算样式、默认样式表 | `dom`、`css` | M4 |
-| `layout` | 盒树、块级/行内布局、换行 | `dom`、`style`、来自 `shell` 的文本度量回调 | M5 |
+| `layout` | 盒树、块级/行内布局、换行（词单元加 CJK 断行单元） | `dom`、`style`、来自 `shell` 的文本度量回调 | M5 |
 | `paint` | 从盒树构建显示列表（元素背景与文本） | `dom`、`style`、`layout`、`render` | M6 |
 | `js` | 小型 JavaScript 引擎与 DOM 绑定（可选，用户已暂缓） | `dom`、`base` | 暂缓 |
 | `shell` | 导航、流水线编排、窗口外壳、字体选择（字体族查找使用已批准的 fontconfig） | 所有模块 | M1 |
@@ -40,7 +40,7 @@
 
 MVP 保持整条链路同步、单线程。每个阶段接收普通数据并返回普通数据，因此每个阶段都能在测试中通过 `--dump-*` 命令单独驱动。
 
-网络（M2，TLS 在 M9）：`net` 拥有 URL、socket 和 HTTP。抓取是阻塞式 HTTP/1.1 GET——每个连接一个请求、连接与读取超时、`Content-Length` 或 chunked body、重定向（M9 起用 `net::ResolveUrl` 解析，因此相对与协议相对 `Location` 可用）与 `Connection: close`——封装在 `Fetch()` 之后，因此以后可以改成非阻塞而不改调用方。`net` 是唯一允许触碰 socket 的模块；页面代码永远看不到 socket。代理支持（先支持 HTTP 代理）计划为 M10，放在 `FetchOptions` 后面并保持在 `net` 内部；它不需要新依赖。
+网络（M2，TLS 在 M9）：`net` 拥有 URL、socket 和 HTTP。抓取是阻塞式 HTTP/1.1 GET——每个连接一个请求、连接与读取超时、`Content-Length` 或 chunked body、重定向（M9 起用 `net::ResolveUrl` 解析，因此相对与协议相对 `Location` 可用）与 `Connection: close`——封装在 `Fetch()` 之后，因此以后可以改成非阻塞而不改调用方。`net` 是唯一允许触碰 socket 的模块；页面代码永远看不到 socket。代理支持（先支持 HTTP 代理）计划为 M11，放在 `FetchOptions` 后面并保持在 `net` 内部；它不需要新依赖。
 
 TLS / HTTPS（M9）：`net` 接受 `https` URL（默认端口 443），通过已批准的 OpenSSL 库在保持不变的阻塞 `Fetch()` 之后抓取。纯 TCP 与 TLS 共享同一份 HTTP/1.1 实现：`src/net/http.cpp` 在一个私有的 `internal::Stream` 接口（“写入全部字节” + “读若干字节直到 EOF”）之上构建请求、解析响应，接口由纯 `SocketStream` 与 `TlsStream` 实现；传输层按 URL scheme 在一处选择（`src/net/stream_internal.h`、`socket_internal.h`、`tls_internal.h` 均为私有，公开头文件中没有 OpenSSL 类型）。进程级 `SSL_CTX` 在第一次 https 抓取时从 OpenSSL 默认校验路径惰性创建（标准 `SSL_CERT_FILE`/`SSL_CERT_DIR` 覆盖在该时刻生效），`SSL_VERIFY_PEER` 始终开启，DNS 主机每连接发送 SNI，证书链 + 主机名校验（DNS 名用 `SSL_set1_host`，IPv4 字面量用 IP SAN 校验）。没有 insecure 模式。TCP 连接用 `connect_timeout_ms`；TLS 握手与所有 TLS I/O 用 `read_timeout_ms`，运行在现有非阻塞 socket + `poll` 循环上；超时、证书与主机名失败都是普通可读的 `Fetch` 错误。干净的 `close_notify` 与非干净 EOF 都结束流（截断仍由 Content-Length/chunked 捕获），TLS 路径忽略一次 `SIGPIPE`，坏掉的对端无法杀死浏览器。未实现 ALPN/HTTP/2、压缩、cookie、HSTS、客户端证书、TLS 会话复用或缓存；由于 shell 已经全部经过 `ParseUrl`/`ResolveUrl`/`Fetch`，无需改动其 API 或 CLI。
 
@@ -48,9 +48,9 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 
 样式（M4）：`css` 把样式表与声明列表解析成普通结构，完全不了解 DOM。`style` 在 DOM 上匹配这些选择器，应用 UA/作者/行内层叠——依据 specificity（优先级）、`!important` 与继承——并为每个元素生成一个 `ComputedStyle`；内置的 UA 样式表本身就是由我们的解析器解析的 CSS。`DumpStyleTree()` 是 `--dump-style` 与样式测试背后的确定性文本形式。布局只会消费样式树，永远不会消费原始 CSS。
 
-布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型）；内置等宽位图字体度量位于 `render`，由 `shell` 适配——若会话选择了真实字体，则改为适配该字体的整形 advance 与行高（M8b），布局本身仍然完全不了解字体。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。M8a 把 replaced 元素加入同一套布局：`LayoutOptions::replaced_sizes` 把 DOM 节点 id 映射到 shell 提供的固有 CSS 像素尺寸；有条目的行内元素成为原子行内级盒（CSS width/height px 覆盖、只给一侧时保持固有宽高比、整体换行、顶部对齐、抬高行高），而 `layout` 仍然从不读取图片、也不依赖 `render`。
+布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型加 `style::ComputedStyle`）；内置等宽位图字体度量位于 `render`，由 `shell` 适配——若为真实字体，则适配该字体的整形 advance、行高与 ascent（M8b/M10），布局本身仍然完全不了解字体。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。M10 起回调会收到文本的计算样式，因此 shell 能按样式选字体；`TextMetrics` 携带 ascent，布局把该行最大的 ascent 写进每个文本盒的 `Box::baseline_offset_px`（同一行不同字体因此在绘制时共享基线）。文本被切成断行单元（`src/layout/text_break.cpp`）：空白分隔单词，非 CJK 文本保持最长词，CJK 字符各自成为断行机会并带简化的标点禁则，因此没有空格的中文也能正常换行。每个单元仍是普通的可度量 word 级文本盒，复用 M5 的适配、行高与基线机制。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。M8a 把 replaced 元素加入同一套布局：`LayoutOptions::replaced_sizes` 把 DOM 节点 id 映射到 shell 提供的固有 CSS 像素尺寸；有条目的行内元素成为原子行内级盒（CSS width/height px 覆盖、只给一侧时保持固有宽高比、整体换行、顶部对齐、抬高行高），而 `layout` 仍然从不读取图片、也不依赖 `render`。M10 的断行单元模型是对 Unicode 断行的简化（没有完整 UAX#14、没有泰语/高棉语/老挝语词典断行、没有连字符断行、不做跨文本节点标点粘连）；拉丁词永不拆开。
 
-绘制（M6）：`paint` 按前序遍历盒树，产出扁平的 `render::DisplayList`：每个计算背景非透明的元素盒变成一条 `FillRect`（背景先于子内容），每个节点 id 有解码图片的行内 replaced 盒变成一条 `DrawImage`（M8a，在背景之后、子内容之前），每个文本盒变成一条 `DrawText`，使用继承的颜色与字号。`paint` 从不光栅化，也从不包含 render 的实现头文件。`render` 执行该列表：矩形填充对不透明目标使用冻结的 SrcOver 整数公式；文本使用内置 8x16 ASCII 字形表，按最近邻单元缩放（无抗锯齿）；图片使用冻结的最近邻源映射（见下）；整数矩形裁剪栈约束每条命令（M7 会用视口 `PushClip`/`PopClip` 对包裹页面，并把每条命令按滚动偏移平移）。`shell` 把 canvas 填白、按 surface 宽度布局页面、构建列表并光栅化；窗口与 `--screenshot` 共享完全相同的这条路径。确定性正是重点：相同输入在 GCC 和 Clang 上产出逐字节相同的 PPM，截图测试依赖这一点。
+绘制（M6）：`paint` 按前序遍历盒树，产出扁平的 `render::DisplayList`：每个计算背景非透明的元素盒变成一条 `FillRect`（背景先于子内容），每个节点 id 有解码图片的行内 replaced 盒变成一条 `DrawImage`（M8a，在背景之后、子内容之前），每个文本盒变成一条或多条 `DrawTextWithFont` run，或（位图模式）一条 `DrawText`，都使用继承的颜色与字号。M10 起 paint 从 shell 接收 `paint::FontRunsProvider` 而不是单一字体：provider 返回该盒文本的有序真实字体 run，绘制器按每个 run 的整形宽度推进 pen，并把所有 run 放在 `box.baseline_offset_px` 上；空 provider（或某盒返回空 run）逐字节复现 M10 之前的位图命令列表。`paint` 从不光栅化，也从不包含 render 的实现头文件。`render` 执行该列表：矩形填充对不透明目标使用冻结的 SrcOver 整数公式；文本使用内置 8x16 ASCII 字形表，按最近邻单元缩放（无抗锯齿）；图片使用冻结的最近邻源映射（见下）；整数矩形裁剪栈约束每条命令（M7 会用视口 `PushClip`/`PopClip` 对包裹页面，并把每条命令按滚动偏移平移）。`shell` 把 canvas 填白、按 surface 宽度布局页面、构建列表并光栅化；窗口与 `--screenshot` 共享完全相同的这条路径。确定性正是重点：相同输入在 GCC 和 Clang 上产出逐字节相同的 PPM，截图测试依赖这一点。
 
 图片（M8a）：`render` 在 `render::DecodePng()` 之后拥有 PNG 解码：已批准的 libpng 依赖封装在
 `src/render/image.cpp` 中，像素转换成直通 alpha 的 ARGB `render::Image`，尺寸与像素数在分配前校验，
@@ -70,19 +70,28 @@ freetype/harfbuzz 类型，加载失败是普通错误，字体自己持有 face
 在请求字号下由 harfbuzz 整形（26.6 求和），`internal::FontRasterizer`（render 私有）把 freetype
 8-bit 覆盖率位图按冻结的逐字形整数放置公式画到显示列表基线上，用 SrcOver 覆盖率混合，并裁剪到
 当前 clip。有效字号被钳制到 `kMaxRealFontSizePx`（4096 px），对抗性 CSS 无法请求无界字形位图。
-会话选择真实字体时，`paint` 为每个文本盒发出一条 `DrawTextWithFont`（基线 = 取整后的盒顶部减去
-滚动再加取整后的 ascent），否则发出冻结的位图 `DrawText`；显示列表和图片一样按共享引用持有字体。
-`shell` 每次运行解析一次 `--font PATH` 或 `--font-family NAME`（后者通过 fontconfig 的 pattern
-匹配，face 0，未知族回退到最佳匹配），加载一个 `Font` 并贯穿页面加载器（`MeasureText` 适配器）、
-`Browser` 与绘制。fontconfig 从不离开 shell，字体也从不离开 render 的私有实现。默认仍是内置位图
-路径，且它不受影响。
+M10 起 `paint` 为每个真实字体 run 发出一条 `DrawTextWithFont`（放在布局提供的基线上），provider
+返回空时发出冻结的位图 `DrawText`；显示列表和图片一样按共享引用持有字体。M8b 的“每次运行一个
+face”（`--font PATH` 或 fontconfig 字体族匹配）已被 M10 的按样式自动选择取代（下一段）。fontconfig
+从不离开 shell，字体也从不离开 render 的私有实现。
+
+字体选择（M10）：`shell` 的公开 `Fonts` 对象（`toy/shell/fonts.h`，pimpl）把计算出的文本样式与
+页面语言变成具体 face。对每个不同的（font-family 列表、weight、slant、language）组合构造
+fontconfig pattern（每个字体族一个 `FC_FAMILY`，`FC_WEIGHT` 经 `FcWeightFromOpenType`，`FC_SLANT`，
+根 `<html lang>` 非空时加 `FC_LANG`），执行标准的 substitute/default/sort 流程，并缓存带字符集的
+有序候选 face；已加载的 `render::Font` 按文件路径缓存。文本盒按码点切成 run：每个码点交给第一个
+字符集覆盖它的候选（因此拉丁页面上的汉字回退到已安装汉字 face，反之亦然），同一 face 的连续码点
+合成一个 run；`MeasureText` 累加 run advance，`Runs` 把同样的 run 交给 paint——度量与绘制因此天然
+一致。没有可用 face 时（fontconfig 失败、无匹配、无可加载文件）对象进入位图模式：用内置位图度量，
+`Runs` 返回空，浏览器仍可用，M10 之前的 golden 输出仍可复现。`--font PATH` 强制单一精确 face
+（无回退）；`--font-family NAME` 强制首选字体族（仍保留字符回退），并开始遵循计算出的 weight/style。
+初始字体族为 `serif`；其他语言通过同一套字符覆盖机制尽力支持（暂无 bidi/RTL 重排与词典断行）。
 
 导航（M7）：`shell::Browser` 拥有一个浏览器会话：当前页面（最终 URL、DOM、样式树、盒树、解码后的图片与字体）、
 导航历史、整数垂直滚动偏移与绘制。历史是一个 URL 向量加一个索引；每次成功加载追加一条
 （后退后再加载会截断前进条目），加载失败则页面、滚动偏移与历史都不变。点击先用滚动偏移换算成
 页面坐标，再对盒树做命中测试（`layout::HitTest` 返回绘制顺序中最后一个包含该点的盒），沿 DOM
-祖先找到最近的带 `href` 属性的元素，用 `net::ResolveUrl` 相对页面最终 URL 解析后加载。只有
-`http`/`file` 引用会导航；只改变 fragment 的引用是 no-op。滚动是垂直的、以整数设备像素表示，
+祖先找到最近的带 `href` 属性的元素，用 `net::ResolveUrl` 相对页面最终 URL 解析后加载。只有 `http`/`https`/`file` 引用会导航；只改变 fragment 的引用是 no-op。滚动是垂直的、以整数设备像素表示，
 由 `layout::ContentHeight` 钳制在 `[0, content_height - viewport_height]`；`paint` 用视口裁剪
 包裹页面并按 `-scroll_y` 平移，`render` 执行冻结的裁剪栈。窗口事件循环把点击、滚轮格数与按键
 （Alt+Left/Right 前进后退，方向键/PageUp/PageDown/Home/End 滚动）转发给会话并按需重绘；窗口
@@ -112,7 +121,7 @@ freetype/harfbuzz 类型，加载失败是普通错误，字体自己持有 face
 - Surface：32 位 ARGB、straight alpha（非预乘 alpha）、SrcOver 混合、左上角原点。
 - 裁剪是由显示列表命令压入的整数矩形栈；初始裁剪是整个 surface，光栅化器的工作量受裁剪区域限制（因此对抗性输入如超大字号也不会让绘制无界）。
 - `shell` 在绘制前把 canvas 填白；元素的 `background-color` 绘制为该元素的盒（M6 不会把 `html`/`body` 背景传播到 canvas）。
-- 文本默认使用小型内置位图字体，字形为手写的 8x16 ASCII 点阵：字形单元按计算字号做最近邻缩放，没有抗锯齿，非 ASCII 码点渲染 `?` 字形。选择真实字体（`--font`/`--font-family`）时，文本由 harfbuzz 整形、freetype 光栅化为 8-bit 覆盖率，放在字形基线上，以覆盖率为 alpha 与不透明目标做 SrcOver 混合；字形裁剪到当前 clip，有效字号上限 4096 px。位图路径仍是回退路径，其像素冻结。
+- 自 M10 起默认文本使用自动选择的真实字体：由 harfbuzz 整形、freetype 光栅化为 8-bit 覆盖率，放在布局提供的行基线上，以覆盖率为 alpha 与不透明目标做 SrcOver 混合；字形裁剪到当前 clip，有效字号上限 4096 px。没有可用系统字体时回退到小型内置位图字体（手写 8x16 ASCII 点阵，最近邻缩放、无抗锯齿、非 ASCII 渲染 `?`），该路径的像素冻结并作为测试基线。
 - 图片被解码为直通 alpha 的 ARGB（界限：每边最多 8192 px，总计最多 16,777,216 像素），并以最近邻缩放绘制：目标像素 (dx, dy) 用整数向下取整采样源 `((dx - x) * width / dst_width, (dy - y) * height / dst_height)`，因此缩放不引入插值或抗锯齿。图片像素与矩形填充使用相同的 SrcOver 公式混合。
 - real-font 文本是唯一使用抗锯齿的绘制路径：freetype 覆盖率用同一 SrcOver 公式混合，逐字形整数放置把 26.6 pen 位置四舍五入到设备像素（远离零），因此在给定字体、字号与 freetype/harfbuzz 版本下输出确定。测试断言着墨区域与 AA 存在性，而不是精确覆盖率字节（后者依赖库版本）。
 - 绘制顺序是盒树前序：一个盒先画自己的背景，再画子节点；还没有层叠上下文或 z-index，因此重叠的盒按文档顺序绘制。
@@ -157,6 +166,12 @@ freetype/harfbuzz 类型，加载失败是普通错误，字体自己持有 face
 - 测试是确定性的，从不需要网络、显示器、已安装字体或特定 locale。
 - M8b real-font 测试使用提交的自造 `tests/fixtures/fonts/toy_test.ttf`（从不使用已安装字体）：`render.font_ttf` 覆盖加载/度量/整形/钳制，扩展后的 `render.paint` 覆盖 AA 覆盖率/裁剪/基线/no-op，`shell.fonts` 覆盖端到端 real-font 页面，CLI 检查覆盖 `--font`、`--font-family`（配合测试局部 `FONTCONFIG_FILE`）、错误退出码与截图输出。
 - M9 TLS 测试使用 `tests/fixtures/tls/` 中提交的仅测试用证书（CA、`localhost` 叶证书与无关的不受信任叶证书；README 记录重新生成方法）与 header-only 的进程内 TLS loopback 服务器 `tests/support/tls_server.h`。信任只通过 CTest `ENVIRONMENT` 属性（`SSL_CERT_FILE=<测试 CA>`）提供，因此走的是正常校验路径。`net.tls` 覆盖成功 GET、不受信任证书、主机名不匹配、握手超时、http<->https 重定向与 body 上限；`shell.https` 通过 `shell::Browser` 用 TLS 提供提交的 HTML+PNG 页面（`tests/fixtures/https_site/`）并断言渲染像素，以及不受信任证书失败路径。没有测试使用公网或公共 CA，M7 导航 fixture 的不支持 scheme 用例改为离线 `ftp://` 链接。
+- M10 字体测试使用提交的自造 fixtures（`tests/fixtures/fonts/`：常规、粗体、斜体与一个小汉字
+  face）与两个生成的 fontconfig 配置：fixture 配置（只有 fixture 字体、通用族映射到拉丁 face）用于
+  自动选择、weight/style、未知族回退与混合拉丁+汉字 run 切分；空配置（无字体目录）强制位图路径，
+  供所有 M10 之前的 golden 使用。`style.parser`、`layout.baseline`、`layout.cjk_line_break`、
+  `shell.font_selection`、`shell.page_language`、`shell.cjk_*`（逐单元文本盒、换行、绘制像素）与
+  更新后的 `shell.fonts*` 覆盖该特性；测试从不使用已安装字体或机器字体配置。
 - M8a 图片测试使用像素内容有文档的手工生成 PNG fixtures（`tests/fixtures/images/`）与提交的图片演示站点（`tests/fixtures/img_site/`）：解码器被直接测试，布局用假 replaced 尺寸测试，shell 端到端通过 `shell::Browser` 以及 CLI 的 `--dump-boxes`/`--screenshot` 检查。
 
 ## 参考资料

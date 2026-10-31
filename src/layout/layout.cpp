@@ -10,8 +10,16 @@
 //
 // Inline layout is a single pass over a flattened event stream (open/close
 // inline element, text, break, replaced element, block child). Line breaking and
-// inline-element fragmentation use the caller-supplied measurement callback;
-// layout never depends on render.
+// inline-element fragmentation use the caller-supplied measurement callback,
+// which receives the computed style of the measured text (layout never depends
+// on render). Every line records the maximum ascent of its text items and stores
+// it in `baseline_offset_px` of each text box on the line, so text boxes sharing
+// a line share one baseline; no other geometry depends on the ascent.
+//
+// Text nodes are split into break units by text_break.h: non-CJK text keeps the
+// pre-M10 word grouping, while every CJK code point is its own unit so Chinese,
+// Japanese and Korean text wraps between characters without spaces (with a
+// simplified approximation of the Unicode punctuation prohibitions).
 //
 // A replaced element (an <img> with a caller-supplied intrinsic size, see
 // LayoutOptions::replaced_sizes) is an atomic inline-level box: it is placed like
@@ -28,6 +36,7 @@
 #include <utility>
 #include <vector>
 
+#include "text_break.h"
 #include "toy/dom/node.h"
 #include "toy/layout/box.h"
 #include "toy/style/computed_style.h"
@@ -46,10 +55,6 @@ bool IsAsciiWhitespace(char character) {
 
 // Padding is clamped to >= 0; margins are used as computed (negative allowed).
 float ClampLength(float value) { return value > 0.0f ? value : 0.0f; }
-
-float NonNegativeFontSize(const style::ComputedStyle& style) {
-  return style.font_size_px > 0.0f ? style.font_size_px : 0.0f;
-}
 
 // Content box of a containing block. Margins and padding are resolved against
 // the content width.
@@ -92,6 +97,10 @@ struct InlineState {
   float cursor_x = 0;
   float cursor_y = 0;
   float line_height = 0;
+  // Maximum ascent of the text items placed on the current line, in CSS px. It
+  // becomes the baseline_offset_px of every text box on the line when the line is
+  // finalized, so all text boxes of one line share a baseline.
+  float line_ascent = 0;
   bool line_has_items = false;
   bool pending_space = false;
   float pending_space_advance = 0;
@@ -166,13 +175,13 @@ class LayoutEngine {
                     float line_width);
   float FinishSession(InlineState& state);
   void FinalizeLine(InlineState& state);
-  void MarkSeparator(InlineState& state, float font_size);
+  void MarkSeparator(InlineState& state, const style::ComputedStyle& style);
   // Places one atomic inline-level item of `advance` width: wraps when it does
   // not fit, consumes a pending separator and materializes one fragment per open
   // inline element, outermost first. Returns the box the item is appended to.
   BoxId PlaceInlineItem(InlineState& state, float advance);
   void PlaceWord(InlineState& state, dom::NodeId text_node, const std::string& word,
-                 float font_size);
+                 const style::ComputedStyle& style);
   void PlaceReplaced(InlineState& state, dom::NodeId element, const ReplacedSize& intrinsic);
   void ProcessText(InlineState& state, dom::NodeId text_node);
   void ProcessBreak(InlineState& state, dom::NodeId br);
@@ -405,6 +414,7 @@ void LayoutEngine::BeginSession(InlineState& state, BoxId container, float origi
   state.cursor_x = origin_x;
   state.cursor_y = 0.0f;
   state.line_height = 0.0f;
+  state.line_ascent = 0.0f;
   state.line_has_items = false;
   state.pending_space = false;
   state.pending_space_advance = 0.0f;
@@ -434,8 +444,14 @@ void LayoutEngine::FinalizeLine(InlineState& state) {
     open.current_fragment = kInvalidBox;
   }
   for (const BoxId id : state.line_boxes) {
-    boxes_[id].y = line_y;
-    boxes_[id].height = state.line_height;
+    Box& box = boxes_[id];
+    box.y = line_y;
+    box.height = state.line_height;
+    // Every text box of the line shares the line's ascent as its baseline; other
+    // box kinds keep the default baseline_offset_px of 0.
+    if (box.kind == BoxKind::kText) {
+      box.baseline_offset_px = state.line_ascent;
+    }
   }
   // A replaced box is top-aligned and keeps its own height even when the line is
   // taller because of another item.
@@ -448,16 +464,17 @@ void LayoutEngine::FinalizeLine(InlineState& state) {
   state.cursor_x = state.origin_x;
   state.line_has_items = false;
   state.line_height = 0.0f;
+  state.line_ascent = 0.0f;
   state.pending_space = false;
   state.pending_space_advance = 0.0f;
 }
 
-void LayoutEngine::MarkSeparator(InlineState& state, float font_size) {
+void LayoutEngine::MarkSeparator(InlineState& state, const style::ComputedStyle& style) {
   // Separators collapse: none at the start of a line, never two in a row.
   if (!state.line_has_items || state.pending_space) {
     return;
   }
-  const TextMetrics metrics = measure_(std::string_view{" "}, font_size);
+  const TextMetrics metrics = measure_(std::string_view{" "}, style);
   state.pending_space = true;
   state.pending_space_advance = metrics.advance_px;
 }
@@ -507,13 +524,14 @@ BoxId LayoutEngine::PlaceInlineItem(InlineState& state, float advance) {
 }
 
 void LayoutEngine::PlaceWord(InlineState& state, dom::NodeId text_node, const std::string& word,
-                             float font_size) {
-  const TextMetrics metrics = measure_(word, font_size);
+                             const style::ComputedStyle& style) {
+  const TextMetrics metrics = measure_(word, style);
   const BoxId parent = PlaceInlineItem(state, metrics.advance_px);
   const float word_x = state.cursor_x;
   state.cursor_x += metrics.advance_px;
   state.line_has_items = true;
   state.line_height = std::max(state.line_height, metrics.line_height_px);
+  state.line_ascent = std::max(state.line_ascent, metrics.ascent_px);
 
   const BoxId text_box = AddBox(BoxKind::kText, text_node);
   Box& text_box_ref = boxes_[text_box];
@@ -543,21 +561,19 @@ void LayoutEngine::PlaceReplaced(InlineState& state, dom::NodeId element,
 
 void LayoutEngine::ProcessText(InlineState& state, dom::NodeId text_node) {
   const std::string& data = document_.Get(text_node).data;
-  const float font_size = NonNegativeFontSize(styles_.Get(text_node));
-  std::string word;
-  for (const char character : data) {
-    if (IsAsciiWhitespace(character)) {
-      if (!word.empty()) {
-        PlaceWord(state, text_node, word, font_size);
-        word.clear();
-      }
-      MarkSeparator(state, font_size);
+  // Text nodes report the style of their nearest element ancestor, so the
+  // measurer sees the computed style that paints this text.
+  const style::ComputedStyle& style = styles_.Get(text_node);
+  // Every break unit becomes an ordinary word-level text box; U+3000 and ASCII
+  // whitespace runs collapse into the pending separator. CJK text therefore
+  // wraps between characters without inserting spaces, while Latin text keeps
+  // its pre-M10 word grouping.
+  for (const detail::TextPiece& piece : detail::SplitBreakUnits(data)) {
+    if (piece.kind == detail::TextPieceKind::kSeparator) {
+      MarkSeparator(state, style);
     } else {
-      word.push_back(character);
+      PlaceWord(state, text_node, piece.text, style);
     }
-  }
-  if (!word.empty()) {
-    PlaceWord(state, text_node, word, font_size);
   }
 }
 
@@ -566,9 +582,9 @@ void LayoutEngine::ProcessBreak(InlineState& state, dom::NodeId br) {
     FinalizeLine(state);
     return;
   }
-  // An empty line forced by <br> uses the empty-text line height of the br's
-  // font size.
-  const TextMetrics metrics = measure_(std::string_view{}, NonNegativeFontSize(styles_.Get(br)));
+  // An empty line forced by <br> uses the empty-text metrics (advance 0, line
+  // height and ascent) of the br's own computed style.
+  const TextMetrics metrics = measure_(std::string_view{}, styles_.Get(br));
   state.cursor_y += metrics.line_height_px;
   state.cursor_x = state.origin_x;
   state.pending_space = false;

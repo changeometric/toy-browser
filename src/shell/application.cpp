@@ -1,7 +1,5 @@
 #include "toy/shell/application.h"
 
-#include <fontconfig/fontconfig.h>
-
 #include <algorithm>
 #include <cstdio>
 #include <memory>
@@ -15,10 +13,10 @@
 #include "toy/net/http.h"
 #include "toy/net/url.h"
 #include "toy/platform/window.h"
-#include "toy/render/font.h"
 #include "toy/render/ppm.h"
 #include "toy/render/surface.h"
 #include "toy/shell/browser.h"
+#include "toy/shell/fonts.h"
 #include "toy/style/computed_style.h"
 
 namespace toy::shell {
@@ -46,89 +44,39 @@ int PageScrollPixels(int viewport_height) {
   return std::max(1, viewport_height - kPageScrollMarginPx);
 }
 
-// --- Real-font selection -----------------------------------------------------
+// --- Font selection ----------------------------------------------------------
 //
-// The CLI selects at most one real font: a file path (--font) or a fontconfig
-// family name (--font-family). The selection is resolved once per run and then
-// shared by layout metrics and painting, exactly like the built-in bitmap font
-// is the shared default. All fontconfig state is process-global, so it is
-// initialized exactly once and never torn down explicitly (the process is about
-// to exit anyway).
+// The CLI selects the session's font source: an explicit file (--font), an
+// explicit fontconfig family (--font-family) or, without any font flag,
+// automatic system fonts driven by the computed CSS font properties and the page
+// language. The selection is resolved once per run and then shared by layout
+// metrics and painting, exactly like the built-in bitmap font is the shared
+// default. A selected file or family that cannot be loaded/resolved is a runtime
+// error (exit 1); automatic system fonts never fail and degrade to the built-in
+// bitmap font when no usable font is installed. Fontconfig is initialized once
+// inside toy::shell::Fonts, on first use.
 
-// Initializes fontconfig on first use. Returns false when it cannot start at all.
-bool EnsureFontconfigInitialized(std::string* error) {
-  static const bool initialized = FcInit() != FcFalse;
-  if (!initialized) {
-    *error = "fontconfig initialization failed";
-    return false;
-  }
-  return true;
-}
-
-// Stores fontconfig's best match for `family` in *file. Fontconfig always returns
-// some installed face for a valid family name (an unknown family falls back to
-// its closest match), so a match is not an error here: only a match without an
-// FC_FILE entry, which should not happen, is reported. Face index and TTC
-// collections are ignored deliberately (M8b MVP: face 0 of one file).
-bool FontFileForFamily(const std::string& family, std::string* file, std::string* error) {
-  if (!EnsureFontconfigInitialized(error)) {
-    return false;
-  }
-  FcPattern* pattern = FcNameParse(reinterpret_cast<const FcChar8*>(family.c_str()));
-  if (pattern == nullptr) {
-    *error = "fontconfig cannot parse the family name";
-    return false;
-  }
-  FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
-  FcDefaultSubstitute(pattern);
-  FcResult match_result = FcResultNoMatch;
-  FcPattern* const match = FcFontMatch(nullptr, pattern, &match_result);
-  FcPatternDestroy(pattern);
-  if (match == nullptr) {
-    *error = "fontconfig found no matching font";
-    return false;
-  }
-  FcChar8* matched_file = nullptr;
-  const FcResult file_result = FcPatternGetString(match, FC_FILE, 0, &matched_file);
-  const bool has_file = file_result == FcResultMatch && matched_file != nullptr;
-  if (has_file) {
-    *file = reinterpret_cast<const char*>(matched_file);
-  }
-  FcPatternDestroy(match);
-  if (!has_file) {
-    *error = "the fontconfig match has no font file";
-    return false;
-  }
-  return true;
-}
-
-// Loads the real font selected by `options` and returns it, or returns null with
-// *error set. Only called when a font flag was given, so null always means a
-// failure the caller must report (exit 1).
-std::shared_ptr<const render::Font> LoadSelectedFont(const Options& options, std::string* error) {
+// Builds the font selection selected by `options`, or returns null with *error
+// set. Only called for the modes that lay text out (window, --screenshot and
+// --dump-boxes), so the dump modes never touch fontconfig.
+std::shared_ptr<const Fonts> LoadSelectedFonts(const Options& options, std::string* error) {
   if (!options.font_family.empty()) {
     std::string family_error;
-    std::string file;
-    if (!FontFileForFamily(options.font_family, &file, &family_error)) {
+    std::shared_ptr<const Fonts> fonts = Fonts::FromFamily(options.font_family, &family_error);
+    if (!fonts) {
       *error = "cannot load font family '" + options.font_family + "': " + family_error;
-      return nullptr;
     }
+    return fonts;
+  }
+  if (!options.font_path.empty()) {
     std::string load_error;
-    std::shared_ptr<const render::Font> font = render::Font::LoadFromFile(file, &load_error);
-    if (!font) {
-      *error =
-          "cannot load font '" + file + "' (family '" + options.font_family + "'): " + load_error;
-      return nullptr;
+    std::shared_ptr<const Fonts> fonts = Fonts::FromFile(options.font_path, &load_error);
+    if (!fonts) {
+      *error = "cannot load font '" + options.font_path + "': " + load_error;
     }
-    return font;
+    return fonts;
   }
-  std::string load_error;
-  std::shared_ptr<const render::Font> font =
-      render::Font::LoadFromFile(options.font_path, &load_error);
-  if (!font) {
-    *error = "cannot load font '" + options.font_path + "': " + load_error;
-  }
-  return font;
+  return Fonts::SystemDefault();
 }
 
 // M1 placeholder page: a white page with a blue band at the top. It proves the
@@ -219,7 +167,7 @@ int RunDumpStyle(const Options& options) {
   return 0;
 }
 
-int RunDumpBoxes(const Options& options, const std::shared_ptr<const render::Font>& font) {
+int RunDumpBoxes(const Options& options, const std::shared_ptr<const Fonts>& fonts) {
   std::string error;
   const std::optional<net::Url> url = net::ParseUrl(options.dump_boxes_url, &error);
   if (!url) {
@@ -233,7 +181,7 @@ int RunDumpBoxes(const Options& options, const std::shared_ptr<const render::Fon
   // failures are skipped by the loader and never fail the dump; parsing, styling
   // and layout are error-tolerant and only a page fetch error is reported.
   Page page;
-  if (!LoadPage(*url, options.width, font, &page, &error)) {
+  if (!LoadPage(*url, options.width, fonts, &page, &error)) {
     std::fprintf(stderr, "toybrowser: %s\n", error.c_str());
     return 1;
   }
@@ -246,7 +194,7 @@ int RunDumpBoxes(const Options& options, const std::shared_ptr<const render::Fon
   return 0;
 }
 
-int RunHeadless(const Options& options, const std::shared_ptr<const render::Font>& font) {
+int RunHeadless(const Options& options, const std::shared_ptr<const Fonts>& fonts) {
   render::Surface surface(options.width, options.height);
   if (options.page_url.empty()) {
     // Backward compatible: no URL keeps the M1 placeholder path unchanged.
@@ -254,7 +202,7 @@ int RunHeadless(const Options& options, const std::shared_ptr<const render::Font
   } else {
     // One Browser frame at scroll 0, through the same code path as the window;
     // for scroll 0 it stays byte-identical to the M6 painting.
-    Browser browser(options.width, options.height, font);
+    Browser browser(options.width, options.height, fonts);
     std::string error;
     if (!browser.Open(options.page_url, &error)) {
       std::fprintf(stderr, "toybrowser: %s\n", error.c_str());
@@ -270,12 +218,12 @@ int RunHeadless(const Options& options, const std::shared_ptr<const render::Font
   return 0;
 }
 
-int RunWindowed(const Options& options, const std::shared_ptr<const render::Font>& font) {
+int RunWindowed(const Options& options, const std::shared_ptr<const Fonts>& fonts) {
   // With a page URL, open it through the Browser before creating the window so a
   // URL or fetch error fails cleanly, without ever showing an empty window.
   std::unique_ptr<Browser> browser;
   if (!options.page_url.empty()) {
-    browser = std::make_unique<Browser>(options.width, options.height, font);
+    browser = std::make_unique<Browser>(options.width, options.height, fonts);
     std::string load_error;
     if (!browser->Open(options.page_url, &load_error)) {
       std::fprintf(stderr, "toybrowser: %s\n", load_error.c_str());
@@ -432,19 +380,23 @@ int Run(const Options& options) {
                  "--dump-body, --dump-dom or --dump-style\n");
     return 2;
   }
-  // Resolve the selected real font once, before any page is touched. Null with
-  // no font flag means the built-in bitmap font (the pre-M8b path).
-  std::shared_ptr<const render::Font> font;
-  if (has_font || has_font_family) {
+  // Resolve the session font selection once, before any page is touched, but
+  // only for the modes that lay text out: dump-body/dom/style and the M1
+  // placeholder page keep the bitmap path and never initialize fontconfig.
+  const bool needs_fonts = !options.dump_boxes_url.empty() || !options.screenshot_path.empty() ||
+                           (options.dump_body_url.empty() && options.dump_dom_url.empty() &&
+                            options.dump_style_url.empty());
+  std::shared_ptr<const Fonts> fonts;
+  if (needs_fonts) {
     std::string font_error;
-    font = LoadSelectedFont(options, &font_error);
-    if (!font) {
+    fonts = LoadSelectedFonts(options, &font_error);
+    if (!fonts) {
       std::fprintf(stderr, "toybrowser: %s\n", font_error.c_str());
       return 1;
     }
   }
   if (!options.dump_boxes_url.empty()) {
-    return RunDumpBoxes(options, font);
+    return RunDumpBoxes(options, fonts);
   }
   if (!options.dump_style_url.empty()) {
     return RunDumpStyle(options);
@@ -456,9 +408,9 @@ int Run(const Options& options) {
     return RunDumpBody(options);
   }
   if (!options.screenshot_path.empty()) {
-    return RunHeadless(options, font);
+    return RunHeadless(options, fonts);
   }
-  return RunWindowed(options, font);
+  return RunWindowed(options, fonts);
 }
 
 }  // namespace toy::shell

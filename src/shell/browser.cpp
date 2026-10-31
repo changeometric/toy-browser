@@ -21,6 +21,7 @@
 #include "toy/paint/paint.h"
 #include "toy/render/paint.h"
 #include "toy/render/surface.h"
+#include "toy/shell/fonts.h"
 
 namespace toy::shell {
 namespace {
@@ -142,8 +143,8 @@ dom::NodeId FindLinkElement(const dom::Document& document, dom::NodeId node) {
 
 }  // namespace
 
-Browser::Browser(int viewport_width, int viewport_height, std::shared_ptr<const render::Font> font)
-    : viewport_width_(viewport_width), viewport_height_(viewport_height), font_(std::move(font)) {
+Browser::Browser(int viewport_width, int viewport_height, std::shared_ptr<const Fonts> fonts)
+    : viewport_width_(viewport_width), viewport_height_(viewport_height), fonts_(std::move(fonts)) {
   assert(viewport_width > 0 && viewport_height > 0);
 }
 
@@ -154,7 +155,7 @@ bool Browser::Load(const net::Url& url, std::string* error) {
   // it returns, so a failure leaves the current page, scroll offset and history
   // unchanged.
   auto page = std::make_unique<Page>();
-  if (!LoadPage(url, viewport_width_, font_, page.get(), error)) {
+  if (!LoadPage(url, viewport_width_, fonts_, page.get(), error)) {
     return false;
   }
   current_url_ = page->final_url;
@@ -357,8 +358,17 @@ void Browser::Paint(render::Surface& surface) const {
     return;
   }
   const paint::Viewport viewport{surface.width(), surface.height(), scroll_y_};
+  // The runs provider binds the session font selection and the page language; a
+  // null selection yields the empty provider, i.e. the frozen bitmap text path.
+  paint::FontRunsProvider font_runs;
+  if (fonts_) {
+    font_runs = [fonts = fonts_, language = page_->language](const style::ComputedStyle& style,
+                                                             std::string_view text_utf8) {
+      return fonts->Runs(text_utf8, style, language);
+    };
+  }
   const render::DisplayList list = paint::BuildDisplayList(
-      page_->document, page_->styles, page_->boxes, viewport, page_->images, font_);
+      page_->document, page_->styles, page_->boxes, viewport, page_->images, font_runs);
   render::DrawDisplayList(list, surface);
 }
 
@@ -367,8 +377,9 @@ void Browser::Relayout() {
     return;
   }
   // Re-layout only: the DOM, styles and decoded images are reused, so a resize
-  // never refetches the page or its images. The session's font is applied again.
-  RelayoutPage(page_.get(), viewport_width_, font_);
+  // never refetches the page or its images. The session's font selection is
+  // applied again.
+  RelayoutPage(page_.get(), viewport_width_, fonts_);
 }
 
 void Browser::ClampScroll() {

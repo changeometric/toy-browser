@@ -9,3 +9,8 @@ add_executable(style_dump_test dump_test.cpp)
 toybrowser_set_warnings(style_dump_test)
 target_link_libraries(style_dump_test PRIVATE toy_style)
 add_test(NAME style.dump COMMAND style_dump_test)
+
+add_executable(style_parser_test parser_test.cpp)
+toybrowser_set_warnings(style_parser_test)
+target_link_libraries(style_parser_test PRIVATE toy_style toy_test_support)
+add_test(NAME style.parser COMMAND style_parser_test)

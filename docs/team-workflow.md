@@ -390,3 +390,34 @@ the round when possible. Clean up stale build directories and stray files.
   validated the security behavior end to end (expired/self-signed/wrong-host pages fail with
   readable errors and exit 1; normal pages fetch, dump and screenshot). Such checks stay manual and
   their network details never enter the repository.
+- M10: the Lead froze the style/layout/paint/shell public headers and generated/validated the new
+  fixture fonts before kickoff, so two implementers could work in parallel; the full tree was
+  transiently broken, and the kickoff prompts again said "build only your own targets".
+- M10: the implementer caught a structural bug in the Lead-generated fixture fonts with an exact
+  diagnosis (the new TTFs' hhea table had one extra field, so `numberOfHMetrics` read as 0 and every
+  shaped advance was 0). `fc-query` parsing a font does not prove its metrics are right: validate
+  generated fixtures through real shaping/metrics, and re-validate after fixing the generator
+  (hhea length 36, correct `numberOfHMetrics`).
+- M10: plan review found that font fallback alone would not make Chinese readable: layout broke
+  lines only at ASCII whitespace, so a space-less Chinese paragraph was one unbreakable "word"
+  overflowing the viewport. Two follow-up tasks (M10-D CJK break units + punctuation rules, M10-E
+  strengthened Chinese fixture tests) were added with the same layout owner. Check end-to-end
+  readability of the target language at intake, not just font lookup.
+- M10: the user clarified mid-round that Chinese was only an example and that English + Chinese
+  features come first, other languages best-effort. That was recorded in the roadmap known limits
+  (generic fontconfig character coverage for other scripts; no bidi/RTL, full UAX#14 or dictionary
+  breaking this round), which prevented fixture/scope growth.
+- M10: determinism came from two generated fontconfig configs: the empty config (no font
+  directories) forces the bitmap canvas and keeps every pre-M10 golden byte-identical, while the
+  fixture config (only the self-authored fonts, generic families mapped to the Latin face) drives
+  the new auto-selection and Han-fallback tests. No installed font and no in-code trust hook.
+- M10: the byte-compatibility gate needed a deliberate update when a frozen format changed on
+  purpose: the style dump gained `font-family=`, so the gate script normalizes that field before
+  comparing everything else byte for byte, instead of loosening the gate or re-baselining goldens.
+- M10: the parallel follow-up tasks were coordinated through the task board (reopen/new task +
+  dependency notes): the shell owner first made the Chinese fixture tests segmentation-agnostic so
+  they stayed green, then froze exact per-unit/wrap geometry once the layout task landed. That
+  avoided a big test rewrite at integration.
+- M10: manual real-site checks (no font flags, system fonts) confirmed fallback and wrapping while
+  also exposing the pre-existing limits (external stylesheets still unimplemented, etc.); such
+  checks stay manual and their network/site details never enter the repository.

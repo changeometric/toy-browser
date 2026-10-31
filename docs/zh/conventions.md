@@ -45,12 +45,13 @@
 - 确定性：无网络、无显示器、不依赖时间、locale、家目录或已安装字体。
 - 解析器和布局优先使用 golden dump 比较。新测试使用 header-only 的 `tests/support/check.h`（CMake 接口目标 `toy_test_support`），不再复制本地 `Check`/`g_failures` 测试支架；旧文件在被改动时迁移。不引入测试框架依赖。
 - 依赖网络的功能只用进程内 loopback 服务器测试：`net` 测试中的纯 HTTP 服务器与 header-only 的 TLS 服务器 `tests/support/tls_server.h`（提交的仅测试用证书在 `tests/fixtures/tls/`，信任通过 CTest `ENVIRONMENT` 属性提供）。任何测试都不访问公网或使用已安装证书库。
+- 依赖字体的功能用 `tests/fixtures/fonts/` 中提交的自造 fixture 与生成的 fontconfig 配置测试；测试通过 CTest `ENVIRONMENT` 属性设置 `FONTCONFIG_FILE`：fixture 配置用于自动选择/回退测试，空配置（无字体目录）用于强制内置位图路径。任何测试都不使用已安装字体或机器字体配置。CJK 布局/绘制测试使用 `tests/fixtures/cjk_site/` 与 `layout.cjk_line_break` 分词器测试。
 - 没有回归测试的 bug 修复不算完成，除非用户明确豁免。
 
 ## 构建
 
 ```sh
-# 快速构建浏览器本体：测试是 opt-in 的，因此不会编译 57 个测试可执行文件。
+# 快速构建浏览器本体：测试是 opt-in 的，因此不会编译 66 个测试可执行文件。
 cmake -S . -B build
 cmake --build build
 

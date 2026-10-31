@@ -15,8 +15,9 @@
   `find_package(Freetype REQUIRED)` 发现。
 - **harfbuzz（MIT）**，由 `render` 用于 OpenType 文本整形（M8b）。通过
   `find_package(harfbuzz CONFIG REQUIRED)` 发现。
-- **fontconfig（MIT 风格）**，由 `shell` 在 `--font-family` 渲染时用于已安装字体的发现与匹配
-  （M8b）。通过 `find_package(Fontconfig REQUIRED)` 发现。
+- **fontconfig（MIT 风格）**，由 `shell` 用于已安装字体的发现与匹配：自 M8b 起用于显式
+  `--font-family` 路径；自 M10 起用于按计算出的 CSS 字体属性自动选择、语言提示与字符覆盖回退。
+  通过 `find_package(Fontconfig REQUIRED)` 发现。
 - **OpenSSL（libssl + libcrypto，Apache-2.0）**，由 `net` 用于 TLS/`https://` 抓取（M9）。通过
   `find_package(OpenSSL REQUIRED)` 发现并 PRIVATE 链接到 `toy_net`；证书校验始终开启并基于默认
   信任库，没有 insecure 模式。

@@ -1,6 +1,6 @@
 // Display-list construction: the box tree becomes an ordered list of background
-// fills, image draws and text draws, clipped to the viewport and scrolled
-// vertically. No rasterization happens here; render executes the list.
+// fills, image draws and real-font text runs, clipped to the viewport and
+// scrolled vertically. No rasterization happens here; render executes the list.
 
 #include "toy/paint/paint.h"
 
@@ -52,23 +52,37 @@ void AppendBackground(const dom::Document& document, const style::StyleTree& sty
 // A text box keeps the inherited computed style; its color is forced opaque
 // because style colors carry no alpha channel in M4.
 //
-// A null font keeps the frozen M6/M7 bitmap command: y is the top of the glyph
-// cell. A real font places the glyphs on the box's baseline instead, so the
-// command y is the box top plus the font ascent rounded to device pixels (the
-// layout box top already comes from the font metrics the caller laid out with).
+// The caller's runs provider decides between real-font runs and the frozen
+// M6/M7 bitmap command. A null provider, or an empty run vector for this box,
+// keeps the bitmap path: y is the top of the glyph cell and x is round(box.x),
+// exactly as before M10. With real-font runs every run becomes one
+// DrawTextWithFont command in order: the baseline y is shared by the box (layout
+// computed the line ascent into baseline_offset_px) and the x comes from a pen
+// that starts at box.x and advances by each run's shaped width, so the runs stay
+// contiguous and match layout's measured width.
 void AppendText(const style::StyleTree& styles, const layout::Box& box, int scroll_y,
-                const std::shared_ptr<const render::Font>& font, render::DisplayList* list) {
+                const FontRunsProvider& font_runs, render::DisplayList* list) {
   const style::ComputedStyle& style = styles.Get(box.node);
   const std::uint32_t color = style.color | 0xFF000000u;
   const float font_size_px = style.font_size_px > 0.0f ? style.font_size_px : 0.0f;
-  const int x = ToDevicePixels(box.x);
-  if (font) {
-    const int baseline_y =
-        TranslatedY(box, scroll_y) + static_cast<int>(std::lround(font->AscentPx(font_size_px)));
-    list->DrawTextWithFont(font, box.text, x, baseline_y, font_size_px, color);
-    return;
+  if (font_runs) {
+    const std::vector<FontRun> runs = font_runs(style, box.text);
+    if (!runs.empty()) {
+      const int baseline_y = TranslatedY(box, scroll_y) + ToDevicePixels(box.baseline_offset_px);
+      float pen_x = box.x;
+      for (const FontRun& run : runs) {
+        assert(run.font != nullptr);
+        if (!run.font) {
+          continue;
+        }
+        list->DrawTextWithFont(run.font, run.text, ToDevicePixels(pen_x), baseline_y, font_size_px,
+                               color);
+        pen_x += run.font->MeasureTextWidth(run.text, font_size_px);
+      }
+      return;
+    }
   }
-  list->DrawText(box.text, x, TranslatedY(box, scroll_y), font_size_px, color);
+  list->DrawText(box.text, ToDevicePixels(box.x), TranslatedY(box, scroll_y), font_size_px, color);
 }
 
 // An inline replaced box paints its image after its own background and before
@@ -93,8 +107,7 @@ void AppendImage(const layout::Box& box, int scroll_y, const ImageMap& images,
 
 render::DisplayList BuildDisplayList(const dom::Document& document, const style::StyleTree& styles,
                                      const layout::BoxTree& boxes, const Viewport& viewport,
-                                     const ImageMap& images,
-                                     const std::shared_ptr<const render::Font>& font) {
+                                     const ImageMap& images, const FontRunsProvider& font_runs) {
   assert(viewport.width > 0);
   assert(viewport.height > 0);
   assert(viewport.scroll_y >= 0);
@@ -122,7 +135,7 @@ render::DisplayList BuildDisplayList(const dom::Document& document, const style:
         AppendImage(box, viewport.scroll_y, images, &list);
         break;
       case layout::BoxKind::kText:
-        AppendText(styles, box, viewport.scroll_y, font, &list);
+        AppendText(styles, box, viewport.scroll_y, font_runs, &list);
         break;
       case layout::BoxKind::kAnonymousBlock:
         break;

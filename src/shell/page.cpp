@@ -30,6 +30,44 @@ const dom::Attribute* FindFirstAttribute(const dom::Node& node, std::string_view
   return nullptr;
 }
 
+bool IsAsciiWhitespace(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r';
+}
+
+std::string TrimAsciiWhitespace(std::string_view text) {
+  std::size_t begin = 0;
+  std::size_t end = text.size();
+  while (begin < end && IsAsciiWhitespace(text[begin])) {
+    ++begin;
+  }
+  while (end > begin && IsAsciiWhitespace(text[end - 1])) {
+    --end;
+  }
+  return std::string(text.substr(begin, end - begin));
+}
+
+// The page language hint: the first `lang` attribute of the root <html> element
+// in document order, trimmed, or empty. Only the root <html> element counts (not
+// a lang on <body> or on descendants), which keeps the hint page-wide and simple.
+std::string ExtractPageLanguage(const dom::Document& document) {
+  std::vector<dom::NodeId> pending;
+  pending.push_back(document.root());
+  while (!pending.empty()) {
+    const dom::NodeId id = pending.back();
+    pending.pop_back();
+    const dom::Node& node = document.Get(id);
+    if (node.type == dom::NodeType::kElement && node.name == "html") {
+      const dom::Attribute* language = FindFirstAttribute(node, "lang");
+      return language == nullptr ? std::string() : TrimAsciiWhitespace(language->value);
+    }
+    for (dom::NodeId child = node.last_child; child != dom::kInvalidNode;
+         child = document.Get(child).prev_sibling) {
+      pending.push_back(child);
+    }
+  }
+  return {};
+}
+
 // Fetches and decodes one <img> and records it under its DOM node id. Every
 // failure below is an ordinary, silently skipped image: it leaves the page
 // load successful and only omits the map entries, so the element lays out as an
@@ -85,20 +123,22 @@ void LoadImages(const dom::Document& document, const net::Url& page_url, Page* p
 
 }  // namespace
 
-void RelayoutPage(Page* page, int viewport_width, const std::shared_ptr<const render::Font>& font) {
+void RelayoutPage(Page* page, int viewport_width, const std::shared_ptr<const Fonts>& fonts) {
   // Field-wise setup on purpose: LayoutOptions may grow fields, and a named
   // assignment keeps every default visible here.
   layout::LayoutOptions options;
   options.viewport_width_px = static_cast<float>(viewport_width);
   options.replaced_sizes = page->replaced_sizes.empty() ? nullptr : &page->replaced_sizes;
-  const layout::MeasureText measure = [&font](std::string_view text_utf8, float font_size_px) {
-    return MeasureText(font, text_utf8, font_size_px);
+  const layout::MeasureText measure = [&fonts, &language = page->language](
+                                          std::string_view text_utf8,
+                                          const style::ComputedStyle& style) {
+    return MeasureText(fonts.get(), text_utf8, style, language);
   };
   page->boxes = layout::LayoutDocument(page->document, page->styles, options, measure);
 }
 
-bool LoadPage(const net::Url& url, int viewport_width,
-              const std::shared_ptr<const render::Font>& font, Page* page, std::string* error) {
+bool LoadPage(const net::Url& url, int viewport_width, const std::shared_ptr<const Fonts>& fonts,
+              Page* page, std::string* error) {
   net::Response response;
   std::string fetch_error;
   if (!net::Fetch(url, net::FetchOptions{}, &response, &fetch_error)) {
@@ -113,11 +153,12 @@ bool LoadPage(const net::Url& url, int viewport_width,
   Page loaded;
   loaded.final_url = response.final_url;
   loaded.document = dom::ParseDocument(response.body);
+  loaded.language = ExtractPageLanguage(loaded.document);
   loaded.styles = style::ComputeStyles(loaded.document);
   // Image sources resolve against the page's final URL (after redirects), like
   // the other page-relative references the shell resolves.
   LoadImages(loaded.document, loaded.final_url, &loaded);
-  RelayoutPage(&loaded, viewport_width, font);
+  RelayoutPage(&loaded, viewport_width, fonts);
 
   *page = std::move(loaded);
   if (error != nullptr) {

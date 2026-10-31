@@ -2,15 +2,18 @@
 
 一个从零实现的玩具网页浏览器：C++20、CMake，不使用现成的浏览器组件。
 
-**状态：M9 —— 最基础 HTTPS。** 浏览器可抓取 `http://`、`https://` 与 `file://` 页面；`https://`
-使用已批准的 OpenSSL，证书与主机名校验始终开启，没有 insecure 模式。窗口与
-`--headless --screenshot` 渲染可选 URL 指定的页面，包括通过已批准的 libpng 依赖抓取并解码的
-`<img src="...png">` 图片，以及在用 `--font PATH` 或 `--font-family NAME`（已批准的
-freetype/harfbuzz/fontconfig）选择真实字体时绘制的抗锯齿 TTF 文本；不传字体标志时仍使用内置位图
-字体，M8b 之前的输出逐字节不变。在窗口中链接可点击、滚轮与键盘可滚动、Alt+Left/Right 在历史中
-前进后退，窗口标题跟随 `<title>`。**下一计划里程碑：M10 —— HTTP 代理**（设计草案见
-[路线图](docs/zh/roadmap.md)）。仓库中的演示站点：
-[`tests/fixtures/font_site/`](tests/fixtures/font_site/)（真实字体 + 图片）、
+**状态：M10 —— 自动字体选择。** 浏览器可抓取 `http://`、`https://` 与 `file://` 页面（`https://`
+使用已批准的 OpenSSL，证书与主机名校验始终开启，没有 insecure 模式），并可在窗口或 headless
+模式下绘制页面。不传任何字体标志时，浏览器像普通浏览器一样自己选择字体：计算出的 CSS
+`font-family`/`font-weight`/`font-style` 通过已批准的 fontconfig 库匹配（初始字体族 `serif`），
+首选字体缺少的字符回退到覆盖它的已安装字体。布局把文本切成 run，并给 CJK 文本独立的断行单元，
+因此没有空格的中文页面也能阅读、正常换行。`--font PATH` 与 `--font-family NAME` 仍是显式覆盖；
+没有可用系统字体时退化到内置位图字体。真实文本抗锯齿（freetype + harfbuzz），
+`<img src="...png">` 图片由 libpng 解码，窗口中链接可点击、滚轮与键盘可滚动、Alt+Left/Right 在
+历史中前进后退、窗口标题跟随 `<title>`。**下一计划里程碑：M11 —— HTTP 代理**（用户已降低优先级；
+设计草案见[路线图](docs/zh/roadmap.md)）。仓库中的演示站点：
+[`tests/fixtures/cjk_site/`](tests/fixtures/cjk_site/)（自动字体 + 可读中文）、
+[`tests/fixtures/font_site/`](tests/fixtures/font_site/)（显式真实字体 + 图片）、
 [`tests/fixtures/img_site/`](tests/fixtures/img_site/)（图片）、
 [`tests/fixtures/nav_site/`](tests/fixtures/nav_site/)（导航）与
 [`tests/fixtures/https_site/`](tests/fixtures/https_site/)（HTTPS pipeline）。`--dump-*` 模式仍是
@@ -37,7 +40,9 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/font_site/index.html" \
     --font tests/fixtures/fonts/toy_test.ttf   # 真实 TTF 文本 + 图片演示（fixture 字体）
 ./build/toybrowser --size 400x200 --font-family "sans-serif" \
-    "file://$PWD/tests/fixtures/nav_site/index.html"   # 任意已安装字体族
+    "file://$PWD/tests/fixtures/nav_site/index.html"   # 强制某已安装字体族
+./build/toybrowser --size 400x240 "file://$PWD/tests/fixtures/cjk_site/index.html"  # 自动字体 + 中文换行
+./build/toybrowser --size 800x900 --screenshot /tmp/zh.ppm https://www.gov.cn/  # 真实中文页面（系统字体）
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"   # 图片演示
 ./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # 提交的导航演示站点
 ./build/toybrowser --dump-body https://example.com/   # 抓取 https URL（TLS，始终校验）
@@ -49,7 +54,7 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --dump-boxes file:///etc/hostname # 抓取、计算样式、布局并输出盒树
 ```
 
-窗口后端链接 libX11，图片解码链接 libpng，真实字体渲染链接 freetype 与 harfbuzz，字体族查找链接
+窗口后端链接 libX11，图片解码链接 libpng，文本渲染/整形链接 freetype 与 harfbuzz，自动字体选择链接
 fontconfig，`https://` 链接 OpenSSL（全部已批准，见[依赖说明](docs/zh/dependencies.md)），因此即使
 只用 headless 模式，构建时仍然需要这些开发头文件。headless 运行不需要显示器，
 是测试和调试的主要模式：所有渲染结果都能不开窗口检查。
@@ -87,7 +92,7 @@ CMake 3.20 或更新版本与任何 C++20 编译器都能构建；仓库不依�
 | libpng + zlib | PNG 图片解码 | libpng 许可证 / zlib 许可证 | 自 M8a 起链接 |
 | freetype | 字体度量与字形光栅化 | FreeType 许可证 | 自 M8b 起链接 |
 | harfbuzz | OpenType 文本整形 | MIT | 自 M8b 起链接 |
-| fontconfig | 已安装字体的发现与匹配 | MIT 风格 | 自 M8b 起链接 |
+| fontconfig | 自动字体发现/匹配、语言提示与字符回退 | MIT 风格 | 自 M8b 起链接（自动选择自 M10 起） |
 | OpenSSL | `https://` 的 TLS | Apache-2.0 | 自 M9 起链接 |
 
 依赖策略、审批记录与自写替代方案见 [dependencies.md](docs/zh/dependencies.md)。

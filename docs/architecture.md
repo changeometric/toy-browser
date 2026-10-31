@@ -14,10 +14,10 @@ speculative — abstractions are added when a real slice needs them.
 | `dom` | HTML tokenizer, tree builder, DOM arena | `base` | M3 |
 | `css` | CSS tokenizer, rule/declaration parser, selectors | `base` | M4 |
 | `style` | Cascade and computed styles, default stylesheet | `dom`, `css` | M4 |
-| `layout` | Box tree, block/inline layout, line breaking | `dom`, `style`, a text-measurement callback from `shell` | M5 |
+| `layout` | Box tree, block/inline layout, line breaking (word units plus CJK break units) | `dom`, `style`, a text-measurement callback from `shell` | M5 |
 | `paint` | Display list construction from the box tree (element backgrounds and text) | `dom`, `style`, `layout`, `render` | M6 |
 | `js` | Small JavaScript engine and DOM bindings (optional, deferred by the user) | `dom`, `base` | deferred |
-| `shell` | Navigation, pipeline orchestration, window chrome, font selection (approved fontconfig for family lookup) | all | M1 |
+| `shell` | Navigation, pipeline orchestration, window chrome, automatic font selection (approved fontconfig matching, run fallback, font cache) | all | M1 |
 
 Dependencies point downward only; no cycles. `render` knows nothing about HTML/CSS (it consumes
 display lists); `paint` knows the DOM/style/layout data but never rasterizes; `platform` knows
@@ -91,23 +91,37 @@ the raw CSS.
 
 Layout (M5): `layout` turns the style tree into a `BoxTree` with absolute CSS-pixel geometry.
 Line breaking needs text metrics, so `LayoutDocument()` takes a `MeasureText` callback (standard
-types only) supplied by `shell`; the built-in monospace bitmap-font metrics live in `render`, and
-`shell` adapts them — or, for a real-font session, adapts the selected font's shaped advances and
-line height (M8b) without layout knowing about fonts. This keeps the dependency direction intact: no `layout` → `render` edge and no
-font code duplicated in `layout`. `DumpBoxTree()` is the deterministic text form behind
+types plus `style::ComputedStyle`) supplied by `shell`; the built-in monospace bitmap-font metrics
+live in `render`, and `shell` adapts them — or the selected real font's shaped advances, line height
+and ascent (M8b/M10) — without layout knowing about fonts. This keeps the dependency direction
+intact: no `layout` → `render` edge and no font code duplicated in `layout`. Since M10 the callback
+receives the text's computed style, so the shell can pick the font for that style; `TextMetrics`
+carries an ascent and layout stores the line's maximum ascent as `Box::baseline_offset_px` on every
+text box of the line (mixed fonts on one line then share a baseline in paint). Text is split into
+break units (`src/layout/text_break.cpp`): whitespace separates words, non-CJK text stays grouped
+into maximal words, and CJK characters are individual break opportunities with simplified
+punctuation prohibitions, so Chinese text without spaces wraps normally. Each unit is an ordinary
+measured word-level text box, so the M5 fitting, line-height and baseline machinery is reused. `DumpBoxTree()` is the deterministic text form behind
 `--dump-boxes` and the layout tests. Layout consumes the style tree only: it never reads raw CSS and
 never paints. The geometry is a pure function of its inputs; a summary of the MVP simplifications
 lives in the known-limits list in [roadmap.md](roadmap.md). M8a adds replaced elements to the same
 layout: `LayoutOptions::replaced_sizes` maps DOM node ids to intrinsic CSS-pixel sizes supplied by
 `shell`; an inline element with an entry becomes an atomic inline-level box (CSS width/height px
 override, one specified side keeps the intrinsic ratio, wraps as a whole, top-aligned, raises the
-line height), while `layout` still never reads images or depends on `render`.
+line height), while `layout` still never reads images or depends on `render`. M10's break-unit
+model is a documented simplification of Unicode line breaking (no full UAX#14, no dictionary
+breaking for Thai/Khmer/Lao, no hyphenation, no cross-text-node punctuation gluing); Latin words
+are never split.
 
 Painting (M6): `paint` walks the box tree in pre-order and emits a flat `render::DisplayList`:
 every element box with a non-transparent computed background becomes a `FillRect` (backgrounds
 before children), every inline replaced box whose node id has a decoded image becomes a `DrawImage`
-(M8a, after the background and before children), and every text box becomes a `DrawText` with the
-inherited color and font size. `paint` never rasterizes and never includes render implementation
+(M8a, after the background and before children), and every text box becomes either one or more
+`DrawTextWithFont` runs or (in bitmap mode) one `DrawText`, all with the inherited color and font
+size. Since M10 paint receives a `paint::FontRunsProvider` from the shell instead of a single font:
+the provider returns ordered real-font runs for the box text, and the painter advances a pen by
+each run's shaped width and places every run on `box.baseline_offset_px`; an empty provider (or an
+empty run list for a box) reproduces the pre-M10 bitmap command list exactly. `paint` never rasterizes and never includes render implementation
 headers. `render` executes the list: rectangle fills use the frozen SrcOver integer formula over an
 opaque destination, text uses the built-in 8x16 ASCII glyph table with nearest-neighbour cell
 scaling (no anti-aliasing), images use a frozen nearest-neighbour source mapping (below), and an
@@ -141,14 +155,30 @@ harfbuzz-shaped at the requested size (26.6 sums), and `internal::FontRasterizer
 render) shaves 8-bit freetype coverage bitmaps onto the display list's baseline with a frozen
 per-glyph integer placement formula and SrcOver coverage compositing, clipped to the current clip
 rectangle. The effective font size is clamped to `kMaxRealFontSizePx` (4096 px) so adversarial CSS
-cannot request unbounded glyph bitmaps. `paint` emits one `DrawTextWithFont` command per text box
-when the session selected a font (baseline = rounded box top minus scroll plus rounded ascent) and
-the frozen bitmap `DrawText` command otherwise; the display list keeps a shared reference to the
-font, like images. `shell` resolves `--font PATH` or `--font-family NAME` once per run (the latter
-through fontconfig's pattern matching, face 0, best match with fallback for unknown families),
-loads one `Font` and threads it through the page loader (`MeasureText` adapter), `Browser` and
-painting. Fontconfig itself never leaks outside the shell and the font never outside render's
-private implementation. The built-in bitmap path stays the default and is untouched.
+cannot request unbounded glyph bitmaps. `paint` emits one `DrawTextWithFont` command per real-font run (M10; the M8b single-face session was
+the special case of one run per box), placed on the layout-provided baseline, and the frozen bitmap
+`DrawText` command when the provider returns nothing; the display list keeps a shared reference to
+each font, like images. M8b loaded exactly one face per run from `--font PATH` or a fontconfig
+family match; M10 replaces that with automatic per-style selection (next paragraph). Fontconfig
+never leaks outside the shell and the font never outside render's private implementation.
+
+Font selection (M10): `shell`'s public `Fonts` object (`toy/shell/fonts.h`, pimpl) turns the
+computed text style and the page language into concrete faces. For every distinct (font-family
+list, weight, slant, language) it builds a fontconfig pattern (`FC_FAMILY` per family,
+`FC_WEIGHT` via `FcWeightFromOpenType`, `FC_SLANT`, `FC_LANG` when the root `<html lang>` value is
+non-empty), runs the normal substitute/default/sort pipeline, and caches the ordered candidate
+faces with their character sets; loaded `render::Font` faces are cached per file path. A text box is
+split into runs by code point: each code point goes to the first candidate whose character set
+covers it (so Han text falls back to an installed Han face on a Latin page and vice versa), runs
+with the same face are grouped, and `MeasureText` sums the run advances while `Runs` returns the
+same runs to paint — measurement and painting therefore agree by construction. If no usable face is
+available (fontconfig failure, no match, no loadable file) the object operates in bitmap mode: the
+built-in bitmap metrics are measured and `Runs` returns empty, which keeps the browser usable and
+the pre-M10 golden outputs reproducible. `--font PATH` forces one exact face (no fallback);
+`--font-family NAME` forces the preferred family (still with character fallback) and now also
+follows the computed weight/style. The initial computed family is `serif`; other scripts are
+best-effort through the same character-coverage mechanism (no bidi/RTL reordering and no
+dictionary-based breaking yet).
 
 Navigation (M7): `shell::Browser` owns one browser session: the current page (final URL, DOM, style
 tree, box tree and decoded images), the navigation history, the integer vertical scroll offset and
@@ -299,6 +329,14 @@ can't form ownership cycles. Revisit only if it actually hurts.
   (`tests/fixtures/https_site/`) over TLS through `shell::Browser` and asserts the rendered pixels
   plus the untrusted-certificate failure. No test uses the public network or a public CA, and the
   M7 nav fixture uses an offline `ftp://` link for its unsupported-scheme case.
+- M10 font tests use the committed self-authored fixtures (`tests/fixtures/fonts/`: regular,
+  bold, italic and a tiny Han face) and two generated fontconfig configs: the fixture config (only
+  the fixture fonts, generic families mapped to the Latin face) for automatic selection, weight/
+  style, unknown-family fallback and the mixed Latin+Han run segmentation; the empty config (no font
+  directories) forces the bitmap path and is used by all pre-M10 goldens. `style.parser`,
+  `layout.baseline`, `layout.cjk_line_break`, `shell.font_selection`, `shell.page_language`, the
+  `shell.cjk_*` tests (per-unit boxes, wrapping, painted ink) and the updated `shell.fonts*` cover
+  the feature; tests never use installed fonts or the machine font configuration.
 - M8a image tests use hand-generated PNG fixtures with documented pixel content
   (`tests/fixtures/images/`) and a committed image demo site (`tests/fixtures/img_site/`): the
   decoder is exercised directly, layout with fake replaced sizes, and the shell end to end through

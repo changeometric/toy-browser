@@ -21,20 +21,21 @@
 | M8a | PNG 图片：`render::Image` + 封装在 `render::DecodePng` 后的 libpng 解码器、`DrawImage` 显示列表命令/光栅化器、按调用方提供的固有尺寸布局 replaced 行内 `<img>`、私有 shell 页面加载器（抓取/解析/解码/跳过失败）、图片 fixtures 与 `tests/fixtures/img_site/`、46 个测试 |
 | M8b | 真实字体：冻结 pimpl 后的 `render::Font`（freetype 度量/光栅化 + harfbuzz 整形、4096 px 有效字号上限）、按基线放置的抗锯齿 `DrawTextWithFont`、`--font PATH` / `--font-family NAME`（fontconfig）选择、自造字体 fixture 与 `tests/fixtures/font_site/`、55 个测试；位图路径保持逐字节不变 |
 | M9 | `https://` 抓取：`net` URL 层接受 https（默认端口 443）；保持阻塞 `Fetch()` 不变，内部接入 OpenSSL TLS 传输，并通过私有字节流抽象与 HTTP/1.1 代码共用；证书与主机名校验始终开启并使用 OpenSSL 默认信任库（无 insecure 模式）、SNI、沿用现有超时；重定向改用 `net::ResolveUrl`（相对/协议相对、http<->https）；提交测试 CA/叶证书、进程内 TLS loopback 服务器、`net.tls` + `shell.https` 端到端测试、57 个测试；http/file 输出逐字节不变 |
+| M10 | 自动字体选择：CSS `font-family`/`font-weight`/`font-style` 通过已批准的 fontconfig 匹配，初始字体族 `serif`，按码点字符覆盖切分 run 实现回退（拉丁页面上的汉字，反之亦然），根 `<html lang>` 作为 fontconfig 语言提示；共享的 `shell::Fonts` 对象同时驱动布局度量与绘制（`TextMetrics::ascent_px`、`Box::baseline_offset_px`、`paint::FontRunsProvider`）；layout 中加入简化的 CJK 断行单元，使中文段落可换行；提交了常规/粗体/斜体/汉字 fixture 字体与确定性的 fixture/空 fontconfig 测试配置；保留 `--font`/`--font-family` 覆盖；位图路径仍是逐字节相同的退化路径；66 个测试 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-**下一计划里程碑：M10 —— HTTP 代理（已计划，尚未开始）。** M9（最基础 HTTPS）已交付；用户于
-2026-10-31 批准 OpenSSL 用于 TLS，并自 M9 起链接（记录在 [dependencies.md](dependencies.md)）。
-M10 通过 `FetchOptions` 支持 HTTP 代理（`http` 用 absolute-form，`https` 用 `CONNECT`），这是在
-受限网络上让真实站点测试变得实用的能力。JavaScript 子集已被用户暂缓。
+**下一计划里程碑：M11 —— HTTP 代理（已计划，尚未开始；用户已降低优先级）。** M10（自动字体选择，
+含可读中文文本）已交付。M11 通过 `FetchOptions` 支持 HTTP 代理（`http` 用 absolute-form，`https`
+用 `CONNECT`）；用户表示代理目前不重要，后续工作按其优先级安排。JavaScript 子集已暂缓。
 
-尚未实现：代理（计划 M10）、JavaScript（已暂缓）、外部样式表、border、水平滚动/滚动条、
-hover/active 链接样式与表单控件，以及 CSS 驱动的字体选择
-（`font-family`/`font-weight`/`font-style`、fallback 链、`@font-face`）。PNG 图片自 M8a 起可用、
-真实 TTF 文本自 M8b 起可用（opt-in）、`https://` 自 M9 起可用（已知限制见 [roadmap.md](roadmap.md)）；
-`http://` 与 `file://` 仍受支持。窗口与 `--screenshot` 在给出 URL 时绘制真实页面，否则显示 M1 占位页；
-给出页面 URL 时窗口也可浏览（链接、滚轮/键盘滚动、Alt+Left/Right 历史、`<title>`）。`--dump-*`
-模式仍是主要调试路径。
+尚未实现：代理（计划 M11）、JavaScript（已暂缓）、外部样式表、border、水平滚动/滚动条、
+hover/active 链接样式与表单控件，以及 `@font-face`/webfont 下载。字体选择自 M10 起自动完成
+（CSS 字体族/weight/style 经 fontconfig、字符覆盖回退、CJK 断行）；其他语言尽力支持，bidi/RTL 与
+完整 Unicode 断行尚未实现。PNG 图片自 M8a 起可用、真实字体自 M8b 起可用、`https://` 自 M9 起可用
+（已知限制见 [roadmap.md](roadmap.md)）；`http://` 与 `file://` 仍受支持。窗口与 `--screenshot` 在
+给出 URL 时绘制真实页面，否则显示 M1 占位页；给出页面 URL 时窗口也可浏览（链接、滚轮/键盘滚动、
+Alt+Left/Right 历史、`<title>`）。`--dump-*` 模式仍是主要调试路径；使用系统字体时文本输出按设计
+依赖机器（测试通过 `FONTCONFIG_FILE` 固定）。
 
 ## 验证当前状态（无需上下文）
 
@@ -56,7 +57,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-预期：57/57 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。
+预期：66/66 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -76,8 +77,11 @@ ctest --test-dir "$BUILD" --output-on-failure
 ```
 
 预期：图片截图绘制提交的 PNG fixtures（旗子、alpha、灰度、调色板），盒 dump 包含带固有/CSS 尺寸的
-`<img> inline` 盒；`missing.png` 不保留盒。fixture 字体的盒 dump 显示真实字体度量（例如 32 px 下
-`<h1>` 文本 "ABC" 宽 58，而不是位图字体的 48）；不给字体标志的页面保持位图输出。
+`<img> inline` 盒；`missing.png` 不保留盒。`--font` fixture 的盒 dump 保持 M8b 度量（例如 32 px 下
+`<h1>` 文本 "ABC" 宽 58）。`--font-family` 现在遵循计算出的 weight/style，因此 UA 的粗体 h1 使用粗体
+face（`shell.fonts_dump_boxes_family` 固定该行为）。不传字体标志时页面使用自动系统字体（按设计依赖
+机器）；测试通过 `FONTCONFIG_FILE` 固定为确定性的 fixture/空配置，空配置让所有 M10 之前的 golden
+保持内置位图输出。
 
 ```sh
 "$BUILD"/toybrowser --size 400x200 --screenshot /tmp/toybrowser-nav.ppm \
@@ -96,6 +100,21 @@ ctest --test-dir "$BUILD" -R '^(net\.tls|shell\.https)$' --output-on-failure
 预期：`net.tls` 与 `shell.https` 通过；公网 `https://` 页面可抓取并绘制。证书、主机名与超时失败是
 普通 fetch 错误（页面模式 CLI 退出码 1），校验始终开启，没有 insecure 模式。
 
+```sh
+# 字体选择（M10）：使用提交的 fixture 字体与测试 fontconfig 配置进行确定性测试；中文 fixture 页面
+# 从磁盘（file://）加载，用 fixture 汉字 face 与逐字符回退 run 布局/绘制。
+ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_break|shell\.font_selection|shell\.page_language|shell\.cjk_.*|shell\.fonts.*)$' --output-on-failure
+
+# 手工系统字体检查：完全不传字体标志。文本使用已安装字体（默认 serif、weight/style、逐字符回退），
+# 依赖机器。中文站点用汉字回退 face 渲染，并且因为 CJK 断行单元而正常换行。
+"$BUILD"/toybrowser --size 800x900 --screenshot /tmp/toybrowser-zh.ppm https://www.gov.cn/
+"$BUILD"/toybrowser --size 800x600 --dump-boxes https://example.com/ | grep 'text "'
+```
+
+预期：所有字体测试确定性地通过（fixture 配置：默认 serif、粗体/斜体 face、混合拉丁+汉字 run、提交的
+中文页面逐单元文本盒、换行与绘制像素；空配置：逐字节相同的位图路径）。手工页面显示真实系统字体，
+中文可读且正常换行。
+
 窗口演示（需要显示器）：
 
 ```sh
@@ -106,10 +125,10 @@ ctest --test-dir "$BUILD" -R '^(net\.tls|shell\.https)$' --output-on-failure
 # 方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right 前进后退；窗口标题跟随 <title>。
 ```
 
-## 下一轮：M10 —— HTTP 代理（已计划；等用户确认后开始）
+## 下一轮：M11 —— HTTP 代理（已计划；等用户确认后开始）
 
-**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M10 代码。M9 已完成且全绿，因此
-起点就是当前 HEAD。
+**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M11 代码。M10 已完成且全绿，因此
+起点就是当前 HEAD；用户降低了代理优先级，开始前先确认。
 
 - 目标：`http://` 通过 HTTP 代理以 absolute-form 请求目标抓取；`https://` 通过代理 `CONNECT` 隧道后
   再做正常的 TLS 握手。浏览器自身的代理支持是在受限网络上让真实站点测试变得实用的能力。
@@ -118,8 +137,8 @@ ctest --test-dir "$BUILD" -R '^(net\.tls|shell\.https)$' --output-on-failure
   （不访问公网），未配置代理时输出逐字节不变。
 - 在重新划范围之前不做：SOCKS 代理、代理认证、bypass 列表、PAC。
 
-M10 之后总路线图就全部变绿；剩余工作是已记录的 backlog（更多图片格式、CSS 字体选择、外部样式表等）
-以及用户的新优先级。
+M11 之后总路线图就全部变绿；剩余工作是已记录的 backlog（webfont、更多图片格式、外部样式表、
+bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
 
 ## 仓库地图
 
@@ -135,16 +154,19 @@ M10 之后总路线图就全部变绿；剩余工作是已记录的 backlog（�
   `src/render/include/toy/render/image.h` —— `Image` 与基于 libpng 的 `DecodePng`；
   `src/render/include/toy/render/font.h` —— 位图字体度量加真实 `Font` API（加载、度量、整形 advance；
   公开头文件不含 freetype/harfbuzz 类型），实现位于 `src/render/font_ttf.cpp`；显示列表与光栅化器在
-  `toy/render/paint.h`，`src/paint/` 从盒树构建列表且不光栅化。`src/shell/application.cpp` 负责字体
-  选择（`--font`/`--font-family`，唯一使用 fontconfig 的地方）。`layout` 通过 `shell` 提供的回调
-  消费文本度量，自身不依赖 `render`。
+  `toy/render/paint.h`，`src/paint/` 从盒树构建列表且不光栅化。字体选择位于
+  `src/shell/fonts.h`/`fonts.cpp`（`Fonts` pimpl：fontconfig 匹配、run 回退、缓存），它是唯一使用
+  fontconfig 的地方；`src/shell/application.cpp` 每次运行根据 `--font`/`--font-family` 或自动系统
+  默认构建一个 `Fonts`。`layout` 通过 `shell` 提供的回调消费文本度量，自身不依赖 `render`；
+  `src/layout/text_break.cpp` 拥有断行单元分词器（单词加 CJK 单元与标点禁则）。
 - `tests/<module>/` —— 每个主题一个可执行文件，注册到 CTest；新测试使用 header-only 的
   `tests/support/check.h`。提交的 fixtures：`tests/fixtures/nav_site/`（三页导航演示；它的
   “Unsupported page” 链接是故意的不支持 scheme 用例，任何测试都不会访问公网）、
   `tests/fixtures/img_site/`（图片流水线演示）、`tests/fixtures/font_site/`（真实字体 + 图片演示）、
-  `tests/fixtures/images/`（像素内容有文档的手工 PNG）、`tests/fixtures/fonts/`（自造最小 TTF，
-  度量/字体族有文档；测试从不使用已安装字体）、`tests/fixtures/https_site/`（shell 测试通过 TLS
-  提供的 HTML+PNG 页面）与 `tests/fixtures/tls/`（提交的仅测试用 CA、`localhost` 叶证书与不受信任叶
+  `tests/fixtures/images/`（像素内容有文档的手工 PNG）、`tests/fixtures/fonts/`（自造最小 TTF：
+  常规、粗体、斜体与一个小汉字 face，度量/字体族有文档；测试从不使用已安装字体）、
+  `tests/fixtures/cjk_site/`（从磁盘加载的中文页面，断言逐单元文本盒、换行与绘制像素）、
+  `tests/fixtures/https_site/`（shell 测试通过 TLS 提供的 HTML+PNG 页面）与 `tests/fixtures/tls/`（提交的仅测试用 CA、`localhost` 叶证书与不受信任叶
   证书/私钥；重新生成方法见其 README）。`tests/support/tls_server.h` 是 `net.tls`/`net.http`/
   `shell.https` 共用的 header-only 进程内 TLS loopback 服务器；没有任何测试访问公网。
 - `docs/` —— 架构、路线图、约定、团队流程、决策、依赖、待决问题（本文件是快照）。
@@ -154,9 +176,9 @@ M10 之后总路线图就全部变绿；剩余工作是已记录的 backlog（�
 
 ## 冻结契约（不要随意改动）
 
-- CLI 模式、标志与退出码：`0` 成功，`1` 运行时错误，`2` 用法错误。可选的位置参数页面 URL（`toybrowser [options] [url]`）只用于窗口模式和 `--screenshot`；最多一个 URL，不能与 `--dump-*` 模式组合，不给 URL 时保留 M1 占位页。M8b 新增 `--font PATH` 与 `--font-family NAME`：各自需要非空参数，二者互斥，且与 `--dump-body`/`--dump-dom`/`--dump-style` 组合是用法错误（退出码 2）；允许与窗口模式、`--screenshot`、`--dump-boxes` 组合。选中的字体无法加载/解析是运行时错误（退出码 1）；两个标志都不给时使用内置位图字体（M8b 之前的行为）。
-- Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层。
-- 布局语义通过布局测试与 M5/M8a 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，仅按 ASCII 空白换行。M8a replaced 元素：`LayoutOptions::replaced_sizes`（DOM 节点 id → 固有 CSS px）把行内元素变成原子行内级盒；CSS `width`/`height` px 覆盖固有尺寸，只指定一侧时保持固有宽高比，盒整体换行、抬高行高并顶部对齐；其 dump 行仍是 `<tag> inline x= y= width= height=`，没有子节点，`display:block` 的 replaced 元素不支持，replaced 盒的 margin/padding 被忽略。没有条目的页面保持原有几何逐字节不变。
+- CLI 模式、标志与退出码：`0` 成功，`1` 运行时错误，`2` 用法错误。可选的位置参数页面 URL（`toybrowser [options] [url]`）只用于窗口模式和 `--screenshot`；最多一个 URL，不能与 `--dump-*` 模式组合，不给 URL 时保留 M1 占位页。M8b 新增 `--font PATH` 与 `--font-family NAME`：各自需要非空参数，二者互斥，且与 `--dump-body`/`--dump-dom`/`--dump-style` 组合是用法错误（退出码 2）；允许与窗口模式、`--screenshot`、`--dump-boxes` 组合。选中的字体无法加载/解析是运行时错误（退出码 1）。两个标志都不给时浏览器使用自动系统字体（M10：计算出的 CSS 字体族/weight/style 经 fontconfig，带字符回退）；只有没有可用系统字体时才退化到内置位图字体。`--font PATH` 保持单一精确 face、无回退；`--font-family NAME` 强制首选字体族并保留字符回退，且自 M10 起也遵循计算出的 weight/style。
+- Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。style dump 自 M10 起在 `font-style=` 之后有 `font-family=` 字段：项之间用 ", " 连接，匹配 `[A-Za-z0-9_-]+` 的项原样输出，否则用双引号包裹并以反斜杠转义 `\` 与 `"`。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层。
+- 布局语义通过布局测试与 M5/M8a/M10 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，换行发生在空白处以及 M10 的 CJK 断行单元（每个 CJK 字符一个单元、简化标点禁则；拉丁词永不拆开、没有完整 UAX#14/词典断行）。自 M10 起 `MeasureText` 回调也收到文本的 `style::ComputedStyle`；`TextMetrics` 携带 `ascent_px`，每个文本盒携带 `baseline_offset_px` = 行最大 ascent（只是元数据，不参与 dump）。M8a replaced 元素：`LayoutOptions::replaced_sizes`（DOM 节点 id → 固有 CSS px）把行内元素变成原子行内级盒；CSS `width`/`height` px 覆盖固有尺寸，只指定一侧时保持固有宽高比，盒整体换行、抬高行高并顶部对齐；其 dump 行仍是 `<tag> inline x= y= width= height=`，没有子节点，`display:block` 的 replaced 元素不支持，replaced 盒的 margin/padding 被忽略。没有条目的页面保持原有几何逐字节不变。
 - 绘制语义通过 M6/M7 测试冻结：显示列表命令使用整数设备像素（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）；填充对不透明目标使用 SrcOver 公式 `(src * a + dst * (255 - a) + 127) / 255`；初始裁剪是整个 surface，光栅化工作量受裁剪限制；`shell` 把 canvas 填白；绘制顺序是盒树前序（先背景、再图片、再子节点/文本）；文本使用内置 8x16 ASCII 字形，最近邻缩放、无抗锯齿、非 ASCII 用 `?`、文本像素不透明。
   M7 绘制：非空页面恰好被一个 `PushClip(0, 0, viewport)`/`PopClip` 对包裹，每条命令的 y 按
   `-scroll_y`（整数设备像素，x 不变）平移；没有图片的页面在滚动 0 必须与 M6/M7 逐字节一致。
@@ -164,19 +186,33 @@ M10 之后总路线图就全部变绿；剩余工作是已记录的 backlog（�
   命令持有 `shared_ptr<const render::Image>`；目标像素 (dx, dy) 用整数向下取整采样源
   `((dx - x) * image.width / width, (dy - y) * image.height / height)`（最近邻，无插值/抗锯齿），
   用同一 SrcOver 公式混合（alpha 0 无操作，alpha 255 写 `0xFF000000 | rgb`，结果不透明）；空图片映射
-  精确复现 M8a 之前的命令列表。M8b real-font 文本：会话选择字体时，每个文本盒变成
-  `DrawTextWithFont` 命令（x = pen 原点，y = 设备像素基线，基线 =
-  `round(box.y) - scroll_y + round(font->AscentPx(size))`），字体按共享引用保留，字形由 harfbuzz
-  整形、freetype 光栅化为 8-bit 覆盖率，按冻结的逐字形整数公式放置（26.6 pen 四舍五入到设备像素、
-  远离零，再加 freetype bitmap_left/top），用同一 SrcOver 公式以覆盖率为 alpha 混合（结果不透明），
-  裁剪到当前 clip，有效字号钳制到 `kMaxRealFontSizePx`（4096 px）。没有选择字体时精确输出冻结的
-  位图命令列表（`DrawText`、cell 顶部 y、不透明无抗锯齿像素）。
-- Real-font 契约（M8b）：`render::Font` 加载后不可变（pimpl，公开头文件不出现 freetype/harfbuzz
+  精确复现 M8a 之前的命令列表。M10 real-font 文本：paint 接收 `paint::FontRunsProvider`；对每个
+  文本盒请求有序、非空、精确拼接成盒文本的 run。每个 run 变成一条 `DrawTextWithFont` 命令，x =
+  `round(pen_x)`（pen 从 box.x 开始，按 `font->MeasureTextWidth(run.text, style.font_size_px)` CSS px
+  推进），y = `round(box.y) - scroll_y + round(box.baseline_offset_px)`；字体按共享引用保留，字形由
+  harfbuzz 整形、freetype 光栅化为 8-bit 覆盖率，按冻结的逐字形整数公式放置（26.6 pen 四舍五入到
+  设备像素、远离零，再加 freetype bitmap_left/top），用同一 SrcOver 公式以覆盖率为 alpha 混合
+  （结果不透明），裁剪到当前 clip，有效字号钳制到 `kMaxRealFontSizePx`（4096 px）。provider 为
+  null/空，或某文本盒返回空 run 时，精确输出 M10 之前的冻结位图命令（`DrawText`、cell 顶部 y、
+  不透明无抗锯齿像素），必须逐字节复现。
+- 字体引擎契约（M8b）：`render::Font` 加载后不可变（pimpl，公开头文件不出现 freetype/harfbuzz
   类型），加载失败是普通错误，只支持 face 0，度量是设计单位按 `size / unitsPerEm` 缩放，advance
-  宽度是 harfbuzz 整形后的 26.6 求和。shell 每次运行解析一个字体（`--font` 文件或 fontconfig 对
-  `--font-family` 的最佳匹配，未知字体族回退），并共享给布局度量与绘制；整个会话一个 face（暂不
-  支持按元素的 CSS 字体选择）。fontconfig 是 shell 独有的依赖；freetype/harfbuzz 是 `render`
-  私有实现。
+  宽度是 harfbuzz 整形后的 26.6 求和。
+- 字体选择契约（M10）：`toy/shell/fonts.h` 的 `Fonts`（pimpl）每会话创建一次，模式为
+  `SystemDefault`、`FromFile` 或 `FromFamily`。`SystemDefault` 把计算出的
+  `font_family`（初始 `serif`）/`font_weight`/`font_style` 加页面语言提示（根 `<html lang>`）交给
+  fontconfig，按码点字符覆盖把一个文本盒的 UTF-8 切成 run（第一个字符集覆盖它的候选；没有候选覆盖
+  的码点用主 face 的 `.notdef`），按（字体族列表、weight、slant、language）缓存候选列表、按文件缓存
+  face，并由布局度量适配器与 paint run provider 共享，因此度量与绘制始终一致。`FromFile` 是单一
+  精确 face（无回退）；`FromFamily` 强制首选字体族并保留字符回退，不可用时返回可读错误。没有可用
+  系统字体（fontconfig 初始化失败、无候选、无可加载文件）时 `SystemDefault` 进入位图模式：位图
+  度量与空 run，页面仍能加载。fontconfig 仍是 shell 独有；freetype/harfbuzz 仍是 `render` 私有实现；
+  默认浏览器行为与自动选择都是 M10 才引入的。
+- 字体确定性契约（M10）：测试从不使用已安装字体或机器字体配置。通过 CTest `ENVIRONMENT` 把
+  `FONTCONFIG_FILE` 指向两个生成配置之一：fixture 配置（`<dir>` = `tests/fixtures/fonts/`，通用族
+  映射到 `Toy Test Font`）用于自动选择/回退测试；空配置（无字体目录）强制位图路径，必须逐字节复现
+  所有 M10 之前的 dump/截图。`Fonts` 缓存保证固定 fontconfig 配置与字体集下 run/度量确定；不要添加
+  代码内的信任/覆盖后门。
 - 图片解码契约（`render::DecodePng`）：只支持 PNG，经由接口后的已批准 libpng 依赖，输出直通 alpha 的
   ARGB `render::Image`；接受尺寸为每边最多 8192 px 且总计最多 16,777,216 像素（包含式上界），在分配前
   拒绝；失败返回 false 并给出可读错误、`*out` 不变；不抛异常；公开头文件中不出现 libpng 类型。
@@ -207,9 +243,9 @@ M10 之后总路线图就全部变绿；剩余工作是已记录的 backlog（�
   成功加载把滚动偏移重置为 0，只改变 fragment 的引用是 no-op，标题是第一个 `<title>` 文本
   （折叠空白，没有时回退到序列化最终 URL），只有 `http`/`https`/`file` 引用会导航。M8a 保持公开方法完全
   不变，但用前向声明、out-of-line 析构函数与 `std::unique_ptr` 隐藏页面（DOM/样式/盒树/图片），
-  因此头文件不再暴露页面数据，`Browser` 不可拷贝。M8b 只增加可选的 `font` 构造函数参数
-  （`Browser(w, h, std::shared_ptr<const render::Font> = nullptr)`）；null 表示位图路径，加载的
-  字体会用于该会话的每次加载/重新布局/绘制。
+  因此头文件不再暴露页面数据，`Browser` 不可拷贝。M10 起可选的构造函数参数是
+  `Browser(w, h, std::shared_ptr<const Fonts> = nullptr)`；null 表示位图路径（M10 之前的测试行为），
+  `Fonts` 会用于该会话的每次加载/重新布局/绘制。
 - 平台输入契约（`toy/platform/window.h`）：`kMouseDown` 是窗口设备像素中的主键点击，`kMouseWheel`
   携带 `wheel_delta`（正值表示朝文档末尾滚动），`kKeyDown` 携带归一化的 `Key` 与 alt/ctrl/shift；
   `SetTitle` 尽力而为，不会让窗口失败。
@@ -296,12 +332,15 @@ M10 之后总路线图就全部变绿；剩余工作是已记录的 backlog（�
   图片不会让 dump 失败。
 - 图片加载没有缓存也没有懒加载：每个 `<img>` 出现都会被抓取，即使它被 `display:none` 隐藏或远在
   视口之外。这是有文档的 M8a MVP 限制，不是 bug；加入缓存/懒加载需要契约变更。
-- M8b 增加了硬性的逐字节兼容门禁：不给 `--font`/`--font-family` 时，所有 M8b 之前的 dump 与截图
-  必须与 M8a 基线 `cmp` 一致；real-font 路径完全 opt-in。任何触碰绘制/字体的改动后都要用上一提交的
+- M10 通过位图路径保留硬性逐字节兼容门禁：把 `FONTCONFIG_FILE` 指向生成的空配置（无字体）时，
+  所有 M10 之前的 dump 与截图必须与 M9 基线 `cmp` 一致；唯一有意的差异是 style dump 新增的
+  `font-family=` 字段，门禁在比较前会把它规范化掉。任何触碰绘制/字体/布局的改动后都要用上一提交的
   `git worktree` 基线重跑。
-- real-font 测试必须使用提交的自造 fixture `tests/fixtures/fonts/toy_test.ttf`，从不使用已安装字体；
-  fontconfig CLI 测试把 `FONTCONFIG_FILE` 指向生成配置，其唯一 `<dir>` 是 fixture 字体目录。已安装
-  字体只用于手工演示（任意 fontconfig 字体族都可用，例如 `sans-serif`）。
+- 字体测试必须使用提交的自造 fixture（`tests/fixtures/fonts/`：常规、粗体、斜体、汉字），从不使用
+  已安装字体。自动选择测试把 `FONTCONFIG_FILE` 指向生成的 fixture 配置（只有 fixture 字体，通用族
+  映射到 `Toy Test Font`）；位图兼容测试指向空配置。已安装字体只用于手工演示。
+  `tests/fixtures/fonts/README.md` 记录了确切的配置配方（含 fontconfig 把 `sans-serif` 规范化为
+  `sans` 这一点）。
 - 不要在测试里断言精确的 freetype 覆盖率字节：抗锯齿像素依赖库版本。`render.paint` 断言着墨区域、
   AA 存在性、裁剪边界、no-op 与确定性；`shell.fonts` 断言页面区域与冻结的布局几何。GCC 与 Clang
   在同一机器/库版本下仍必须产出逐字节相同的 PPM。
@@ -314,9 +353,10 @@ M10 之后总路线图就全部变绿；剩余工作是已记录的 backlog（�
 - shell 的字体 fixture 几何（`shell.fonts*` 的 dump 正则）硬编码自
   `toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x200 --dump-boxes`；改 fixture、
   其度量或字体流水线时要在同一改动里更新这些常量，和 M7/M8a fixture 几何一样。
-- `--font-family` 使用 fontconfig 的正常语义：未知字体族返回最佳匹配而不报错，使用匹配文件的
-  face 0，忽略 TTC/face index。M8b MVP 每会话只支持一个字体；按元素的 CSS
-  `font-family`/weight/style 是后续工作。
+- `--font-family` 为所有文本强制首选字体族（仍保留字符回退），且自 M10 起也遵循计算出的
+  `font-weight`/`font-style`，因此 UA 粗体 h1 在 `--font-family` 下也会使用粗体 face（M8b 的期望
+  已随之调整）。未知字体族经 fontconfig 回退而不报错；使用匹配文件的 face 0，忽略 TTC/face index。
+  `--font PATH` 仍是单一精确 face、无回退。
 - `src/render/CMakeLists.txt` 现在 `find_package` freetype（模块）与 harfbuzz（CONFIG，目标
   `harfbuzz::harfbuzz`）；`src/shell/CMakeLists.txt` 查找 fontconfig（目标
   `Fontconfig::Fontconfig`）。全部保持 PRIVATE，不硬编码版本/路径。
@@ -324,3 +364,27 @@ M10 之后总路线图就全部变绿；剩余工作是已记录的 backlog（�
   `net.tls`/`net.http`/`shell.https` 测试可执行文件也链接 OpenSSL，因为它们要编译进程内测试服务器；
   它们传入的 fixture 路径来自 `CMAKE_CURRENT_SOURCE_DIR`（由 CMake 生成，绝不硬编码）。公开头文件保持
   不含 OpenSSL，也不要添加版本、路径或 vendoring。
+- M10 自动字体选择依赖首次使用时创建的进程级 fontconfig 状态：`FONTCONFIG_FILE`/`FONTCONFIG_PATH`
+  在 `Fonts` 第一次解析样式时被读取，因此测试必须在进程启动前通过 CTest `ENVIRONMENT` 属性设置它。
+  不要在进程中途切换字体配置；不要添加代码内的信任/覆盖后门。
+- `Fonts` 按（字体族列表、weight、slant、language）缓存候选 face、按文件路径缓存已加载 face，并被
+  布局度量与绘制共享：绝不要跨线程共享一个 `Fonts`（MVP 单线程），也不要为同一页面构建第二个选择，
+  否则度量与绘制可能不一致。`--font`/`--font-family` 选择失败是运行时错误（退出码 1）；自动系统
+  字体失败退化到位图路径，而不是让页面加载失败。
+- layout 的文本分词器（`src/layout/text_break.cpp`）是简化的断行模型：CJK 码点是独立断行单元，
+  收尾/起始标点按小规则粘连；没有完整 UAX#14、没有泰语/高棉语/老挝语词典断行、没有连字符断行，
+  不同文本节点中的标点无法与前一个单元粘连。拉丁词永不拆开。扩展它需要测试与 roadmap/文档更新。
+- 一个 CJK 断行单元对应一个 kText 盒：中文页面会产生很多盒（每字符一个），对 MVP 没问题（受 16 MiB
+  body 上限约束），但不要把盒数当成词数写进测试或文档。CJK 页面的盒 dump 天然很大。
+- CJK fixtures（`tests/fixtures/cjk_site/`、`layout.cjk_line_break`）冻结逐单元几何与绘制像素；
+  `tests/fixtures/fonts/toy_cjk.ttf` 只含合成的方块汉字字形（不是真实字形设计），M10 fixture 字体的
+  斜体 face 只有斜体元数据、轮廓未做倾斜。
+- 使用系统字体（不传字体标志）时，浏览器文本输出按设计依赖机器：除非固定 `FONTCONFIG_FILE`，dump
+  与截图不能跨机器复现。这对真实浏览器是预期的；测试必须始终固定它。
+- `paint::BuildDisplayList` 接收 `FontRunsProvider`；空/null provider 仍必须产出冻结的 M10 之前位图
+  命令列表（测试会断言）。真实字体 run 必须精确拼成盒文本，并按冻结的 pen/取整规则放置，否则布局
+  度量与绘制会不一致。
+- fontconfig 是既有已批准依赖；M10 没有新增依赖。它只被 `src/shell/fonts.cpp` 使用；保持
+  `fontconfig/*.h` 不出现在任何公开头文件中，也不要添加版本、路径或 vendoring。fixture fontconfig
+  配置生成在构建目录（由 `tests/shell/CMakeLists.txt` 生成）；提交的 fixture 字体是测试唯一可用的
+  字体文件。

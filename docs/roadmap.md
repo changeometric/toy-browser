@@ -3,9 +3,9 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M9 are done (M9 = most-basic HTTPS). M10 (HTTP proxy) is the next planned
-milestone; the JavaScript subset is deferred.** For a snapshot and takeover guide, read
-[handoff.md](handoff.md).
+**Current status: M0–M10 are done (M10 = automatic font selection and Chinese-capable line
+breaking). M11 (HTTP proxy) is the next planned milestone but was deprioritized by the user; the
+JavaScript subset is deferred.** For a snapshot and takeover guide, read [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
 
@@ -259,16 +259,66 @@ milestone; the JavaScript subset is deferred.** For a snapshot and takeover guid
   certificate, hostname and timeout failures are explicit errors; every pre-M9 `http`/`file` dump
   and screenshot is byte-identical to the M8b baseline and GCC/Clang PPMs are identical; manual
   public-site checks (raw body, DOM dump, screenshot) work. Real-site checking is manual and
-  network-dependent; restricted networks still need the M10 proxy.
+  network-dependent; restricted networks still need the M11 proxy.
 - Known M9 limits: HTTP/1.1 only (no ALPN/HTTP/2), no compression (no `Accept-Encoding` is sent), no
   cookies/sessions, HSTS, mixed-content blocking, client certificates, TLS session reuse or HTTP
-  caching; no proxy (M10); IPv6 literal https URLs are still unsupported by the URL parser; the
+  caching; no proxy (M11); IPv6 literal https URLs are still unsupported by the URL parser; the
   trust policy is exactly OpenSSL's default store plus the standard env overrides (no pinning, no
   insecure mode); the TLS context is created lazily once per process; real-world rendering stays
   limited by the existing HTML/CSS subset; public-network details are never committed and real-site
   checks stay manual.
 
-## M10 — HTTP proxy (planned after M9)
+## M10 — Automatic font selection ✅ (done)
+
+- Goal met: with no font flags, text is rendered with fonts the browser picks itself, like a normal
+  browser. The computed CSS `font-family` list, `font-weight` and `font-style` are matched through
+  the approved fontconfig library; the initial family is `serif`; a text box is split into runs by
+  character coverage so scripts missing from the preferred face (Han text on a Latin page, or a
+  Latin word on a Han-heavy page) fall back to an installed font whose character set covers them;
+  the page language (`<html lang>`) is passed to fontconfig as a language hint.
+- `style`: `font-family` is a parsed, inherited computed property (comma lists, quoted names,
+  generic families normalized); the UA sheet adds `b/strong` bold, `i/em` italic and
+  `code/kbd/samp/pre` monospace; `--dump-style` gains a `font-family=` field.
+- Layout and paint share one per-session `Fonts` object, so the font chosen for a text box is the
+  same for measurement and painting: `TextMetrics` has `ascent_px`; a measure callback receives
+  the text's computed style; text boxes carry `baseline_offset_px` (the line's ascent, so mixed
+  fonts on one line share a baseline); paint takes a `FontRunsProvider` returning per-run real
+  fonts, or nothing for the built-in bitmap path.
+- Chinese/readable-text support: layout now segments text into break units: ASCII/U+3000
+  whitespace separates words as before, non-CJK text stays word-grouped, CJK characters become
+  individual break opportunities (Han, Kana, Hangul, Bopomofo, CJK punctuation, fullwidth forms),
+  with simplified prohibitions (closing punctuation never starts a line, opening punctuation never
+  ends one). Chinese paragraphs without spaces therefore wrap and are readable. Invalid UTF-8 is
+  lenient and never crashes.
+- `--font PATH` (one exact face, no fallback) and `--font-family NAME` (preferred family that now
+  also follows the computed weight/style, with character fallback) remain explicit overrides. With
+  no usable system font, or a fontconfig failure, the browser degrades to the built-in bitmap
+  font; a page load never fails because fonts are missing.
+- Tests stay deterministic: committed self-authored fixture fonts (`tests/fixtures/fonts/`: the
+  M8b regular face plus new bold and italic faces and a tiny Han face, all documented) and
+  generated test fontconfig configs. The empty fontconfig config reproduces every pre-M10 bitmap
+  golden byte for byte; the fixture config exercises automatic selection (default serif, generic
+  families, weight/style, unknown-family fallback) and the Han fallback, `shell.cjk_*` serve a
+  committed Chinese page and assert its per-unit boxes, wrapping and painted ink, and
+  `layout.cjk_line_break` covers the tokenizer and punctuation rules.
+- Acceptance reached: all pre-M10 tests plus the new style/layout/paint/shell tests pass under GCC
+  and Clang with warnings as errors (66 tests); a page with no font flags renders English with
+  system serif/bold/italic fonts and Chinese with a Han fallback face plus wrapping; the bitmap
+  path (empty fontconfig) is byte-identical to the pre-M10 baseline and GCC/Clang PPMs are
+  identical on both paths; manual checks render Latin and Chinese pages with system fonts.
+- Known limits: no `@font-face`/webfont downloads (only installed fonts); no cross-text-node
+  punctuation gluing (`中<b>文</b>。` may start a line with `。`); one text box per CJK break unit
+  (fine for the MVP, scales with the 16 MiB body cap); simplified UAX#14 subset (no full line
+  breaking, no dictionary breaking for Thai/Khmer/Lao, no hyphenation); no bidi/RTL layout
+  (Arabic/Hebrew render in logical order, not visually reordered) and no complex-script shaping
+  beyond harfbuzz's default per-run shaping; other scripts are best-effort through generic
+  fontconfig character coverage (English and Chinese are the explicitly supported languages);
+  no synthetic bold/italic (a missing bold/italic face falls back to regular); TTC face 0 only;
+  no `font-stretch`/`font-variant`/`font-feature-settings`; language comes only from the root
+  `<html lang>`; output with system fonts is machine-dependent by design (tests pin
+  `FONTCONFIG_FILE`).
+
+## M11 — HTTP proxy (planned; deferred by the user after M9)
 
 - Fetch `http://` through an HTTP proxy with absolute-form request targets, and `https://` through
   a proxy `CONNECT` tunnel followed by the TLS handshake.
@@ -283,7 +333,7 @@ milestone; the JavaScript subset is deferred.** For a snapshot and takeover guid
   large optional milestone (lexer, parser, small interpreter, DOM bindings and event handlers);
   do not start it without an explicit user priority decision.
 
-## M11+ — Opportunistic
+## M12+ — Opportunistic
 
 More CSS (flex, tables), forms, better text handling, performance, conformance suites. Each item
 starts only after the previous slice is clean and the user agrees on priority.
@@ -292,9 +342,10 @@ starts only after the previous slice is clean and the user agrees on priority.
 
 - **More image formats and background images** — JPEG/GIF/WebP, `background-image`,
   `srcset`, an image cache and lazy loading; scheduled after M8a on demand, blocking no milestone.
-- **CSS font selection and richer text** — map CSS `font-family`/`font-weight`/`font-style` to the
-  font stack, add fallback chains, `@font-face`/font downloads and richer shaping; the M8b CLI
-  selection is deliberately one face per session.
+- **Web fonts and richer text** — `@font-face`/font downloads, synthetic bold/italic, variable
+  font instances, bidi/RTL and full Unicode line breaking (UAX#14), dictionary breaking for Thai/
+  Khmer/Lao and complex-script refinements; M10 deliberately covers English and Chinese first,
+  other scripts are best-effort through fontconfig character coverage.
 - **Test helper consolidation** — the per-file `Check`/`g_failures` test harness is still
   duplicated in the older test executables. The header-only `tests/support/check.h` (interface
   target `toy_test_support`) was introduced in M5 and is used by the new tests; migrate the older

@@ -6,6 +6,7 @@ add_library(toy_layout STATIC
   dump.cpp
   geometry.cpp
   layout.cpp
+  text_break.cpp
 )
 
 target_include_directories(toy_layout PUBLIC include)

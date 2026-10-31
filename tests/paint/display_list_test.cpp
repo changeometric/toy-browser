@@ -2,13 +2,17 @@
 // display list of background fills, image draws and text draws, wrapped in a
 // viewport clip and translated by the vertical scroll offset.
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "support/check.h"
 #include "toy/dom/node.h"
@@ -30,6 +34,8 @@ using toy::layout::ReplacedSize;
 using toy::layout::ReplacedSizes;
 using toy::layout::TextMetrics;
 using toy::paint::BuildDisplayList;
+using toy::paint::FontRun;
+using toy::paint::FontRunsProvider;
 using toy::paint::ImageMap;
 using toy::paint::Viewport;
 using toy::render::Command;
@@ -41,43 +47,149 @@ using toy::render::Image;
 using toy::render::Surface;
 
 // The real built-in bitmap-font metrics, adapted exactly like shell does for
-// layout. Paint never depends on them; the test pipeline needs a measure
-// callback to lay the page out.
-TextMetrics MeasureWithBitmapFont(std::string_view text_utf8, float font_size_px) {
-  return TextMetrics{toy::render::MeasureTextWidth(text_utf8, font_size_px),
-                     toy::render::LineHeightPx(font_size_px)};
+// layout when no real font is selected. Paint never depends on them; the test
+// pipeline needs a measure callback to lay the page out.
+TextMetrics MeasureWithBitmapFont(std::string_view text_utf8,
+                                  const toy::style::ComputedStyle& style) {
+  const float font_size_px = style.font_size_px > 0.0f ? style.font_size_px : 0.0f;
+  const float line_height_px = toy::render::LineHeightPx(font_size_px);
+  return TextMetrics{toy::render::MeasureTextWidth(text_utf8, font_size_px), line_height_px,
+                     line_height_px};
 }
 
-// Full pipeline for a fixture page with caller-supplied replaced sizes, images
-// and an optional real font. The layout viewport is the viewport width, exactly
-// like shell does it; layout always uses the bitmap measurer, so the box geometry
-// (and therefore the expected paint geometry) does not depend on the font.
-DisplayList BuildPageForDocument(const Document& document, const ReplacedSizes* replaced_sizes,
-                                 const ImageMap& images, const std::shared_ptr<const Font>& font,
-                                 int viewport_width, int viewport_height, int scroll_y) {
+// Layout metrics of one face: the same values the shell's Fonts object reports
+// for a FromFile selection, so a real-font paint test lays the page out with the
+// same metrics it paints with.
+TextMetrics MeasureWithFont(const std::shared_ptr<const Font>& font, std::string_view text_utf8,
+                            const toy::style::ComputedStyle& style) {
+  const float font_size_px = style.font_size_px > 0.0f ? style.font_size_px : 0.0f;
+  return TextMetrics{font->MeasureTextWidth(text_utf8, font_size_px),
+                     font->LineHeightPx(font_size_px), font->AscentPx(font_size_px)};
+}
+
+// Full pipeline for a fixture page with caller-supplied replaced sizes, images,
+// a layout measurer and a paint runs provider. The layout viewport is the
+// viewport width, exactly like shell does it.
+DisplayList BuildPageWithMeasure(const Document& document, const ReplacedSizes* replaced_sizes,
+                                 const ImageMap& images, const toy::layout::MeasureText& measure,
+                                 const FontRunsProvider& font_runs, int viewport_width,
+                                 int viewport_height, int scroll_y) {
   const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
   LayoutOptions options;
   options.viewport_width_px = static_cast<float>(viewport_width);
   options.replaced_sizes = replaced_sizes;
-  const BoxTree boxes = LayoutDocument(document, styles, options, MeasureWithBitmapFont);
+  const BoxTree boxes = LayoutDocument(document, styles, options, measure);
   const Viewport viewport{viewport_width, viewport_height, scroll_y};
-  return BuildDisplayList(document, styles, boxes, viewport, images, font);
+  return BuildDisplayList(document, styles, boxes, viewport, images, font_runs);
 }
 
 // The M7 path: no replaced elements, an empty image map and no real font.
 DisplayList BuildPage(const std::string& html, int viewport_width = 800, int viewport_height = 600,
                       int scroll_y = 0) {
   const ImageMap images;
-  return BuildPageForDocument(toy::dom::ParseDocument(html), nullptr, images, nullptr,
-                              viewport_width, viewport_height, scroll_y);
+  return BuildPageWithMeasure(toy::dom::ParseDocument(html), nullptr, images, MeasureWithBitmapFont,
+                              FontRunsProvider{}, viewport_width, viewport_height, scroll_y);
 }
 
-// The same pipeline with a real font selected (the M8b path).
+// A runs provider that paints the whole text box with one selected face (the
+// shape of a single-font selection). Empty text keeps the bitmap path.
+FontRunsProvider SingleFontProvider(const std::shared_ptr<const Font>& font) {
+  return [font](const toy::style::ComputedStyle&, std::string_view text_utf8) {
+    if (text_utf8.empty()) {
+      return std::vector<FontRun>{};
+    }
+    return std::vector<FontRun>{FontRun{font, text_utf8}};
+  };
+}
+
+// The same pipeline with a real font selected (the M8b-equivalent path): layout
+// measures with the font and paint receives one run per text box.
 DisplayList BuildFontPage(const std::string& html, const std::shared_ptr<const Font>& font,
                           int viewport_width = 800, int viewport_height = 600, int scroll_y = 0) {
   const ImageMap images;
-  return BuildPageForDocument(toy::dom::ParseDocument(html), nullptr, images, font, viewport_width,
-                              viewport_height, scroll_y);
+  const toy::layout::MeasureText measure = [font](std::string_view text_utf8,
+                                                  const toy::style::ComputedStyle& style) {
+    return MeasureWithFont(font, text_utf8, style);
+  };
+  return BuildPageWithMeasure(toy::dom::ParseDocument(html), nullptr, images, measure,
+                              SingleFontProvider(font), viewport_width, viewport_height, scroll_y);
+}
+
+// A two-face test selection: every non-ASCII code point (the Han fixture text)
+// uses `han`, ASCII uses `latin`. The same splitting drives layout measurement
+// and the paint provider, so the two agree exactly like the shell's Fonts does.
+constexpr int kLatinFace = 0;
+constexpr int kHanFace = 1;
+
+// The fixture Han code points are three-byte UTF-8 sequences and the ASCII text
+// is single-byte, which is all this test splitter needs.
+std::vector<FontRun> SplitTestRuns(const std::shared_ptr<const Font>& latin,
+                                   const std::shared_ptr<const Font>& han,
+                                   std::string_view text_utf8) {
+  std::vector<FontRun> runs;
+  std::size_t offset = 0;
+  std::size_t run_start = 0;
+  int run_face = -1;
+  while (offset < text_utf8.size()) {
+    const std::size_t start = offset;
+    const bool han_sequence = (static_cast<unsigned char>(text_utf8[offset]) & 0x80U) != 0U;
+    offset = std::min(text_utf8.size(), offset + (han_sequence ? 3U : 1U));
+    const int face = han_sequence ? kHanFace : kLatinFace;
+    if (run_face < 0) {
+      run_face = face;
+      run_start = start;
+      continue;
+    }
+    if (face == run_face) {
+      continue;
+    }
+    runs.push_back(FontRun{run_face == kLatinFace ? latin : han,
+                           text_utf8.substr(run_start, start - run_start)});
+    run_face = face;
+    run_start = start;
+  }
+  if (run_face >= 0) {
+    runs.push_back(FontRun{run_face == kLatinFace ? latin : han, text_utf8.substr(run_start)});
+  }
+  return runs;
+}
+
+TextMetrics MeasureWithTwoFonts(const std::shared_ptr<const Font>& latin,
+                                const std::shared_ptr<const Font>& han, std::string_view text_utf8,
+                                const toy::style::ComputedStyle& style) {
+  const float font_size_px = style.font_size_px > 0.0f ? style.font_size_px : 0.0f;
+  if (text_utf8.empty()) {
+    return TextMetrics{0.0f, latin->LineHeightPx(font_size_px), latin->AscentPx(font_size_px)};
+  }
+  float advance_px = 0.0f;
+  float line_height_px = 0.0f;
+  float ascent_px = 0.0f;
+  for (const FontRun& run : SplitTestRuns(latin, han, text_utf8)) {
+    advance_px += run.font->MeasureTextWidth(run.text, font_size_px);
+    line_height_px = std::max(line_height_px, run.font->LineHeightPx(font_size_px));
+    ascent_px = std::max(ascent_px, run.font->AscentPx(font_size_px));
+  }
+  return TextMetrics{advance_px, line_height_px, ascent_px};
+}
+
+FontRunsProvider TwoFontProvider(const std::shared_ptr<const Font>& latin,
+                                 const std::shared_ptr<const Font>& han) {
+  return [latin, han](const toy::style::ComputedStyle&, std::string_view text_utf8) {
+    return SplitTestRuns(latin, han, text_utf8);
+  };
+}
+
+DisplayList BuildTwoFontPage(const std::string& html, const std::shared_ptr<const Font>& latin,
+                             const std::shared_ptr<const Font>& han, int viewport_width = 800,
+                             int viewport_height = 600, int scroll_y = 0) {
+  const ImageMap images;
+  const toy::layout::MeasureText measure = [latin, han](std::string_view text_utf8,
+                                                        const toy::style::ComputedStyle& style) {
+    return MeasureWithTwoFonts(latin, han, text_utf8, style);
+  };
+  return BuildPageWithMeasure(toy::dom::ParseDocument(html), nullptr, images, measure,
+                              TwoFontProvider(latin, han), viewport_width, viewport_height,
+                              scroll_y);
 }
 
 // The DOM id of the first <img> element: layout and paint both key images by it.
@@ -103,8 +215,7 @@ std::shared_ptr<const Image> MakeImage(int width, int height, std::uint32_t argb
 }
 
 // The pipeline for a page whose first <img> is a replaced box with `intrinsic`
-// size and whose node id maps to `image`. `font` selects real-font text or, when
-// null, the frozen bitmap path.
+// size and whose node id maps to `image`.
 DisplayList BuildFontImagePage(const std::string& html, const ReplacedSize& intrinsic,
                                const std::shared_ptr<const Image>& image,
                                const std::shared_ptr<const Font>& font, int viewport_width = 800,
@@ -119,8 +230,16 @@ DisplayList BuildFontImagePage(const std::string& html, const ReplacedSize& intr
   if (image_node != toy::dom::kInvalidNode) {
     images.emplace(image_node, image);
   }
-  return BuildPageForDocument(document, &sizes, images, font, viewport_width, viewport_height,
-                              scroll_y);
+  if (!font) {
+    return BuildPageWithMeasure(document, &sizes, images, MeasureWithBitmapFont, FontRunsProvider{},
+                                viewport_width, viewport_height, scroll_y);
+  }
+  const toy::layout::MeasureText measure = [font](std::string_view text_utf8,
+                                                  const toy::style::ComputedStyle& style) {
+    return MeasureWithFont(font, text_utf8, style);
+  };
+  return BuildPageWithMeasure(document, &sizes, images, measure, SingleFontProvider(font),
+                              viewport_width, viewport_height, scroll_y);
 }
 
 // The same pipeline painted with the built-in bitmap font.
@@ -143,8 +262,8 @@ DisplayList BuildReplacedPageWithoutImages(const std::string& html, const Replac
     sizes.emplace(image_node, intrinsic);
   }
   const ImageMap images;
-  return BuildPageForDocument(document, &sizes, images, nullptr, viewport_width, viewport_height,
-                              scroll_y);
+  return BuildPageWithMeasure(document, &sizes, images, MeasureWithBitmapFont, FontRunsProvider{},
+                              viewport_width, viewport_height, scroll_y);
 }
 
 void ExpectSize(const DisplayList& list, std::size_t expected, const char* description) {
@@ -339,7 +458,7 @@ void TestEmptyBoxTree() {
   const BoxTree boxes;
   const ImageMap images;
   const DisplayList list =
-      BuildDisplayList(document, styles, boxes, Viewport{800, 600, 0}, images, nullptr);
+      BuildDisplayList(document, styles, boxes, Viewport{800, 600, 0}, images, FontRunsProvider{});
   ExpectSize(list, 0, "an empty box tree yields an empty display list");
 }
 
@@ -618,7 +737,8 @@ void TestMissingNodeIdPaintsNoImage() {
       break;
     }
   }
-  const DisplayList list = BuildPageForDocument(document, &sizes, images, nullptr, 800, 600, 0);
+  const DisplayList list = BuildPageWithMeasure(document, &sizes, images, MeasureWithBitmapFont,
+                                                FontRunsProvider{}, 800, 600, 0);
   ExpectSize(list, 2, "an image keyed by the wrong node id paints no DrawImage");
   ExpectViewportClip(list, 800, 600, "the page with an unmatched image key keeps the clip pair");
 }
@@ -786,6 +906,111 @@ void TestRealFontDeterministic(const std::shared_ptr<const Font>& font) {
                   "selecting a real font changes only the text command's font and baseline");
 }
 
+// The runs provider is optional: a null provider and an explicitly empty
+// provider must both reproduce the frozen pre-M10 bitmap command list exactly.
+void TestEmptyProviderMatchesNullProvider() {
+  const std::string html = "<div style=\"background-color: #102030\"><p>Hi</p><p>ABC</p></div>";
+  const Document document = toy::dom::ParseDocument(html);
+  const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
+  LayoutOptions options;
+  options.viewport_width_px = 800.0f;
+  const BoxTree boxes = LayoutDocument(document, styles, options, MeasureWithBitmapFont);
+  const ImageMap images;
+  const Viewport viewport{800, 600, 0};
+  const DisplayList empty_provider =
+      BuildDisplayList(document, styles, boxes, viewport, images, FontRunsProvider{});
+  const DisplayList null_provider =
+      BuildDisplayList(document, styles, boxes, viewport, images, nullptr);
+  bool identical = empty_provider.size() == null_provider.size();
+  for (std::size_t index = 0; identical && index < empty_provider.size(); ++index) {
+    identical = SameCommand(empty_provider.commands()[index], null_provider.commands()[index]);
+  }
+  if (!identical) {
+    std::fprintf(stderr,
+                 "paint display list test: the empty provider differs from the null provider\n");
+  }
+  toy_test::Check(identical, "an empty provider reproduces the null-provider bitmap list");
+  toy_test::Check(NoCommandHasFont(empty_provider), "the empty-provider list has no real font");
+}
+
+// A text box whose characters resolve to different faces becomes one
+// DrawTextWithFont per run, in order; the x pen starts at box.x and advances by
+// each run's shaped width, so the runs stay contiguous; all runs share the
+// box's baseline (layout computed the line ascent).
+void TestMultiRunPenAdvance(const std::shared_ptr<const Font>& latin,
+                            const std::shared_ptr<const Font>& han) {
+  const std::string html = "<p>A\u4e2dB\u6587</p>";
+  const DisplayList list = BuildTwoFontPage(html, latin, han);
+  ExpectSize(list, 6, "four mixed-script runs yield four text commands between the clip pair");
+  ExpectViewportClip(list, 800, 600, "the runs page keeps the viewport clip pair");
+  const int baseline_y = 24 + static_cast<int>(std::lround(latin->AscentPx(16.0f)));
+  // The pen advances by the exact shaped widths; each command x is lround(pen).
+  float pen_x = 8.0f;
+  ExpectDrawTextWithFont(list, 1, latin, "A", static_cast<int>(std::lround(pen_x)), baseline_y,
+                         16.0f, 0xFF000000u, "the first ASCII run starts at the box x");
+  pen_x += latin->MeasureTextWidth("A", 16.0f);
+  ExpectDrawTextWithFont(list, 2, han, "\u4e2d", static_cast<int>(std::lround(pen_x)), baseline_y,
+                         16.0f, 0xFF000000u,
+                         "the Han run advances the pen by the first run's shaped width");
+  pen_x += han->MeasureTextWidth("\u4e2d", 16.0f);
+  ExpectDrawTextWithFont(list, 3, latin, "B", static_cast<int>(std::lround(pen_x)), baseline_y,
+                         16.0f, 0xFF000000u,
+                         "the next ASCII run advances the pen by the Han run's shaped width");
+  pen_x += latin->MeasureTextWidth("B", 16.0f);
+  ExpectDrawTextWithFont(list, 4, han, "\u6587", static_cast<int>(std::lround(pen_x)), baseline_y,
+                         16.0f, 0xFF000000u,
+                         "the last Han run advances the pen by the previous run's shaped width");
+  std::string painted;
+  for (std::size_t index = 1; index + 1 < list.size(); ++index) {
+    painted += list.commands()[index].text;
+  }
+  toy_test::Check(painted == "A\u4e2dB\u6587", "the painted runs concatenate to the box text");
+}
+
+// The baseline comes from Box::baseline_offset_px, not from each run's own
+// ascent: two inline text boxes with different font sizes on one line share the
+// line's maximum ascent (the 32 px box's), so both baselines must be equal.
+void TestBaselineFromBoxBaselineOffset(const std::shared_ptr<const Font>& font) {
+  const DisplayList list = BuildFontPage(
+      "<p><span style=\"font-size: 32px\">A</span><span style=\"font-size: 16px\">B</span></p>",
+      font);
+  ExpectSize(list, 4, "two differently sized text boxes yield two text commands");
+  ExpectViewportClip(list, 800, 600, "the mixed-size page keeps the viewport clip pair");
+  // Layout sets the line ascent 25.6 px on both boxes: round(24) + round(25.6).
+  ExpectDrawTextWithFont(list, 1, font, "A", 8, 50, 32.0f, 0xFF000000u,
+                         "the large text sits on the line baseline");
+  ExpectDrawTextWithFont(list, 2, font, "B", 27, 50, 16.0f, 0xFF000000u,
+                         "the small text shares the line baseline instead of using its own ascent");
+  toy_test::Check(list.commands()[1].y == list.commands()[2].y,
+                  "both text boxes of one line share the line baseline");
+}
+
+// A provider may return no runs for one box while returning real runs for
+// another: the empty box keeps the frozen bitmap DrawText, the other becomes a
+// real-font command.
+void TestPerBoxEmptyRunsKeepsBitmap(const std::shared_ptr<const Font>& font) {
+  const FontRunsProvider mixed = [font](const toy::style::ComputedStyle&,
+                                        std::string_view text_utf8) {
+    if (text_utf8 == "Hi") {
+      return std::vector<FontRun>{FontRun{font, text_utf8}};
+    }
+    return std::vector<FontRun>{};
+  };
+  const toy::layout::MeasureText measure = [font](std::string_view text_utf8,
+                                                  const toy::style::ComputedStyle& style) {
+    return MeasureWithFont(font, text_utf8, style);
+  };
+  const ImageMap images;
+  const DisplayList list = BuildPageWithMeasure(toy::dom::ParseDocument("<p>Hi</p><p>AB</p>"),
+                                                nullptr, images, measure, mixed, 800, 600, 0);
+  ExpectSize(list, 4, "one real-font box and one bitmap box yield two text commands");
+  ExpectViewportClip(list, 800, 600, "the mixed-provider page keeps the viewport clip pair");
+  ExpectDrawTextWithFont(list, 1, font, "Hi", 8, 37, 16.0f, 0xFF000000u,
+                         "the box with runs is painted with the real font on its baseline");
+  ExpectDrawText(list, 2, "AB", 8, 72, 16.0f, 0xFF000000u,
+                 "the box without runs keeps the frozen bitmap DrawText at the box top");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -811,6 +1036,7 @@ int main(int argc, char** argv) {
   TestMissingNodeIdPaintsNoImage();
   TestBlockReplacedPaintsNoImage();
   TestNullFontMatchesPreM8bList();
+  TestEmptyProviderMatchesNullProvider();
 
   // The real-font tests load the committed self-authored fixture font. CMake
   // passes its directory as argv[1], so no installed font is ever required.
@@ -831,5 +1057,19 @@ int main(int argc, char** argv) {
   TestRealFontScrollAndClip(font);
   TestRealFontOrderingWithImage(font);
   TestRealFontDeterministic(font);
+  TestBaselineFromBoxBaselineOffset(font);
+  TestPerBoxEmptyRunsKeepsBitmap(font);
+
+  // The two-font tests split mixed ASCII/Han text by character coverage, like
+  // the shell's system font selection does.
+  const std::string cjk_path = std::string(argv[1]) + "/toy_cjk.ttf";
+  std::string cjk_error;
+  const std::shared_ptr<const Font> cjk = Font::LoadFromFile(cjk_path, &cjk_error);
+  if (!cjk) {
+    std::fprintf(stderr, "paint display list test: cannot load %s: %s\n", cjk_path.c_str(),
+                 cjk_error.c_str());
+    return 1;
+  }
+  TestMultiRunPenAdvance(font, cjk);
   return toy_test::Finish("paint display list");
 }

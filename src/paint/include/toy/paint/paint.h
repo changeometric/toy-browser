@@ -1,10 +1,14 @@
 #pragma once
 
+#include <functional>
 #include <memory>
+#include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "toy/dom/node.h"
 #include "toy/layout/box.h"
+#include "toy/render/font.h"
 #include "toy/render/paint.h"
 #include "toy/style/computed_style.h"
 
@@ -28,18 +32,44 @@ struct Viewport {
 // is still alive.
 using ImageMap = std::unordered_map<dom::NodeId, std::shared_ptr<const render::Image>>;
 
+// One consecutive slice of a text box painted with one real font. `text` is a
+// view into the laid-out text box's text and stays valid only for the duration of
+// the BuildDisplayList call; `font` must be non-null and is kept by shared
+// reference in the emitted command. Runs of one text box are emitted in order and
+// must concatenate exactly to the box text.
+struct FontRun {
+  std::shared_ptr<const render::Font> font;
+  std::string_view text;
+};
+
+// Resolves one text box (its computed style and its exact laid-out text) to the
+// real-font runs to paint. The caller (shell) supplies it; the same selection
+// logic must also drive layout measurement so widths and painting agree. Return
+// an empty vector when no real font applies: that box keeps the bitmap path.
+// An empty (null) provider makes every text box use the bitmap path, which
+// reproduces the pre-M10 command list exactly.
+using FontRunsProvider = std::function<std::vector<FontRun>(const style::ComputedStyle& style,
+                                                            std::string_view text_utf8)>;
+
 // Paints a laid-out page into a display list: it walks the box tree in pre-order
 // and emits one background FillRect per element box whose computed background is
 // not fully transparent, then one DrawImage per inline replaced box whose node id
 // is present in `images` (after that box's background, before its children), then
 // one text draw per text box.
 //
-// Text uses `font` when it is non-null: each text box becomes a DrawTextWithFont
-// command whose baseline is `round(box.y) - scroll_y + round(font->AscentPx(size))`
-// device pixels, so layout keeps using the real font's metrics while painting
-// places real glyphs. When `font` is null the M7/M8a bitmap path is unchanged
-// (one DrawText per text box with y = round(box.y) - scroll_y). Passing a null
-// font must therefore reproduce the pre-M8b command list exactly.
+// Text: paint asks `font_runs` for the real-font runs of each text box. With a
+// non-empty run list (real font):
+// - each run becomes a DrawTextWithFont command, in order;
+// - the baseline y is `round(box.y) - viewport.scroll_y + round(box.baseline_offset_px)`
+//   device pixels (layout computed the line's ascent, so text boxes on one line
+//   share a baseline);
+// - the run x is `round(pen_x)` with pen_x starting at box.x and advanced by
+//   `font->MeasureTextWidth(run.text, style.font_size_px)` CSS pixels after each
+//   run, so the runs stay contiguous and match layout's measured width.
+// When the provider is null/empty, or returns an empty run vector for a box, that
+// box keeps the frozen M7/M8a bitmap path: one DrawText command with
+// x = round(box.x), y = round(box.y) - viewport.scroll_y. A null provider must
+// reproduce the pre-M10 command list exactly (bitmap byte-compatibility gate).
 //
 // The list is pure data: paint never rasterizes and render never learns about
 // HTML or CSS. Geometry is converted from CSS pixels to device pixels with
@@ -56,7 +86,6 @@ using ImageMap = std::unordered_map<dom::NodeId, std::shared_ptr<const render::I
 // behavior (M7) and asserted by the paint tests.
 render::DisplayList BuildDisplayList(const dom::Document& document, const style::StyleTree& styles,
                                      const layout::BoxTree& boxes, const Viewport& viewport,
-                                     const ImageMap& images,
-                                     const std::shared_ptr<const render::Font>& font);
+                                     const ImageMap& images, const FontRunsProvider& font_runs);
 
 }  // namespace toy::paint

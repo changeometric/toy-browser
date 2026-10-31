@@ -170,6 +170,96 @@ void ApplyFontWeightValue(std::string_view value, ComputedStyle* style) {
   }
 }
 
+bool IsAsciiAlpha(char character) {
+  return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
+}
+
+// Bytes of an unquoted font family name: ASCII letters/digits, '-', '_' and
+// non-ASCII bytes (a UTF-8 encoded family name is kept as-is).
+bool IsFontFamilyNameChar(char character) {
+  return IsAsciiAlpha(character) || IsAsciiDigit(character) || character == '-' ||
+         character == '_' || static_cast<unsigned char>(character) >= 0x80;
+}
+
+bool IsGenericFontFamily(std::string_view lower_name) {
+  return lower_name == "serif" || lower_name == "sans-serif" || lower_name == "monospace" ||
+         lower_name == "cursive" || lower_name == "fantasy" || lower_name == "system-ui";
+}
+
+// Parses one font-family value: a comma-separated list of family names. An item
+// is either a quoted string (single or double quotes; a backslash escapes the
+// next character) or an unquoted name made of IsFontFamilyNameChar bytes.
+// Generic families are normalized to lowercase, other names keep their spelling.
+// Any empty or invalid item invalidates the whole list, so the declaration is
+// ignored as in CSS. The unsupported CSS-wide keywords (inherit, initial, unset)
+// invalidate the declaration too; only a quoted "inherit" is an ordinary name.
+std::optional<std::vector<std::string>> ParseFontFamilyValue(std::string_view value) {
+  std::vector<std::string> families;
+  std::size_t index = 0;
+  while (true) {
+    while (index < value.size() && IsAsciiWhitespace(value[index])) {
+      ++index;
+    }
+    if (index >= value.size()) {
+      return std::nullopt;  // Empty list or an empty item (including a trailing comma).
+    }
+    std::string family;
+    if (value[index] == '"' || value[index] == '\'') {
+      const char quote = value[index++];
+      bool closed = false;
+      while (index < value.size()) {
+        const char character = value[index];
+        if (character == '\\') {
+          if (index + 1 >= value.size()) {
+            return std::nullopt;  // A dangling escape is invalid.
+          }
+          family.push_back(value[index + 1]);
+          index += 2;
+          continue;
+        }
+        if (character == quote) {
+          ++index;
+          closed = true;
+          break;
+        }
+        family.push_back(character);
+        ++index;
+      }
+      if (!closed) {
+        return std::nullopt;
+      }
+    } else {
+      const std::size_t start = index;
+      while (index < value.size() && IsFontFamilyNameChar(value[index])) {
+        ++index;
+      }
+      if (index == start) {
+        return std::nullopt;  // An item must start with a name byte or a quote.
+      }
+      const std::string_view name = value.substr(start, index - start);
+      const std::string lower_name = ToLowerAscii(name);
+      if (lower_name == "inherit" || lower_name == "initial" || lower_name == "unset") {
+        return std::nullopt;
+      }
+      family = IsGenericFontFamily(lower_name) ? lower_name : std::string(name);
+    }
+    if (family.empty()) {
+      return std::nullopt;  // An empty family name is invalid.
+    }
+    families.push_back(std::move(family));
+    while (index < value.size() && IsAsciiWhitespace(value[index])) {
+      ++index;
+    }
+    if (index >= value.size()) {
+      return families;
+    }
+    if (value[index] != ',') {
+      return std::nullopt;  // Garbage after an item (e.g. an unquoted space).
+    }
+    ++index;  // Consume the comma; the next item is parsed by the next iteration.
+  }
+}
+
 void ApplyBackgroundColorValue(std::string_view value, ComputedStyle* style) {
   if (ToLowerAscii(TrimAsciiWhitespace(value)) == "transparent") {
     style->background_color = 0x00000000u;
@@ -322,6 +412,14 @@ void ApplyDeclaration(const css::Declaration& declaration, ComputedStyle* style)
       style->font_style = FontStyle::kNormal;
     } else if (value == "italic") {
       style->font_style = FontStyle::kItalic;
+    }
+    return;
+  }
+  if (property == "font-family") {
+    const std::optional<std::vector<std::string>> families =
+        ParseFontFamilyValue(declaration.value);
+    if (families) {
+      style->font_family = *families;
     }
     return;
   }

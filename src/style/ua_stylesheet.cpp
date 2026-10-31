@@ -15,6 +15,9 @@ h1 { font-size: 32px; font-weight: 700; margin: 16px 0; }
 h2 { font-size: 24px; font-weight: 700; margin: 12px 0; }
 h3 { font-size: 20px; font-weight: 700; margin: 12px 0; }
 a { color: #0000ee; }
+b, strong { font-weight: 700; }
+i, em { font-style: italic; }
+code, kbd, samp, pre { font-family: monospace; }
 )css";
   return kSheet;
 }
