@@ -41,4 +41,28 @@ struct Image {
 // malformed, truncated or unsupported data is an ordinary error.
 bool DecodePng(std::string_view bytes, Image* out, std::string* error);
 
+// Decodes one JPEG image from `bytes` and fills `out`. The decoder is the approved
+// libjpeg (libjpeg-turbo) dependency behind this interface, so libjpeg types stay
+// in render's private implementation and no other module includes a JPEG header.
+// Baseline and progressive streams are accepted; grayscale, RGB and CMYK/YCCK
+// sources are converted to RGB by libjpeg and the output is always straight-alpha
+// ARGB with alpha 255 (JPEG has no alpha channel). EXIF orientation, ICC profiles
+// and other metadata are ignored: pixels are decoded in the stored image
+// orientation. The same bounds as PNG apply (inclusive maxima: a side larger than
+// kMaxImageDimension or a pixel count larger than kMaxImagePixels is rejected
+// before the pixel buffer is allocated).
+//
+// Returns true on success; on failure returns false, stores a human-readable
+// message in *error (when not null) and leaves `out` untouched. Never throws:
+// malformed, truncated or unsupported data is an ordinary error.
+bool DecodeJpeg(std::string_view bytes, Image* out, std::string* error);
+
+// Decodes one image by CONTENT, never by file extension or caller hint: the PNG
+// signature selects DecodePng and a JPEG SOI marker (FF D8 FF) selects DecodeJpeg.
+// Unknown or malformed data is an ordinary error. The output bounds, ARGB pixel
+// representation and never-throw error contract are identical to the format
+// specific decoders. Page loaders should use this entry point so a page's images
+// can mix formats without the shell knowing any codec details.
+bool DecodeImage(std::string_view bytes, Image* out, std::string* error);
+
 }  // namespace toy::render

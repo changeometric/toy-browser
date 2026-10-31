@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <title>JPEG image pipeline</title>
+  <style>
+    /* The progressive JPEG is CSS-scaled to 32x16; the others keep their
+       intrinsic 16x8 size. */
+    #scaled { width: 32px; }
+  </style>
+</head>
+<body>
+  <p id="rgb"><img src="../images/jpeg_rgb_16x8.jpg"> RGB photo</p>
+  <p id="gray"><img src="../images/jpeg_gray_16x8.jpg"> Gray photo</p>
+  <p id="progressive"><img id="scaled" src="../images/jpeg_progressive_16x8.jpg">
+    Progressive photo</p>
+  <p id="mixed"><img src="../images/flag_16x8.png"><img
+      src="../images/jpeg_rgb_16x8.jpg"> Mixed formats</p>
+  <p id="missing"><img src="missing.jpg"> Missing JPEG</p>
+  <p id="truncated"><img src="../images/jpeg_truncated_16x8.jpg"> Truncated JPEG</p>
+</body>
+</html>

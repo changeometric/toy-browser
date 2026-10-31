@@ -30,6 +30,7 @@
 | M13 | 资源加载：公开 `net::Client`（pimpl、单线程），每个 origin 最多一条空闲 keep-alive HTTP/1.1 连接并复用；在私有 `Stream` 上增量解析 Content-Length/chunked body 与 trailer，读到的多余字节留给下一请求；遵循 HTTP/1.1/1.0 持久连接规则；用已批准的 zlib 透明解码 gzip（原始与解码后 body 都受限，其他编码是错误）；池化连接在收到任何响应字节前失败时在新连接上重试一次；重定向与 `file://` 走同一个 client；一次性 `Fetch()` 保持完全相同的请求字节/行为。shell `LoadPage` 每次加载创建一个 Client 用于页面 + 样式表 + 图片，并按解析后的图片 URL 在页内去重（重复 URL 共享一次抓取/解码/图片对象；失败 URL 被记住；每个 `<link>` 出现仍各抓一次；无跨加载缓存）。共享 loopback HTTP/TLS 测试服务器增加持久连接模式与连接/请求计数；`net.keep_alive`、`net.gzip`、`net.tls_keep_alive` 与 `shell.resource_loading`；74 个测试；字节兼容、GCC/Clang 与真实页面加载时间门禁全绿 |
 | M14a | CSS 值与排版：`%`/`rem` 单位、`rgb()`/`rgba()`/`hsl()`/`hsla()` 与完整 CSS 命名颜色集、`background` 简写颜色、逻辑属性映射到物理边、min/max-width/height、`margin: auto`、`line-height`、`text-align`、`text-decoration: underline`、`visibility`；新计算值模型 `Length`/`AutoLength`/`LineHeight`/`TextAlign`/`Visibility`（盒属性百分比留给 layout）；样式 dump 追加 `min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`；layout 按包含块内容宽度解析百分比、min/max 钳制、auto margin 居中、line-height half-leading 基线与 text-align 整行平移；paint 支持 visibility 与下划线；提交 `tests/fixtures/css_compat_site/`；`style.values`、`style.typography`、`layout.style_properties`、`shell.css_compat`、`shell.dump_style_css_compat`、`shell.css_compat_screenshot`；80 个测试；字节兼容（样式字段规范化）、GCC/Clang 与真实站点视觉门禁 |
 | M14b | 盒装饰与约束：`BorderSide`/`BorderStyle`/`BoxSizing`/`Overflow` 计算类型与 `UsedBorderWidth`/`UsedBorderColor` 辅助函数；border 长写（px/thin/medium/thick 宽度、十种样式、含 alpha/transparent/currentColor 的颜色）、1–4 值 width/style/color 简写、逐边与 `border` 简写（重置到初始值语义）、`box-sizing`、`overflow` 简写 + `overflow-x/y`、三标志 `text-decoration` 重置语义；样式 dump 扩展 `text-decoration=` 并追加 ` border-*-width= border-*-style= border-color= box-sizing= overflow=`；layout 把 used border 放入盒模型（border box = content+padding+borders，content-box vs border-box 宽高与 px min/max、auto margin 按最终 border box、行内水平 border、replaced 忽略 border）；paint 顺序 background→borders→image→children、四条 border FillRect（所有样式实心、逐矩形裁剪）、overflow-hidden padding-box clip 对、line-through/overline 与 underline；css_compat_site 增加 borders/overflow/decorations 页面；`style.borders`、`style.box_model`、`layout.box_model`、扩展 paint/shell 测试与 CLI 检查；85 个测试；字节兼容（样式规范化）、GCC/Clang 与真实站点视觉门禁 |
+| M17 | JPEG/JPG 图片：用户批准的 libjpeg（libjpeg-turbo）记录进依赖/README/CI；`render::DecodeJpeg`（baseline+progressive；灰度/RGB/YCbCr/CMYK/YCCK；直通 alpha ARGB；与 PNG 相同的边界；忽略 EXIF/ICC；截断警告视为错误、良性警告容忍；公开头文件无 libjpeg 类型）与按内容的 `render::DecodeImage`，`DecodePng` 未改动；shell 图片加载器改用 `DecodeImage`，静默跳过语义不变；提交自造 JPEG fixtures + 生成器 + 容差、`render.jpeg`、`tests/fixtures/jpeg_site/`、`shell.jpeg`/`shell.jpeg_dump_boxes`；88 个测试；PNG/M17 之前输出逐字节不变、GCC/Clang 与真实站点门禁 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
 **下一计划里程碑：M15 —— Flexbox / position / float 子集（已计划，尚未开始）。**
@@ -37,7 +38,10 @@ M14（CSS 兼容批次 1）已完成：M14a 加入 CSS 值与排版层，M14b �
 box-sizing、overflow:hidden 裁剪与 line-through/overline。手工真实站点检查显示两批都生效
 （python.org 绘制每项彩色导航 border，其通用 `box-sizing: border-box` 使 836 个元素重排；w3.org 的
 skip-link border 与 overflow 裁剪生效；gnu.org 的 skip 链接绘制 border；更早的 M14a 检查：
-导航行距、居中、百分比/颜色）。M15 是下一个大型布局里程碑（position/float/flex/grid 子集）。
+导航行距、居中、百分比/颜色）。M17（JPEG 图片支持）随后应维护者要求在顺序之外交付：用户批准的
+libjpeg-turbo 现在能解码 JPEG/JPG 的 `<img>` 源，混合 PNG/JPEG 页面可用（按内容识别）；真实站点
+检查显示 gnu.org/debian.org 的 JPEG 缩略图被绘制。M15 是下一个大型布局里程碑（position/float/
+flex/grid 子集）。
 HTTP 代理（M16）与 JavaScript 子集保持延后。
 
 尚未实现：并行/线程资源加载、跨页面图片缓存与懒加载（M13 只有串行复用与页内去重）、
@@ -80,7 +84,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-预期：85/85 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。`CMakePresets.json` 把同样的命令封装为 `default`/`dev` presets，`.github/workflows/ci.yml` 用 GCC 与 Clang 运行 configure、build、test 与安装冒烟步骤。
+预期：88/88 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。`CMakePresets.json` 把同样的命令封装为 `default`/`dev` presets，`.github/workflows/ci.yml` 用 GCC 与 Clang 运行 configure、build、test 与安装冒烟步骤。
 
 ```sh
 # 外部样式表（M12）：提交的 fixture 站点在两个内联 <style> 之间链接子目录样式表，并包含
@@ -155,6 +159,21 @@ auto 居中、min/max 钳制、line-height 行盒），截图绘制对齐/下划
 M14a fixture 页面上有差异。测试：`style.borders`、`style.box_model`、`layout.box_model`、扩展的
 paint 显示列表用例、扩展的 `shell.css_compat`、`shell.dump_style_css_compat_borders`、
 `shell.css_compat_screenshot_borders`；共 85 个测试。
+
+```sh
+# JPEG 图片（M17）：提交的 JPEG fixtures 能解码，混合 PNG/JPEG 页面能渲染；截断 JPEG 被静默跳过。
+"$BUILD"/toybrowser --size 320x400 --dump-boxes \
+    "file://$PWD/tests/fixtures/jpeg_site/index.html" | grep '<img>'
+"$BUILD"/toybrowser --size 320x400 --screenshot /tmp/toybrowser-jpeg.ppm \
+    "file://$PWD/tests/fixtures/jpeg_site/index.html" && file /tmp/toybrowser-jpeg.ppm
+"$BUILD"/toybrowser --size 320x200 --dump-boxes \
+    "file://$PWD/tests/fixtures/jpeg_site/index.html" | grep -c '<img>'   # 5 个可解码出现
+```
+
+预期：RGB/灰度/progressive JPEG 与混合 PNG+JPEG 行保留 16x8 图片盒（CSS 缩放的 progressive 为
+32x16），像素在文档化 JPEG 容差内而 PNG 像素精确，缺失/截断 JPEG 不产生图片盒（静默跳过、页面仍
+加载）。M17 之前的页面必须保持逐字节 dump/PPM；改动图片加载时与上一提交的 `git worktree` 构建对比。
+测试：`render.jpeg`、`shell.jpeg`、`shell.jpeg_dump_boxes`；共 88 个测试。
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -268,7 +287,9 @@ HTTP 代理仍在 M16，JavaScript 子集保持延后。
   模型携带 `Length`/`AutoLength`/`LineHeight`/`TextAlign`/`Visibility`，值层支持 `%`/`rem`、
   十六进制/rgb/rgba/hsl/hsla 与 CSS 命名颜色、逻辑属性与 min/max/auto 约束，`--dump-style`
   追加 M14a 字段（见 dump 契约）；
-  `src/render/include/toy/render/image.h` —— `Image` 与基于 libpng 的 `DecodePng`；
+  `src/render/include/toy/render/image.h` —— `Image`、基于 libpng 的 `DecodePng`、基于 libjpeg 的
+`DecodeJpeg`（M17）与按内容的 `DecodeImage`；`src/render/image.cpp`（libpng + 分派）与
+`src/render/jpeg.cpp`（libjpeg）保持所有编解码类型私有；
   `src/render/include/toy/render/font.h` —— 位图字体度量加真实 `Font` API（加载、度量、整形 advance；
   公开头文件不含 freetype/harfbuzz 类型），实现位于 `src/render/font_ttf.cpp`；显示列表与光栅化器在
   `toy/render/paint.h`，`src/paint/` 从盒树构建列表且不光栅化（M11：`src/paint/paint.cpp` 的
@@ -283,7 +304,7 @@ HTTP 代理仍在 M16，JavaScript 子集保持延后。
   `tests/support/check.h`。提交的 fixtures：`tests/fixtures/nav_site/`（三页导航演示；它的
   “Unsupported page” 链接是故意的不支持 scheme 用例，任何测试都不会访问公网）、
   `tests/fixtures/img_site/`（图片流水线演示）、`tests/fixtures/font_site/`（真实字体 + 图片演示）、
-  `tests/fixtures/images/`（像素内容有文档的手工 PNG）、`tests/fixtures/fonts/`（自造最小 TTF：
+  `tests/fixtures/images/`（像素内容/容差有文档的手工 PNG 与 JPEG + 提交的 JPEG 生成器）、`tests/fixtures/fonts/`（自造最小 TTF：
   常规、粗体、斜体与一个小汉字 face，度量/字体族有文档；测试从不使用已安装字体）、
   `tests/fixtures/cjk_site/`（从磁盘加载的中文页面，断言逐单元文本盒、换行与绘制像素）、
   `tests/fixtures/css_site/`（M12 外部样式表 fixture 站点：子目录相对样式表、顺序、被过滤/失败/
@@ -357,9 +378,16 @@ HTTP 代理仍在 M16，JavaScript 子集保持延后。
   映射到 `Toy Test Font`）用于自动选择/回退测试；空配置（无字体目录）强制位图路径，必须逐字节复现
   所有 M10 之前的 dump/截图。`Fonts` 缓存保证固定 fontconfig 配置与字体集下 run/度量确定；不要添加
   代码内的信任/覆盖后门。
-- 图片解码契约（`render::DecodePng`）：只支持 PNG，经由接口后的已批准 libpng 依赖，输出直通 alpha 的
-  ARGB `render::Image`；接受尺寸为每边最多 8192 px 且总计最多 16,777,216 像素（包含式上界），在分配前
-  拒绝；失败返回 false 并给出可读错误、`*out` 不变；不抛异常；公开头文件中不出现 libpng 类型。
+- 图片解码契约（`render::DecodePng` / `render::DecodeJpeg` / `render::DecodeImage`，M17）：PNG 经由
+  已批准 libpng，JPEG/JPG 经由已批准 libjpeg（libjpeg-turbo），都在接口之后；输出直通 alpha 的 ARGB
+  `render::Image`。接受尺寸为每边最多 8192 px 且总计最多 16,777,216 像素（包含式上界），在分配前
+  拒绝；`DecodeImage` 只按内容识别格式——PNG 八字节签名或 JPEG 的 `FF D8 FF` SOI 标记，绝不看扩展
+  名——并分派；未知数据是可读错误。JPEG 接受 baseline 与 progressive，以及灰度、RGB、YCbCr、
+  CMYK/YCCK 源（alpha 始终 255）；libjpeg-turbo 不能把 CMYK/YCCK 转成 RGB，因此解码为 `JCS_CMYK`
+  并用 Adobe 反相 `channel = sample*black/255` 折叠；EXIF 方向/ICC 元数据被忽略（按存储方向）。截断
+  警告（`Premature end of JPEG file`、`Corrupt JPEG data: premature end of data segment`）提升为
+  错误，partial 图片绝不返回；良性警告静默容忍。失败返回 false 并给出可读错误、`*out` 不变；不抛
+  异常；公开头文件中不出现 libpng 或 libjpeg 类型。
 - HTTPS/TLS 契约（M9）：URL scheme 集合为 `file`、`http`、`https`（小写）；`https` 默认端口 443，
   与 http 相同的 RFC 3986 authority/端口/path 规则，`ParseUrl`/`ResolveUrl`/`SerializeUrl` 可往返。
   `Fetch` 按 scheme 分派；http 与 https 通过私有的字节流抽象（`src/net/stream_internal.h`）共享同一套
@@ -509,6 +537,19 @@ HTTP 代理仍在 M16，JavaScript 子集保持延后。
 - 图片测试（`shell.images*` 以及 `tests/fixtures/img_site/` 的 dump 正则）硬编码了来自
   `toybrowser --size 320x200 --dump-boxes` 的几何，和导航测试硬编码链接坐标一样：改 fixture、
   replaced 元素布局或文本度量时，要在同一改动里更新这些常量。
+- M17 JPEG 不变量：libjpeg 是必需的构建依赖（`src/render/CMakeLists.txt` 的
+  `find_package(JPEG REQUIRED)`，PRIVATE 到 `toy_render`）；保持 `jpeglib.h` 不进公开头文件，绝不
+  硬编码版本/路径。`DecodeJpeg` 的错误管理器必须从 standard-layout `ErrorManager` 的**首成员**恢复
+  上下文（有 `offsetof`/is_standard_layout static_assert）：第一版实现把 `cinfo->err` 直接 cast 成
+  decoder context，而错误管理器不是首成员，导致 `longjmp` 目标损坏、截断 JPEG 段错误。绝不要删除
+  截断输入回归测试（`render.jpeg` + `shell.jpeg`）。
+- M17 JPEG 策略是刻意的：截断警告是解码错误，良性警告静默忽略，CMYK 假定标准 Adobe 反相约定，
+  EXIF/ICC 忽略，解码电平会随 libjpeg 构建略有差异，因此 fixture 测试使用文档化每通道容差，绝不
+  比较整文件或要求逐位精确电平。保持 `tests/fixtures/images/README.md`、已提交 fixtures、
+  `generate_jpeg.cpp` 与 `tests/render/jpeg_test.cpp` 同步。
+- JPEG fixtures 是自造的，生成器使用已批准 libjpeg（开发工具，README 记录 `g++ ... -ljpeg` 命令；
+  不是构建目标）。不要下载测试图片/语料；新 fixture 必须像现有 PNG/JPEG 一样生成并记录。shell
+  fixture 站点 `tests/fixtures/jpeg_site/` 记录期望盒/跳过行，fixture 变化时要与测试一起更新。
 - `shell.images_screenshot` 是 `cmake -P` 辅助脚本，只检查退出状态、P6 头与文件大小；同一页面的像素
   内容由 `shell.images` 断言。
 - `--dump-boxes` 现在也会加载并解码页面图片（`<img>` 盒就是这样出现的）；图片失败仍被跳过，因此坏

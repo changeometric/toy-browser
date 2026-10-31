@@ -26,9 +26,11 @@ namespace toy::shell {
 //
 // `images` and `replaced_sizes` share their keys: the DOM element node id of
 // each <img>. Layout reserves the replaced box from `replaced_sizes`, paint
-// draws the decoded pixels from `images`. A skipped image is absent from both
-// maps and lays out as an empty inline (M8a MVP limit: no broken-image icon and
-// no error output for image failures, see docs/roadmap.md). Since M13 one page
+// draws the decoded pixels from `images`. The decoder dispatches by image
+// CONTENT (PNG or JPEG, never by file extension), so a page may mix formats. A
+// skipped image is absent from both maps and lays out as an empty inline (M8a
+// MVP limit: no broken-image icon and no error output for image failures, see
+// docs/roadmap.md). Since M13 one page
 // load caches decoded images per resolved URL, so <img> occurrences that resolve
 // to the same URL share one decoded `render::Image` object (and one fetch).
 //

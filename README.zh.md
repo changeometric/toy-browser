@@ -36,10 +36,11 @@ PNG 图片，可 headless 运行，也可在小型 X11 窗口中浏览。浏览�
 - 真实文本：freetype 光栅化 + harfbuzz 整形，通过 fontconfig 自动选择字体（计算出的
   `font-family`/`font-weight`/`font-style`、字符覆盖回退、CJK 断行单元），并以内置位图字体作为
   最后的确定性回退。
-- 用 libpng 解码 PNG 图片，最近邻缩放绘制。
+- 用已批准的 libpng 与 libjpeg 解码 PNG 与 JPEG/JPG 图片，最近邻缩放绘制（按内容识别，混合格式
+  页面可用；JPEG 的 EXIF 方向与 ICC 配置被忽略）。
 - 可导航的 X11 窗口（链接可点击、滚轮/键盘滚动、Alt+Left/Right 历史、窗口标题）与完整的
   headless `--dump-*`/`--screenshot` 调试模式。
-- 一套小而有确定性的测试（85 个 CTest 用例），CI 用 GCC 与 Clang 无警告构建并运行。
+- 一套小而有确定性的测试（88 个 CTest 用例），CI 用 GCC 与 Clang 无警告构建并运行。
 
 中文文本会通过自动字体回退渲染，并在没有空格时正常换行：
 
@@ -50,8 +51,8 @@ PNG 图片，可 headless 运行，也可在小型 X11 窗口中浏览。浏览�
 ## 快速开始
 
 需要 Linux、CMake 3.20 或更新版本，以及任意 C++20 编译器。构建依赖（Debian/Ubuntu 包名）：
-`cmake g++ clang libx11-dev libpng-dev libfreetype-dev libharfbuzz-dev libfontconfig1-dev
-libssl-dev`；其他发行版有对应包。
+`cmake g++ clang libx11-dev libpng-dev libjpeg-dev libfreetype-dev libharfbuzz-dev
+libfontconfig1-dev libssl-dev`；其他发行版有对应包。
 
 ```sh
 # 配置并构建带测试、warnings-as-errors 的开发树。
@@ -153,10 +154,11 @@ docs/               架构、路线图、决策、约定、接管笔记
 
 ## 状态与限制
 
-里程碑 M0–M14 已完成：浏览器能渲染真实页面及其外部样式表、通过复用的 keep-alive 连接与 gzip
-加载资源、应用高频 CSS 值与排版属性（单位、颜色、line-height、text-align、visibility、min/max
-尺寸与 auto margin）以及盒装饰（border、box-sizing、overflow 裁剪、underline/line-through/
-overline）、支持真实字体与图片、支持 HTTPS，并有可导航窗口。下一个计划里程碑是
+里程碑 M0–M14 已完成（M14 = CSS 兼容批次 1），M17（JPEG/JPG 图片支持）应维护者要求在顺序之外
+提前交付：浏览器能渲染真实页面及其外部样式表、通过复用的 keep-alive 连接与 gzip 加载资源、应用
+高频 CSS 值与排版属性（单位、颜色、line-height、text-align、visibility、min/max 尺寸与 auto
+margin）以及盒装饰（border、box-sizing、overflow 裁剪、underline/line-through/overline）、
+解码 PNG 与 JPEG 图片、支持真实字体、支持 HTTPS，并有可导航窗口。下一个计划里程碑是
 flexbox/position/float 子集（M15）。HTTP 代理（M16）与 JavaScript 子集已延后。
 
 当前里程碑集刻意保留的限制：
@@ -168,6 +170,9 @@ flexbox/position/float 子集（M15）。HTTP 代理（M16）与 JavaScript 子�
 - 拉丁与中文之外的文字是尽力支持；没有 bidi/RTL 排序，也没有完整的 Unicode 断行。
 - 还没有代理（M16）、HTTP 缓存头或 cookie，也没有并行资源加载、跨页面图片缓存或懒加载；请求仍是
   串行的，只有 keep-alive、gzip 与页面内的图片去重（M13）。
+- JPEG 支持（M17）忽略 EXIF 方向与 ICC/色彩管理、假定标准 Adobe 反相 CMYK 约定，且有损；GIF/
+  WebP/SVG、`background-image` 与 `srcset` 尚不支持。在 `display:block` replaced 元素支持之前
+  （M15），部分真实站点 JPEG 仍不可见。
 - 渲染是纯软件、单线程；没有 GPU 后端，呈现时整帧发送给 X server。
 - 没有做安全加固：把抓取到的页面当作不可信输入，不要在其中输入敏感信息。
 
@@ -193,13 +198,14 @@ flexbox/position/float 子集（M15）。HTTP 代理（M16）与 JavaScript 子�
 
 ## 依赖
 
-目前链接了六个第三方包；浏览器引擎本身没有任何现成组件。
+目前链接了七个第三方包；浏览器引擎本身没有任何现成组件。
 
 | 组件 | 用途 | 许可证 |
 | --- | --- | --- |
 | C++20 标准库 + POSIX | 基础（容器、socket、文件） | 标准 / 系统 |
 | libX11 | 窗口、输入、像素呈现 | MIT/X11 |
 | libpng + zlib | PNG 图片解码 | libpng 许可证 / zlib 许可证 |
+| libjpeg（libjpeg-turbo） | JPEG/JPG 图片解码 | IJG 许可证 / BSD-3-Clause |
 | freetype | 字体度量与字形光栅化 | FreeType 许可证 |
 | harfbuzz | OpenType 文本整形 | MIT |
 | fontconfig | 自动字体发现/匹配与字符回退 | MIT 风格 |

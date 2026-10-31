@@ -4,8 +4,9 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M14 已完成（M14 = CSS 兼容批次 1：M14a 值与排版、M14b 盒装饰与约束）。
-M15（flexbox/position/float 子集）是下一个计划里程碑。HTTP 代理（M16）与 JavaScript 子集已延后。**
+**当前状态：M0–M14 已完成（M14 = CSS 兼容批次 1：M14a 值与排版、M14b 盒装饰与约束），
+M17（JPEG 图片支持）应维护者要求在顺序之外提前交付。M15（flexbox/position/float 子集）是下一个
+计划里程碑。HTTP 代理（M16）与 JavaScript 子集已延后。**
 快照与接管指南见 [handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
@@ -106,7 +107,7 @@ M15（flexbox/position/float 子集）是下一个计划里程碑。HTTP 代理�
 - 已达成验收：`render.image`、`layout.replaced`、`shell.images`、图片 CLI 检查与所有既有测试在
   GCC 与 Clang 下、警告视为错误时通过（共 46 个测试）；无图片的 dump 与截图与 M7 逐字节一致；
   GCC 与 Clang 产出逐字节相同的图片 PPM；窗口显示图片页面。
-- M8a 已知限制：只支持 PNG（libpng 能转换成 8-bit RGBA 的全部格式；没有 JPEG/GIF/WebP/SVG），
+- M8a 已知限制：M8a 时只支持 PNG（JPEG 在 M17 加入；GIF/WebP/SVG 仍不支持），
   没有 `background-image`、`srcset`、`alt` 文本或 broken-image 提示，没有图片缓存（同一 URL 在
   每个 `<img>` 处各抓取一次），HTML `width`/`height` 属性被忽略（只用 CSS px），
   `display:block` 的 replaced 元素以及 replaced 元素的 margin/padding 不支持，replaced 盒顶部
@@ -442,18 +443,62 @@ M15（flexbox/position/float 子集）是下一个计划里程碑。HTTP 代理�
   直接出网受限的网络上让真实站点测试变得实用的能力。
 - 范围与契约在该轮开始时冻结；预计不需要新依赖。
 
+## M17 — JPEG 图片支持 ✅（已完成；应维护者要求在顺序之外交付）
+
+- 目标已达成：JPEG/JPG 的 `<img>` 源现在能像 PNG 一样解码并渲染，混合格式页面也可用；不再因为
+  文件是 JPEG 而拒绝，而是使用用户批准的 libjpeg（libjpeg-turbo）依赖。
+- 依赖：用户于 2026-10-31 批准 libjpeg-turbo 用于 JPEG 解码，记录在
+  [dependencies.md](dependencies.md)（清单/审批记录/候选表）；通过 `find_package(JPEG REQUIRED)`
+  发现并 PRIVATE 链接到 `toy_render`（无 vendoring、不硬编码版本/路径）；README/CONTRIBUTING 的
+  安装包列表与 CI apt 列表都加入了 `libjpeg-dev`。
+- `render`：新增 `render::DecodeJpeg`（libjpeg 类型保持私有）与按内容的 `render::DecodeImage`，
+  与未改动的 `render::DecodePng` 并列。`DecodeImage` 用八字节 PNG 签名与 JPEG 的 `FF D8 FF`
+  SOI 标记识别格式——绝不看扩展名——再分派给对应解码器；未知数据返回可读错误。`DecodeJpeg` 支持
+  baseline 与 progressive，以及灰度、RGB、YCbCr、CMYK/YCCK 源，输出始终是 straight-alpha ARGB
+  （alpha 255）。它在分配前强制与 PNG 相同的包含边界（每边 `kMaxImageDimension`、总计
+  `kMaxImagePixels`），不抛异常，失败时保持 `out` 不变。libjpeg-turbo 的 libjpeg API 无法把
+  CMYK/YCCK 转换成 RGB（`JERR_CONVERSION_NOTIMPL`），因此这些流解码为 `JCS_CMYK`，再用标准的
+  Adobe 反相公式 `channel = sample * black / 255` 折叠。EXIF 方向、ICC 配置与其他元数据被忽略
+  （按存储方向解码）。截断警告（`Premature end of JPEG file`、
+  `Corrupt JPEG data: premature end of data segment`）提升为解码错误，partial 图片绝不会被当作
+  完整图片返回；良性警告（例如 marker 前多余字节）被静默容忍，且不打印任何内容。第一版实现中的
+  崩溃（libjpeg 错误管理器从错误的 struct 偏移恢复，导致 `longjmp` 使用损坏上下文）由 shell 任务
+  发现并修复：改用 standard-layout 的 `ErrorManager { jpeg_error_base; context* }` 加
+  `offsetof`/standard-layout static_assert，并加入截断输入回归测试。
+- `shell`：私有图片加载器在原来的调用点改用 `DecodeImage` 而不是 `DecodePng`，因此页面可以混用
+  PNG 与 JPEG 源；失败仍被静默跳过并按解析后的 URL 记忆，图片失败绝不让页面加载失败，M13 的页内
+  URL 去重/缓存语义不变。
+- Fixtures/测试：提交自造的 JPEG fixture 与基于 libjpeg 的生成器
+  `tests/fixtures/images/generate_jpeg.cpp`：baseline RGB 四象限、灰度、progressive、Adobe CMYK、
+  9000x1 超宽用例与截断流；fixture README 记录像素内容、每个 fixture 的容差（JPEG 有损）、CMYK/
+  警告策略与重新生成命令（不同 libjpeg 构建解码电平可能相差一两级；测试按容差比较，绝不比较整
+  文件）。新增 `render.jpeg` 覆盖解码、边界、错误时 `out` 不变、`DecodeImage` 分派、非法/垃圾数据
+  与确定性；`tests/fixtures/jpeg_site/` 加 `shell.jpeg`/`shell.jpeg_dump_boxes` 覆盖混合 PNG/JPEG
+  页面的固有尺寸/CSS 缩放、缺失/截断静默跳过以及容差内的 Browser 像素；共 88 个测试。
+- 已达成验收：所有 85 个 M17 之前测试加 3 个新测试在 GCC 与 Clang 下、警告视为错误时通过（88 个
+  测试）；所有 M17 之前输出（PNG 图片页、CSS 页、dump、截图、退出码）与 pre-JPEG 二进制逐字节
+  相同（25 用例门禁，无需规范化），GCC/Clang 输出一致；可直接访问的真实站点检查显示 JPEG 生效：
+  gnu.org 的 `<img>` 盒 8 -> 13，五张发行版截图 JPEG 现在被绘制（800x1600 像素差 7.98%），
+  debian.org 盒 3 -> 8、五张 JPEG 照片（5.79%）；w3.org 的三张 JPEG 能解码但不可见，因为它们是
+  `display:block` replaced 元素——既有 M8a 布局限制（M15 范围）。除已批准的 libjpeg 外没有新运行时
+  依赖。
+- M17 之后的已知限制：JPEG 元数据被忽略（无 EXIF 方向、无 ICC/色彩管理）；CMYK 解码假定标准
+  Adobe 反相样本（CMYK JPEG 的标准；非 Adobe 四分量文件罕见且同样处理）；解码通道有损且可能随
+  libjpeg 构建略有差异（测试使用容差）；GIF/WebP/SVG、`background-image`/`srcset` 仍不支持；既有
+  `display:block` replaced 元素布局限制在 M15 之前仍会隐藏部分真实站点 JPEG。
+
 ## 暂缓 —— JavaScript 子集
 
 - 用户于 2026-10-31 暂缓 JavaScript 子集；它不是下一个里程碑。它仍是一个大的可选里程碑（词法
   分析器、解析器、小型解释器、DOM 绑定与事件处理器）；没有用户明确的优先级决定不要开始。
 
-## M17+ — 机会性工作
+## M18+ — 机会性工作
 
 更多 CSS（补充 flex/grid、表格）、表单、更多图片格式、更好的文本处理、一致性测试套件与进一步性能。每一项都只在前一个切片干净、且维护者同意优先级之后才开始。
 
 ## Backlog — 计划中的后续工作
 
-- **更多图片格式与背景图**——JPEG/GIF/WebP、`background-image`、`srcset`、图片缓存与懒加载；这些都在 M8a 之后按需排期，不阻塞任何里程碑。
+- **更多图片格式与背景图**——GIF/WebP/SVG、`background-image`、`srcset`、图片缓存与懒加载；JPEG 已在 M17 交付，其余按需排期，不阻塞任何里程碑。
 - **Web 字体与更丰富的文本**——`@font-face`/字体下载、合成粗体/斜体、可变字体实例、bidi/RTL 与完整 Unicode 断行（UAX#14）、泰语/高棉语/老挝语词典断行与复杂脚本细化；M10 刻意先覆盖英文与中文，其他语言通过 fontconfig 字符覆盖尽力支持。
 - **测试辅助代码合并**——较旧的测试可执行文件里仍然重复着每个文件各自的 `Check`/`g_failures` 测试支架。header-only 的 `tests/support/check.h`（接口目标 `toy_test_support`）已在 M5 引入，新测试都在使用；旧文件只在被改动时迁移。不引入框架依赖。
 

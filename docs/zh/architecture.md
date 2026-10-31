@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `base` | 小型共享工具（几何、日志、UTF-8），只在出现需要时才存在 | — | 首次需要时 |
 | `platform` | 窗口、输入事件、事件循环、呈现像素表面 | `base` | M1 |
-| `render` | 显示列表、软件光栅化器、内置位图字体（度量与字形）、PNG 图片解码（已批准的 libpng）、真实字体引擎（已批准的 freetype + harfbuzz） | `base` | M1 |
+| `render` | 显示列表、软件光栅化器、内置位图字体（度量与字形）、PNG + JPEG 图片解码（已批准的 libpng/libjpeg）、真实字体引擎（已批准的 freetype + harfbuzz） | `base` | M1 |
 | `net` | URL 解析、socket、HTTP/1.1 抓取（纯 TCP 或经校验的 TLS，已批准 OpenSSL）、keep-alive `Client` 与 gzip（已批准 zlib）、`file://` 读取 | `base` | M2 |
 | `dom` | HTML tokenizer（词法分析器）、树构建器、DOM arena（区域分配器） | `base` | M3 |
 | `css` | CSS tokenizer、规则/声明解析器、选择器 | `base` | M4 |
@@ -87,14 +87,22 @@ round(font_size/3))，overline 在盒顶部，各为 1px `FillRect`、不透明�
 
 绘制（M6）：`paint` 按前序遍历盒树，产出扁平的 `render::DisplayList`：每个计算背景非透明的元素盒变成一条 `FillRect`（背景先于子内容），每个节点 id 有解码图片的行内 replaced 盒变成一条 `DrawImage`（M8a，在背景之后、子内容之前），每个文本盒变成一条或多条 `DrawTextWithFont` run，或（位图模式）一条 `DrawText`，都使用继承的颜色与字号。M10 起 paint 从 shell 接收 `paint::FontRunsProvider` 而不是单一字体：provider 返回该盒文本的有序真实字体 run，绘制器按每个 run 的整形宽度推进 pen，并把所有 run 放在 `box.baseline_offset_px` 上；空 provider（或某盒返回空 run）逐字节复现 M10 之前的位图命令列表。`paint` 从不光栅化，也从不包含 render 的实现头文件。`render` 执行该列表：矩形填充对不透明目标使用冻结的 SrcOver 整数公式；文本使用内置 8x16 ASCII 字形表，按最近邻单元缩放（无抗锯齿）；图片使用冻结的最近邻源映射（见下）；整数矩形裁剪栈约束每条命令（M7 会用视口 `PushClip`/`PopClip` 对包裹页面，并把每条命令按滚动偏移平移）。`shell` 把 canvas 填白、按 surface 宽度布局页面、构建列表并光栅化；窗口与 `--screenshot` 共享完全相同的这条路径。确定性正是重点：相同输入在 GCC 和 Clang 上产出逐字节相同的 PPM，截图测试依赖这一点。
 
-图片（M8a）：`render` 在 `render::DecodePng()` 之后拥有 PNG 解码：已批准的 libpng 依赖封装在
-`src/render/image.cpp` 中，像素转换成直通 alpha 的 ARGB `render::Image`，尺寸与像素数在分配前校验，
-公开头文件里不出现任何 libpng 类型。`shell` 通过私有加载器（`src/shell/page.h`）拥有页面级策略：
+图片（M8a，M17 扩展）：`render` 在 `render::DecodePng()`、`render::DecodeJpeg()` 与按内容的
+`render::DecodeImage()` 之后拥有图片解码：已批准的 libpng 与 libjpeg（libjpeg-turbo）依赖分别封装在
+`src/render/image.cpp` 与 `src/render/jpeg.cpp` 中，像素转换成直通 alpha 的 ARGB `render::Image`，
+尺寸与像素数在分配前校验，公开头文件里不出现任何 libpng/libjpeg 类型。`DecodeImage` 用八字节 PNG
+签名与 JPEG 的 `FF D8 FF` SOI 标记识别格式（绝不看扩展名）并分派，调用方因此与编解码器解耦。JPEG
+支持 baseline 与 progressive，以及灰度/RGB/YCbCr/CMYK-YCCK 源（alpha 始终 255）：libjpeg 的 libjpeg
+API 无法把 CMYK 转成 RGB，因此 CMYK/YCCK 解码为 `JCS_CMYK`，再用 Adobe 反相公式
+`channel = sample*black/255` 折叠；EXIF 方向与 ICC 元数据被忽略（按存储方向解码）；libjpeg 的截断
+警告变成解码错误，良性警告被静默容忍（不打印任何内容）。`shell` 通过私有加载器（`src/shell/page.h`）拥有页面级策略：
 在抓取、解析与样式之后、布局之前，把每个 `<img src>` 相对页面最终 URL 解析，经本次页面加载的
 `net::Client` 抓取（http/https/file；M13 之前用 `net::Fetch`），解码，并维护按 img DOM 节点 id 索引的
 `paint::ImageMap` 与 `layout::ReplacedSizes` 映射。M13 起加载器在单次页面加载内按 URL 去重图片：
 重复的 `<img src>` 共享一次抓取、一个解码后的图片对象与一个固有尺寸；失败的抓取/解码被记住，重复的
-坏图片不会重试（仍无跨加载缓存）。缺失或失败的图片被静默跳过，元素按空行内布局（MVP 限制）。
+坏图片不会重试（仍无跨加载缓存）。M17 起加载器调用 `render::DecodeImage`，因此一页可以混用 PNG
+与 JPEG 的 `<img>` 源，无需扩展名检查；PNG 与 JPEG 失败共享相同的静默跳过策略。缺失或失败的图片
+被静默跳过，元素按空行内布局（MVP 限制）。
 `paint` 把有解码图片的行内 replaced 盒变成 `DrawImage` 命令；显示列表持有
 `shared_ptr<const Image>`，因此列表可以比构建它的页面数据活得更久。`render` 用冻结的最近邻整数
 源映射、与填充相同的 SrcOver 公式和裁剪栈执行图片。`shell::Browser` 随页面保存图片并绘制它们，
@@ -239,6 +247,16 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
   `shell.font_selection`、`shell.page_language`、`shell.cjk_*`（逐单元文本盒、换行、绘制像素）与
   更新后的 `shell.fonts*` 覆盖该特性；测试从不使用已安装字体或机器字体配置。
 - M8a 图片测试使用像素内容有文档的手工生成 PNG fixtures（`tests/fixtures/images/`）与提交的图片演示站点（`tests/fixtures/img_site/`）：解码器被直接测试，布局用假 replaced 尺寸测试，shell 端到端通过 `shell::Browser` 以及 CLI 的 `--dump-boxes`/`--screenshot` 检查。
+- M17 JPEG 测试离线且确定：`tests/fixtures/images/` 提交自造 JPEG fixtures（baseline RGB 四象限、
+  灰度、progressive、Adobe CMYK、9000x1 超宽与截断流）以及基于已批准 libjpeg 的提交生成器
+  `generate_jpeg.cpp`；fixture README 记录像素内容、每通道容差、CMYK/警告策略与重新生成命令
+  （JPEG 有损，测试绝不比较整文件或要求逐位精确电平）。`render.jpeg` 覆盖解码、边界、失败时
+  `out` 不变、`DecodeImage` 分派（PNG 精确像素/JPEG/垃圾数据）、两个入口的截断输入、非法数据与
+  确定性。`tests/fixtures/jpeg_site/` 加 `shell.jpeg`/`shell.jpeg_dump_boxes` 通过
+  `LoadPage`/`Browser` 覆盖混合 PNG/JPEG 页面：固有尺寸、CSS 缩放、URL 共享缓存、缺失/截断静默
+  跳过、冻结盒几何与容差内像素（PNG 像素精确）。M17 之前的字节兼容门禁把上一提交的构建与新版
+  比较（25 用例：PNG/CSS 页面、dump、截图、退出码必须逐字节相同）；真实站点 JPEG 证据留在
+  `.tmp/`，绝不提交。
 - M12 外部样式表测试使用提交的 `tests/fixtures/css_site/` 站点（子目录相对样式表、文档序排序、
   被过滤/失败/重复链接、无样式表与全被过滤页面，以及有文档的期望计算值、几何与像素），并加上
   header-only 进程内 loopback HTTP 服务器 `tests/support/http_server.h` 覆盖重定向、绝对 URL、

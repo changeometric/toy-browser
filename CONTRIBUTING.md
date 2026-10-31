@@ -21,7 +21,7 @@ keep the existing tests green are the most welcome kind.
 Requirements: Linux, CMake 3.20 or newer, and a C++20 compiler. On Debian/Ubuntu:
 
 ```sh
-sudo apt install cmake g++ clang libx11-dev libpng-dev libfreetype-dev \
+sudo apt install cmake g++ clang libx11-dev libpng-dev libjpeg-dev libfreetype-dev \
     libharfbuzz-dev libfontconfig1-dev libssl-dev
 ```
 

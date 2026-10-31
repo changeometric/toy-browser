@@ -9,7 +9,7 @@ speculative — abstractions are added when a real slice needs them.
 | --- | --- | --- | --- |
 | `base` | Small shared utilities (geometry, logging, UTF-8), only when a need appears | — | when first needed |
 | `platform` | Window, input events, event loop, presenting pixel surfaces | `base` | M1 |
-| `render` | Display list, software rasterizer, built-in bitmap font (metrics and glyphs), PNG image decoding (approved libpng), real-font engine (approved freetype + harfbuzz) | `base` | M1 |
+| `render` | Display list, software rasterizer, built-in bitmap font (metrics and glyphs), PNG + JPEG image decoding (approved libpng/libjpeg), real-font engine (approved freetype + harfbuzz) | `base` | M1 |
 | `net` | URL parsing, sockets, HTTP/1.1 fetch over plain TCP or verified TLS (approved OpenSSL), keep-alive `Client` with gzip (approved zlib), `file://` reader | `base` | M2 |
 | `dom` | HTML tokenizer, tree builder, DOM arena | `base` | M3 |
 | `css` | CSS tokenizer, rule/declaration parser, selectors | `base` | M4 |
@@ -246,17 +246,27 @@ order: underline at baseline+1, line-through at baseline - max(1, round(font_siz
 the box top, each a 1px `FillRect` in the opaque text color, under the same text culling and never
 for hidden text. Pages without the new properties build the byte-identical pre-M14b command list.
 
-Images (M8a): `render` owns PNG decoding behind `render::DecodePng()`: the approved libpng
-dependency is wrapped in `src/render/image.cpp`, pixels are converted to straight-alpha ARGB
-`render::Image`, dimensions and pixel counts are validated before allocation, and no libpng type
-appears in a public header. `shell` owns the page-level policy in a private loader
+Images (M8a, extended in M17): `render` owns image decoding behind `render::DecodePng()` and
+`render::DecodeJpeg()` plus the content-based `render::DecodeImage()`: the approved libpng and
+libjpeg (libjpeg-turbo) dependencies are wrapped in `src/render/image.cpp` and
+`src/render/jpeg.cpp`, pixels are converted to straight-alpha ARGB `render::Image`, dimensions and
+pixel counts are validated before allocation, and no libpng/libjpeg type appears in a public
+header. `DecodeImage` detects PNG by its eight-byte signature and JPEG by the `FF D8 FF` SOI marker
+(never by file extension) and dispatches, so callers stay codec-agnostic. JPEG supports baseline
+and progressive streams and grayscale/RGB/YCbCr/CMYK-YCCK sources (alpha always 255): libjpeg
+cannot convert CMYK to RGB through its libjpeg API, so CMYK/YCCK decodes to `JCS_CMYK` and is folded
+with the inverted-Adobe `channel = sample*black/255` formula; EXIF orientation and ICC metadata are
+ignored (stored orientation); libjpeg truncation warnings become decode errors while benign
+warnings are tolerated silently (nothing is printed). `shell` owns the page-level policy in a private loader
 (`src/shell/page.h`): after fetching, parsing and styling the page and before layout, it resolves
 each `<img src>` against the page's final URL, fetches it through the page load's `net::Client`
 (http/https/file; `net::Fetch` before M13), decodes it, and keeps a `paint::ImageMap` plus a
 `layout::ReplacedSizes` map keyed by the img DOM node id. Since M13 the loader deduplicates image
 URLs within one page load: repeated `<img src>` values share one fetch, one decoded image object and
 one intrinsic size, and a failed fetch/decode is remembered so duplicate broken images are not
-retried (still no cross-load cache).
+retried (still no cross-load cache). Since M17 the loader calls `render::DecodeImage`, so one page
+may mix PNG and JPEG `<img>` sources with no extension checks; PNG and JPEG failures share the same
+silent-skip policy.
 Missing or failed images are skipped silently and the element lays out as an empty inline (MVP
 limit). `paint` turns an inline replaced box with a decoded image into a `DrawImage` command; the
 display list keeps a `shared_ptr<const Image>`, so a list may outlive the page data it was built
@@ -550,6 +560,19 @@ can't form ownership cycles. Revisit only if it actually hurts.
   binary (box dumps/PPMs/exit status identical; style dumps normalized from ` min-width=`), and a
   pre-M14 (M13) comparison differs only in the M14a fixture pages. Real-site evidence stays in
   `.tmp/` and never enters the repo/CTest.
+- M17 JPEG tests are offline and deterministic: committed self-authored JPEG fixtures in
+  `tests/fixtures/images/` (baseline RGB quadrants, grayscale, progressive, Adobe CMYK, a 9000x1
+  too-wide case and a truncated stream) plus the committed `generate_jpeg.cpp` generator using the
+  approved libjpeg; the fixture README documents pixel content, per-channel tolerances, the CMYK
+  and warning policies and the regeneration command (JPEG is lossy, so tests never compare whole
+  files or expect bit-exact levels). `render.jpeg` covers decoding, bounds, `out` untouched on
+  failure, `DecodeImage` dispatch (PNG exact pixels / JPEG / garbage), truncated input through both
+  entry points, malformed data and determinism. `tests/fixtures/jpeg_site/` plus `shell.jpeg` and
+  `shell.jpeg_dump_boxes` cover a mixed PNG/JPEG page through `LoadPage`/`Browser`: intrinsic
+  sizes, CSS scaling, shared URL cache, missing/truncated silent skips, frozen box geometry and
+  pixels within tolerance with exact PNG pixels. The pre-M17 byte-compat gate compares a build of
+  the previous commit against the new one (25 cases: PNG/CSS pages, dumps, screenshots, exit
+  status must be byte-identical); real-site JPEG evidence stays in `.tmp/` and is never committed.
 
 ## Reference material
 

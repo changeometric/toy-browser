@@ -29,6 +29,7 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M13 | Resource loading: public `net::Client` (pimpl, single-threaded) with one idle keep-alive HTTP/1.1 connection per origin, incremental Content-Length/chunked framing with read-ahead for the next request, HTTP/1.1/1.0 persistence rules, transparent gzip via the approved zlib (raw and decoded bodies bounded, other codings are errors), one stale-connection retry before any response byte, redirects and `file://` through the same client; the one-shot `Fetch()` keeps its exact request bytes/behavior. Shell `LoadPage` creates one Client per load for page + stylesheets + images and dedups image URLs per page load (duplicate URLs share one fetch/decode/image object; failed URLs remembered; every `<link>` occurrence still fetched; no cross-load cache). Shared loopback HTTP/TLS test servers gained persistent-connection modes and connection/request counters; `net.keep_alive`, `net.gzip`, `net.tls_keep_alive` and `shell.resource_loading`; 74 tests; byte-compat, GCC/Clang and measured real-page load-time gates |
 | M14a | CSS values & typography: `%`/`rem` units, `rgb()`/`rgba()`/`hsl()`/`hsla()` + full CSS named-color set, `background` shorthand color, logical properties mapped to physical sides, min/max-width/height, `margin: auto`, `line-height`, `text-align`, `text-decoration: underline`, `visibility`; new computed `Length`/`AutoLength`/`LineHeight`/`TextAlign`/`Visibility` model (box percentages unresolved for layout), style dump appends `min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`; layout resolves percentages against the containing content width, clamps min/max, centers with auto margins, applies line-height half-leading baselines and text-align line shifting; paint honors visibility and underlines; committed `tests/fixtures/css_compat_site/`; `style.values`, `style.typography`, `layout.style_properties`, `shell.css_compat`, `shell.dump_style_css_compat`, `shell.css_compat_screenshot`; 80 tests; byte-compat (style-normalized), GCC/Clang and real-site visual gates |
 | M14b | Box decorations & constraints: `BorderSide`/`BorderStyle`/`BoxSizing`/`Overflow` computed types and `UsedBorderWidth`/`UsedBorderColor` helpers; border longhands (px/thin/medium/thick widths, ten styles, colors incl. alpha/transparent/currentColor), 1–4 value width/style/color shorthands, side + `border` shorthands with reset-to-initial semantics, `box-sizing`, `overflow` shorthand + `overflow-x/y`, three-flag `text-decoration` reset semantics; style dump extends `text-decoration=` and appends ` border-*-width= border-*-style= border-color= box-sizing= overflow=`; layout puts used borders into the box model (border box = content+padding+borders, content-box vs border-box width/height and px min/max, auto margins against the border box, inline horizontal borders, replaced borders ignored); paint order background→borders→image→children, four border FillRects (solid painting for every style, per-rect culling), overflow-hidden padding-box clip pairs, line-through/overline in addition to underline; css_compat_site gained borders/overflow/decorations pages; `style.borders`, `style.box_model`, `layout.box_model`, extended paint/shell tests and CLI checks; 85 tests; byte-compat (style-normalized), GCC/Clang and real-site visual gates |
+| M17 | JPEG/JPG images: user-approved libjpeg (libjpeg-turbo) recorded in dependencies/README/CI; `render::DecodeJpeg` (baseline+progressive; grayscale/RGB/YCbCr/CMYK/YCCK; straight-alpha ARGB; PNG-identical bounds; EXIF/ICC ignored; truncation warnings are errors, benign warnings tolerated; no libjpeg types in public headers) and content-based `render::DecodeImage` next to the untouched `DecodePng`; shell image loader uses `DecodeImage` with unchanged silent-skip semantics; committed self-authored JPEG fixtures + generator + tolerances, `render.jpeg`, `tests/fixtures/jpeg_site/`, `shell.jpeg`/`shell.jpeg_dump_boxes`; 88 tests; PNG/pre-M17 outputs byte-identical, GCC/Clang and real-site gates |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
 **Next planned milestone: M15 — Flexbox / position / float subset (planned, not started).**
@@ -37,8 +38,10 @@ box decorations — borders/border-*, box-sizing, overflow:hidden clipping and l
 Manual real-site checks show both batches working (python.org paints per-item colored nav borders
 and its universal `box-sizing: border-box` reflows 836 elements, w3.org's skip-link border and
 overflow clips apply, gnu.org's skip link paints its border; earlier M14a pass: nav line spacing,
-centering, percentages/colors). M15 is the next large layout milestone (position/float/flex/grid
-subset). The HTTP proxy (M16) and the JavaScript subset remain deferred.
+centering, percentages/colors). M17 (JPEG image support) was then delivered out of sequence at the
+maintainer's request: the user-approved libjpeg-turbo now decodes JPEG/JPG `<img>` sources and mixed
+PNG/JPEG pages work (content-detected); real-site checks show gnu.org/debian.org JPEG thumbnails
+painting. M15 is the next large layout milestone (position/float/flex/grid subset). The HTTP proxy (M16) and the JavaScript subset remain deferred.
 
 Not implemented yet: parallel/threaded resource loading, cross-page image caching and lazy loading
 (M13 keeps serial reuse and per-page dedup only), `border-radius`, `box-shadow`, position/float/
@@ -85,7 +88,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 85/85 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 88/88 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
 or newer is required; building needs the X11, libpng, freetype, harfbuzz, fontconfig and OpenSSL
@@ -178,6 +181,24 @@ gate strips); a comparison against the pre-M14 (M13) binary differs only in the 
 Tests: `style.borders`, `style.box_model`, `layout.box_model`, extended paint display-list cases,
 extended `shell.css_compat`, `shell.dump_style_css_compat_borders`,
 `shell.css_compat_screenshot_borders`; 85 tests total.
+
+```sh
+# JPEG images (M17): the committed JPEG fixtures decode and a mixed PNG/JPEG page renders; a
+# truncated JPEG is skipped silently.
+"$BUILD"/toybrowser --size 320x400 --dump-boxes \
+    "file://$PWD/tests/fixtures/jpeg_site/index.html" | grep '<img>'
+"$BUILD"/toybrowser --size 320x400 --screenshot /tmp/toybrowser-jpeg.ppm \
+    "file://$PWD/tests/fixtures/jpeg_site/index.html" && file /tmp/toybrowser-jpeg.ppm
+"$BUILD"/toybrowser --size 320x200 --dump-boxes \
+    "file://$PWD/tests/fixtures/jpeg_site/index.html" | grep -c '<img>'   # 5 decodable occurrences
+```
+
+Expected: the RGB/gray/progressive JPEGs and the mixed PNG+JPEG row reserve 16x8 image boxes (the
+CSS-scaled progressive one 32x16), pixels are within the documented JPEG tolerances while the PNG
+pixels are exact, and the missing/truncated JPEGs produce no image box (silently skipped, page still
+loads). Pre-M17 pages must keep byte-identical dumps/PPMs; compare against a `git worktree` build of
+the previous commit when touching image loading. Tests: `render.jpeg`, `shell.jpeg`,
+`shell.jpeg_dump_boxes`; 88 tests total.
 
 ```sh
 # Images (M8a): the committed PNG fixtures render end to end.
@@ -302,7 +323,9 @@ stays at M16 and the JavaScript subset stays deferred.
   `Length`/`AutoLength`/`LineHeight`/`TextAlign`/`Visibility`, the value layer supports `%`/`rem`,
   hex/rgb/rgba/hsl/hsla and the CSS named colors, logical properties and min/max/auto constraints,
   and `--dump-style` appends the M14a fields (see the dump contract);
-  `src/render/include/toy/render/image.h` — `Image` and the libpng-backed `DecodePng`;
+  `src/render/include/toy/render/image.h` — `Image`, the libpng-backed `DecodePng`, the
+  libjpeg-backed `DecodeJpeg` (M17) and content-based `DecodeImage`; `src/render/image.cpp`
+  (libpng + dispatch) and `src/render/jpeg.cpp` (libjpeg) keep every codec type private;
   `src/render/include/toy/render/font.h` — bitmap-font metrics plus the real `Font` API (load,
   metrics, shaped advances; no freetype/harfbuzz types in the header), implemented by
   `src/render/font_ttf.cpp` (plus the private `src/render/font_cache_internal.h` LRU and the M11
@@ -329,7 +352,7 @@ stays at M16 and the JavaScript subset stays deferred.
   navigation demo; its "Unsupported page" link is a deliberate unsupported-scheme case so no test
   touches the public network), `tests/fixtures/img_site/` (image pipeline demo),
   `tests/fixtures/font_site/` (real-font + image demo), `tests/fixtures/images/` (hand-generated
-  PNGs with documented pixel content), `tests/fixtures/fonts/` (self-authored minimal TTFs:
+  PNGs and JPEGs with documented pixel content/tolerances + a committed JPEG generator), `tests/fixtures/fonts/` (self-authored minimal TTFs:
   regular, bold, italic and a tiny Han face, all with documented metrics/family; the tests never
   use installed fonts), `tests/fixtures/cjk_site/` (Chinese page served from disk, asserting
   per-unit boxes, wrapping and painted ink), `tests/fixtures/css_site/` (M12 external-stylesheet
@@ -552,11 +575,20 @@ stays at M16 and the JavaScript subset stays deferred.
   bitmap path and must reproduce every pre-M10 dump/screenshot byte for byte. `Fonts` caches mean a
   fixed fontconfig configuration and font set produce deterministic runs/metrics; do not add an
   in-code trust/override hook.
-- Image decoding contract (`render::DecodePng`): PNG only, via the approved libpng dependency behind
-  the interface, output straight-alpha ARGB `render::Image`; accepted sizes are each side at most
-  8192 px and at most 16,777,216 pixels in total (inclusive maxima), rejected before allocation;
-  failures return false with a human-readable error and leave `*out` untouched; no exceptions; no
-  libpng type crosses a public header.
+- Image decoding contract (`render::DecodePng` / `render::DecodeJpeg` / `render::DecodeImage`, M17):
+  PNG via the approved libpng dependency and JPEG/JPG via the approved libjpeg (libjpeg-turbo)
+  dependency, both behind the interface; output is straight-alpha ARGB `render::Image`. Accepted
+  sizes are each side at most 8192 px and at most 16,777,216 pixels in total (inclusive maxima) and
+  are rejected before allocation. `DecodeImage` detects the format by CONTENT only — PNG's
+  eight-byte signature or JPEG's `FF D8 FF` SOI marker, never a file extension — and dispatches;
+  unknown data is a readable error. JPEG accepts baseline and progressive streams and grayscale,
+  RGB, YCbCr and CMYK/YCCK sources (always alpha 255); libjpeg-turbo cannot convert CMYK/YCCK to
+  RGB, so those decode to `JCS_CMYK` and use the inverted-Adobe `channel = sample*black/255` fold;
+  EXIF orientation/ICC metadata are ignored (stored orientation). Truncation warnings
+  (`Premature end of JPEG file`, `Corrupt JPEG data: premature end of data segment`) are promoted
+  to errors so a partial image is never returned; benign warnings are tolerated silently. Failures
+  return false with a human-readable error, leave `*out` untouched and never throw; no libpng or
+  libjpeg type crosses a public header.
 - HTTPS/TLS contract (M9): the URL scheme set is `file`, `http`, `https` (lowercase); `https` uses
   default port 443 and the same RFC 3986 authority/port/path rules as http, and
   `ParseUrl`/`ResolveUrl`/`SerializeUrl` round-trip it. `Fetch` dispatches by scheme; http and https
@@ -782,6 +814,24 @@ stays at M16 and the JavaScript subset stays deferred.
   geometry taken from `toybrowser --size 320x200 --dump-boxes`, the same way the navigation test
   hardcodes link coordinates: changing the fixture, the replaced-element layout or the text metrics
   means updating those constants in the same change.
+- M17 JPEG invariants: libjpeg is a required build dependency (`find_package(JPEG REQUIRED)` in
+  `src/render/CMakeLists.txt`, PRIVATE to `toy_render`); keep `jpeglib.h` out of public headers and
+  never hardcode versions/paths. `DecodeJpeg`'s error manager must recover its context from the
+  FIRST member of a standard-layout `ErrorManager` (there are `offsetof`/is_standard_layout
+  static_asserts): the first implementation cast `cinfo->err` to the decoder context while the
+  error manager was not first, so `longjmp` used a corrupt target and truncated JPEGs segfaulted.
+  Never remove the truncated-input regression tests (`render.jpeg` + `shell.jpeg`).
+- M17 JPEG policy is deliberate: truncation warnings are decode errors, benign warnings are ignored
+  silently, CMYK assumes the standard Adobe inverted convention, EXIF/ICC are ignored, and decoded
+  levels vary slightly with the libjpeg build, so fixture tests use documented per-channel
+  tolerances and never compare whole files or expect bit-exact pixel values. Keep
+  `tests/fixtures/images/README.md`, the committed fixtures, `generate_jpeg.cpp` and
+  `tests/render/jpeg_test.cpp` in sync.
+- JPEG fixtures are self-authored and the generator uses the approved libjpeg (dev tool, documented
+  `g++ ... -ljpeg` command; not a build target). Do not download test images/corpora; new fixtures
+  must be generated and documented like the existing PNG/JPEG ones. The shell fixture site
+  `tests/fixtures/jpeg_site/` documents expected boxes/skipped rows and must be updated with the
+  tests if the fixture changes.
 - `shell.images_screenshot` is a `cmake -P` helper that only checks exit status, the P6 header and
   the file size; the pixel content of the same page is asserted by `shell.images`.
 - `--dump-boxes` now loads and decodes the page's images too (that is how `<img>` boxes appear);

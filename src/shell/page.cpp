@@ -223,9 +223,11 @@ struct CachedImage {
 using ImageCache = std::unordered_map<std::string, CachedImage>;
 
 // Returns the cache entry for `url`, fetching and decoding it on the first
-// occurrence. Every failure below is an ordinary, silently skipped image: it
-// leaves the page load successful and is remembered as a null image so a
-// duplicate broken image is not retried. That is the documented M8a MVP limit
+// occurrence. The decoder dispatches by content (PNG signature or JPEG SOI
+// marker), so the shell never looks at a file extension and a page can mix
+// formats. Every failure below is an ordinary, silently skipped image: it leaves
+// the page load successful and is remembered as a null image so a duplicate
+// broken image is not retried. That is the documented M8a MVP limit
 // (no broken-image icon, no stderr noise), not a hidden error.
 const CachedImage& LoadCachedImage(net::Client& client, const net::Url& url, ImageCache* cache) {
   const std::string key = net::SerializeUrl(url);
@@ -238,7 +240,7 @@ const CachedImage& LoadCachedImage(net::Client& client, const net::Url& url, Ima
   net::Response response;
   if (client.Fetch(url, net::FetchOptions{}, &response, &error)) {
     render::Image image;
-    if (render::DecodePng(response.body, &image, &error)) {
+    if (render::DecodeImage(response.body, &image, &error)) {
       entry.size = layout::ReplacedSize{static_cast<float>(image.width),
                                         static_cast<float>(image.height)};
       entry.image = std::make_shared<const render::Image>(std::move(image));

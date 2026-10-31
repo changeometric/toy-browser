@@ -142,4 +142,27 @@ bool DecodePng(std::string_view bytes, Image* out, std::string* error) {
   return true;
 }
 
+bool DecodeImage(std::string_view bytes, Image* out, std::string* error) {
+  if (out == nullptr) {
+    SetError(error, "DecodeImage: the output image must not be null");
+    return false;
+  }
+  if (bytes.empty()) {
+    SetError(error, "DecodeImage: empty image data");
+    return false;
+  }
+  // Detect the format by content, never by file extension: the PNG signature
+  // selects the PNG decoder and a JPEG SOI marker (FF D8 FF) the JPEG decoder.
+  constexpr std::string_view kPngSignature("\x89PNG\r\n\x1a\n", 8);
+  constexpr std::string_view kJpegSignature("\xFF\xD8\xFF", 3);
+  if (bytes.starts_with(kPngSignature)) {
+    return DecodePng(bytes, out, error);
+  }
+  if (bytes.starts_with(kJpegSignature)) {
+    return DecodeJpeg(bytes, out, error);
+  }
+  SetError(error, "DecodeImage: unrecognized image format (expected PNG or JPEG)");
+  return false;
+}
+
 }  // namespace toy::render

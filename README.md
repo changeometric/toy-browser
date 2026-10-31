@@ -45,10 +45,12 @@ well-understood subset of the web and grows one minimal vertical slice at a time
 - Real text: freetype rasterization and harfbuzz shaping, automatic font selection through
   fontconfig (computed `font-family`/`font-weight`/`font-style`, character-coverage fallback,
   CJK break units) and a built-in bitmap font as the last-resort deterministic fallback.
-- PNG images decoded with libpng and drawn with nearest-neighbour scaling.
+- PNG and JPEG/JPG images decoded with the approved libpng and libjpeg libraries and drawn with
+  nearest-neighbour scaling (content-detected, so mixed-format pages work; JPEG EXIF orientation and
+  ICC profiles are ignored).
 - A navigable X11 window (clickable links, wheel/keyboard scrolling, Alt+Left/Right history, window
   title) and fully headless `--dump-*`/`--screenshot` modes for debugging and tests.
-- A small, deterministic test suite (85 CTest cases) and CI that builds it warning-free with GCC
+- A small, deterministic test suite (88 CTest cases) and CI that builds it warning-free with GCC
   and Clang.
 
 Chinese text is rendered with automatic font fallback and wraps without spaces:
@@ -61,8 +63,8 @@ depends on the fonts installed on the machine.
 ## Quick start
 
 Requirements: Linux, CMake 3.20 or newer, and a C++20 compiler. Build dependencies (Debian/Ubuntu
-package names): `cmake g++ clang libx11-dev libpng-dev libfreetype-dev libharfbuzz-dev
-libfontconfig1-dev libssl-dev`. Other distributions provide equivalent packages.
+package names): `cmake g++ clang libx11-dev libpng-dev libjpeg-dev libfreetype-dev
+libharfbuzz-dev libfontconfig1-dev libssl-dev`. Other distributions provide equivalent packages.
 
 ```sh
 # Configure and build a developer tree with tests and warnings-as-errors.
@@ -167,13 +169,14 @@ nothing about HTML/CSS and the platform layer knows nothing about page content.
 
 ## Status and limitations
 
-Milestones M0–M14 are complete: the browser renders real pages with their external stylesheets,
-loads their resources over reused keep-alive connections with gzip, applies the high-frequency CSS
-value/typography properties (units, colors, line-height, text-align, visibility, min/max sizes and
-auto margins) and the box decorations (borders, box-sizing, overflow clipping, underline/
-line-through/overline), supports real fonts and images, speaks HTTPS and has a navigable window.
-The next planned milestone is a flexbox/position/float subset (M15). HTTP proxy support (M16) and
-the JavaScript subset are deferred.
+Milestones M0–M14 are complete (M14 = CSS compatibility batch 1), and M17 (JPEG/JPG image support)
+was delivered out of sequence at the maintainer's request: the browser renders real pages with their
+external stylesheets, loads their resources over reused keep-alive connections with gzip, applies the
+high-frequency CSS value/typography properties (units, colors, line-height, text-align, visibility,
+min/max sizes and auto margins) and the box decorations (borders, box-sizing, overflow clipping,
+underline/line-through/overline), decodes PNG and JPEG images, supports real fonts, speaks HTTPS and
+has a navigable window. The next planned milestone is a flexbox/position/float subset (M15). HTTP
+proxy support (M16) and the JavaScript subset are deferred.
 
 Known limits, by design of the current milestone set:
 
@@ -188,6 +191,10 @@ Known limits, by design of the current milestone set:
 - No proxy support (M16), no HTTP caching headers or cookies, and no parallel resource loading,
   cross-page image cache or lazy loading yet; requests are serial, with keep-alive, gzip and
   per-page image deduplication only (M13).
+- JPEG support (M17) ignores EXIF orientation and ICC/color management, assumes the standard
+  Adobe-inverted CMYK convention, and decodes are lossy; GIF/WebP/SVG, `background-image` and
+  `srcset` are not supported yet. Some real-site JPEGs stay invisible while `display:block`
+  replaced elements are unsupported (M15).
 - Rendering is software-only and single-threaded; there is no GPU backend, and presentation sends
   the whole frame to the X server.
 - Not security-hardened: treat fetched pages as untrusted input, do not enter secrets into it.
@@ -214,13 +221,14 @@ Chinese translations live under [docs/zh/](docs/zh/); English is the source of t
 
 ## Dependencies
 
-Six third-party packages are linked today; the browser engine itself has no ready-made components.
+Seven third-party packages are linked today; the browser engine itself has no ready-made components.
 
 | Component | Purpose | License |
 | --- | --- | --- |
 | C++20 standard library + POSIX | baseline (containers, sockets, files) | standard / OS |
 | libX11 | window, input, pixel presentation | MIT/X11 |
 | libpng + zlib | PNG image decoding | libpng license / zlib license |
+| libjpeg (libjpeg-turbo) | JPEG/JPG image decoding | IJG license / BSD-3-Clause |
 | freetype | font metrics and glyph rasterization | FreeType License |
 | harfbuzz | OpenType text shaping | MIT |
 | fontconfig | automatic font discovery/matching and character fallback | MIT-style |

@@ -6,12 +6,15 @@
 
 ## 当前清单
 
-**目前链接了六个第三方包：**
+**目前链接了七个第三方包：**
 
 - **libX11（MIT/X11）**，用于 X11 窗口后端（M1）。
 - **libpng + zlib（libpng 许可证 / zlib 许可证）**，由 `render` 用于解码 PNG 图片（M8a），并自 M13
   起由 `net` 用于解码 keep-alive HTTP 响应的 gzip `Content-Encoding`。通过 CMake 的
   `find_package(PNG REQUIRED)`（render）与 `find_package(ZLIB REQUIRED)`（net）发现；无 vendoring。
+- **libjpeg（libjpeg-turbo，IJG 许可证 / BSD-3-Clause）**，由 `render` 用于解码 JPEG/JPG 图片
+  （M17）。通过 CMake 的 `find_package(JPEG REQUIRED)` 发现并 PRIVATE 链接到 `toy_render`；
+  libjpeg 类型不出现在公开头文件中。
 - **freetype（FreeType 许可证）**，由 `render` 用于真实字体的度量与字形光栅化（M8b）。通过
   `find_package(Freetype REQUIRED)` 发现。
 - **harfbuzz（MIT）**，由 `render` 用于 OpenType 文本整形（M8b）。通过
@@ -48,6 +51,13 @@
   许可证：fontconfig 的 MIT 风格许可证。通过 `src/shell/CMakeLists.txt` 中的
   `find_package(Fontconfig REQUIRED)` 链接。
 
+用户在 2026-10-31 批准、自 M17 起链接（JPEG 图片支持）：
+
+- **libjpeg（libjpeg-turbo，IJG 许可证 / BSD-3-Clause）**——解码 JPEG/JPG，用于 `<img>` 及未来
+  图片格式工作。通过 CMake 的 `find_package(JPEG REQUIRED)` 发现并 PRIVATE 链接到 `toy_render`；
+  无 vendoring、无硬编码版本/路径。它只是底层编解码库：浏览器的图片加载/资源策略仍在我们代码中，
+  `render` 强制与 PNG 解码器相同的边界、错误风格与 ARGB 表示。
+
 用户于 2026-10-31 批准，用于计划中的 M9 HTTPS 里程碑：
 
 - **OpenSSL（libssl + libcrypto）**——`https://` 抓取所需的 TLS 1.2/1.3。许可证：Apache-2.0
@@ -80,6 +90,7 @@ JavaScript——而不包括底层编解码与字体机制。因此图片解码�
 | harfbuzz | OpenType 整形（连字、字形选择、定位） | 只做基础拉丁整形 | 高 | **已批准，自 M8b 起链接**（由 `render::Font` 使用） |
 | fontconfig | 已安装字体的发现与匹配 | 硬编码字体路径 / 不做发现 | 中等 | **已批准，自 M8b 起链接**（shell 的 `--font-family` 使用） |
 | OpenSSL | TLS，即 `https://` | 从零实现不现实 | 高 | **2026-10-31 已批准，自 M9 起链接**（始终校验证书与主机名、使用默认信任库） |
+| libjpeg（libjpeg-turbo） | JPEG/JPG 图片解码 | 自写 baseline JPEG 解码器（Huffman、IDCT、YCbCr、渐进式） | 高（约 1,500–3,000 行） | **用户 2026-10-31 批准，自 M17 起链接**（`render::DecodeJpeg`，PRIVATE 到 `toy_render`；忽略 EXIF 方向/ICC） |
 | stb_truetype / stb_image | 单头文件即插即用实现 | 自写实现 | 低 | **未批准**——与本项目的精神冲突 |
 | icu | Unicode 数据与完整国际化 | 先做小型 ASCII/拉丁子集 | 高 | **不计划** |
 

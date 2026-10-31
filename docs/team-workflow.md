@@ -545,3 +545,32 @@ the round when possible. Clean up stale build directories and stray files.
   allowed the same three teammates to be reused; each sub-round ran its own GCC/Clang, byte-compat
   and real-site gates. When a roadmap batch is clearly larger than one round, propose the split
   during intake with measured evidence instead of starting a mega-round.
+
+- M17: a user-approved dependency can be integrated quickly when the approval, docs, CI and README
+  requirement updates happen in the same intake step (dependencies.md approval log, package list,
+  CI apt line, dependency tables) and the implementation stays behind a Lead-published public API
+  with the library type out of public headers — the render and shell halves could then run in
+  parallel against that frozen contract. Keep the dependency decision record (purpose, license,
+  size/maintenance cost, from-scratch alternative) in dependencies.md, not only in the chat.
+- M17: content-based dispatch (`DecodeImage` detects PNG/JPEG by magic bytes, never by file
+  extension) kept the shell codec-agnostic and made mixed-format pages a free by-product; the shell
+  task only changed one call plus fixtures. When a new format is added, extend the dispatcher and
+  the format-specific tests rather than teaching callers about extensions or MIME types.
+- M17: the parallel shell task found a crash the render unit tests had not yet covered (truncated
+  JPEG segfaulted because the libjpeg error manager was recovered from a non-first struct member
+  and `longjmp` used a corrupt target). The Lead reproduced it with gdb, sent the exact diagnosis,
+  and required a regression test through both public entry points plus the shell repro. Lesson:
+  libjpeg-style `setjmp`/`longjmp` error managers need an explicit standard-layout+offsetof
+  container-of design and a truncated-input test; cross-module integration testing finds these
+  before the commit, not the unit suite alone.
+- M17: JPEG is lossy, so frozen binary fixtures are not enough — document per-channel tolerances
+  and frame tests around them (never whole-file/bit-exact pixel comparisons). Keep the fixture
+  generator committed next to the fixtures and state that decoded levels may differ by a couple of
+  levels with another libjpeg build; that keeps the tests honest and portable. Also verify PNG
+  behavior is untouched with a byte-identical pre-round gate plus a GCC-vs-Clang PPM comparison.
+- M17: real-site checks should target pages that are directly reachable without a proxy (the
+  browser has none until M16) and whose JPEGs are inline replaced images: gnu.org/debian.org worked
+  (gnu 8 -> 13 `<img>` boxes, five distro JPEG thumbnails painted; debian 3 -> 8, 5.79% pixel
+  diff), while w3.org's JPEGs stay invisible because they are `display:block` replaced elements —
+  a pre-existing M8a layout limit, not a decoder bug. Report the limitation explicitly instead of
+  presenting a 0.00% diff as success.

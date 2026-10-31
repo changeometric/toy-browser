@@ -417,6 +417,34 @@ add_test(NAME shell.css_compat_screenshot_borders
           -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/css_compat_screenshot_borders.ppm
           -P "${CMAKE_CURRENT_SOURCE_DIR}/css_compat_screenshot_check.cmake")
 
+# M17 JPEG images: the shell page loader decodes images by CONTENT through
+# render::DecodeImage, so a page that mixes PNG and JPEG works with no shell
+# knowledge of the codec. The committed jpeg_site fixture uses the JPEG/PNG files
+# from tests/fixtures/images/ (jpeg_rgb_16x8.jpg, jpeg_gray_16x8.jpg,
+# jpeg_progressive_16x8.jpg, jpeg_truncated_16x8.jpg and flag_16x8.png) plus a
+# missing.jpg: valid JPEGs paint, broken JPEGs are skipped silently. JPEG is
+# lossy, so the C++ test compares pixels with the documented per-channel
+# tolerance; file:// only, no network, display or installed font.
+set(shell_jpeg_site "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/jpeg_site")
+
+add_executable(shell_jpeg_test jpeg_test.cpp)
+# The test includes the shell-private page loader header on purpose.
+target_include_directories(shell_jpeg_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../src/shell")
+target_link_libraries(shell_jpeg_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(shell_jpeg_test)
+add_test(NAME shell.jpeg COMMAND shell_jpeg_test "${shell_jpeg_site}")
+
+# --dump-boxes over the same fixture: the JPEG rows reserve their intrinsic 16x8
+# boxes and the CSS-scaled progressive JPEG a 32x16 box, exactly like PNG, while
+# the missing/truncated rows keep text only.
+add_test(NAME shell.jpeg_dump_boxes
+  COMMAND $<TARGET_FILE:toybrowser> --size 320x400 --dump-boxes
+          "file://${shell_jpeg_site}/index.html")
+set_tests_properties(shell.jpeg_dump_boxes PROPERTIES
+  PASS_REGULAR_EXPRESSION
+    "<img> inline x=8 y=24 width=16 height=8([^\n]*\n)* *<img> inline x=8 y=72 width=16 height=8([^\n]*\n)* *<img> inline x=8 y=120 width=32 height=16([^\n]*\n)* *<img> inline x=8 y=168 width=16 height=8([^\n]*\n)* *<img> inline x=24 y=168 width=16 height=8")
+
 # M10: every pre-M10 test that runs toybrowser or a Browser through the automatic
 # system-font selection uses the empty config, which forces the built-in bitmap
 # font. Their outputs are the pre-M10 goldens, so they must stay byte-identical.
@@ -455,6 +483,8 @@ foreach(shell_bitmap_font_test IN ITEMS
     shell.dump_style_css_compat_borders
     shell.css_compat_screenshot
     shell.css_compat_screenshot_borders
+    shell.jpeg
+    shell.jpeg_dump_boxes
     shell.fonts
     shell.fonts_dump_boxes
     shell.fonts_missing_file

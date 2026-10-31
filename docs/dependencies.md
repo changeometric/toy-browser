@@ -5,7 +5,7 @@ what is still being requested.
 
 ## Inventory today
 
-**Six third-party packages are linked:**
+**Seven third-party packages are linked:**
 
 - **libX11 (MIT/X11)**, used by the X11 window backend (M1).
 - **libpng + zlib (libpng license / zlib license)**, used by `render` to decode PNG images (M8a)
@@ -20,6 +20,9 @@ what is still being requested.
   explicit `--font-family` path since M8b, and since M10 the automatic selection of the computed CSS
   font properties with language hints and character-coverage fallback. Discovered with
   `find_package(Fontconfig REQUIRED)`.
+- **libjpeg (libjpeg-turbo, IJG license / BSD-3-Clause)**, used by `render` to decode JPEG/JPG
+  images (M17). Discovered with CMake's `find_package(JPEG REQUIRED)` and linked PRIVATE to
+  `toy_render`; libjpeg types stay out of public headers.
 - **OpenSSL (libssl + libcrypto, Apache-2.0)**, used by `net` for TLS/`https://` fetching (M9).
   Discovered with `find_package(OpenSSL REQUIRED)` and linked PRIVATE to `toy_net`; certificate
   verification is always on against the default trust store and there is no insecure mode.
@@ -49,6 +52,14 @@ Approved by the user on 2026-10-31, before M8a started, and linked in M8b:
 - **fontconfig** — installed-font discovery and matching, used by the shell to resolve
   `--font-family NAME` to a font file. License: fontconfig's MIT-style license. Linked through
   `find_package(Fontconfig REQUIRED)` in `src/shell/CMakeLists.txt`.
+
+Approved by the user on 2026-10-31, for JPEG image support (M17) and linked since M17:
+
+- **libjpeg (libjpeg-turbo, IJG license / BSD-3-Clause)** — JPEG/JPG decoding for `<img>` and
+  future image formats work. Discovered with CMake's `find_package(JPEG REQUIRED)` and linked
+  PRIVATE to `toy_render`; no vendoring, no hardcoded version or path. It is a low-level codec
+  only: the browser's image loading/resource policy stays in our code, and the same bounds,
+  error style and ARGB representation as the PNG decoder are enforced by `render`.
 
 Approved by the user on 2026-10-31, for M9 and linked since M9:
 
@@ -86,6 +97,7 @@ without a display.
 | harfbuzz | OpenType shaping (ligatures, glyph selection, positioning) | Basic Latin shaping only | High | **Approved, linked since M8b** (used by `render::Font`) |
 | fontconfig | Installed-font discovery and matching, including automatic CSS/property matching since M10 | Hardcoded font path / no discovery | Medium | **Approved, linked since M8b** (used by `shell` for `--font-family` and the M10 automatic selection/fallback) |
 | OpenSSL | TLS, i.e. `https://` | Not realistic from scratch | High | **Approved on 2026-10-31, linked since M9** (always-on certificate/hostname verification, default trust store) |
+| libjpeg (libjpeg-turbo) | JPEG/JPG image decoding | Own baseline JPEG decoder (Huffman, IDCT, YCbCr, progressive) | High (~1,500–3,000 lines) | **Approved by the user on 2026-10-31, linked since M17** (`render::DecodeJpeg`, PRIVATE to `toy_render`; EXIF orientation/ICC ignored) |
 | stb_truetype / stb_image | Drop-in single-header implementations | Own implementations | Low | **Not approved** — conflicts with the project's spirit |
 | icu | Unicode data and full internationalization | Small ASCII/Latin subset first | High | **Not planned** |
 

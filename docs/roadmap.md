@@ -4,8 +4,9 @@ Each milestone is a minimal vertical slice: small, buildable, demoable and teste
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
 **Current status: M0–M14 are done (M14 = CSS compatibility batch 1: M14a values & typography, M14b
-box decorations & constraints). M15 (flexbox/position/float subset) is the next planned milestone.
-The HTTP proxy (M16) and the JavaScript subset are deferred.** For a snapshot and takeover guide, read
+box decorations & constraints), and M17 (JPEG image support) was delivered out of sequence at the
+maintainer's request. M15 (flexbox/position/float subset) is the next planned milestone. The HTTP
+proxy (M16) and the JavaScript subset are deferred.** For a snapshot and takeover guide, read
 [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
@@ -175,7 +176,7 @@ The HTTP proxy (M16) and the JavaScript subset are deferred.** For a snapshot an
   every pre-existing test pass under GCC and Clang with warnings as errors (46 tests total);
   image-less dumps and screenshots are byte-identical to M7; GCC and Clang produce byte-identical
   image PPMs; the window shows the image page.
-- Known M8a limits: PNG only (whatever libpng converts to 8-bit RGBA; no JPEG/GIF/WebP/SVG), no
+- Known M8a limits: PNG only at M8a (JPEG was added in M17; GIF/WebP/SVG remain unsupported), no
   `background-image`, `srcset`, `alt` text or broken-image indicator, no image cache (a duplicate
   URL is fetched once per `<img>`), HTML `width`/`height` attributes are ignored (CSS px only),
   `display:block` replaced elements and margins/padding on replaced elements are unsupported,
@@ -601,13 +602,69 @@ The HTTP proxy (M16) and the JavaScript subset are deferred.** For a snapshot an
   direct outbound traffic is restricted.
 - Scope and contracts are frozen at the start of that round; no new dependency is expected.
 
+## M17 — JPEG image support ✅ (done, delivered out of sequence at the maintainer's request)
+
+- Goal met: JPEG/JPG `<img>` sources now decode and render like PNGs, including mixed-format pages,
+  using the user-approved libjpeg (libjpeg-turbo) dependency instead of rejecting the bytes.
+- Dependency: the user approved libjpeg-turbo on 2026-10-31 for JPEG decoding; it is recorded in
+  [dependencies.md](dependencies.md) (inventory/approval log/candidate table), discovered with
+  `find_package(JPEG REQUIRED)` and linked PRIVATE to `toy_render` (no vendoring, no version/path
+  pinning); the README/CONTRIBUTING package lists and CI apt list gained `libjpeg-dev`.
+- `render`: new `render::DecodeJpeg` (libjpeg types stay private) and content-based
+  `render::DecodeImage` next to the untouched `render::DecodePng`. `DecodeImage` detects PNG by its
+  eight-byte signature and JPEG by the `FF D8 FF` SOI marker — never by file extension — and
+  dispatches to the matching decoder; unknown data is a readable error. `DecodeJpeg` supports
+  baseline and progressive streams and grayscale, RGB, YCbCr and CMYK/YCCK sources, always producing
+  straight-alpha ARGB with alpha 255. It enforces the same inclusive bounds as PNG
+  (`kMaxImageDimension` per side, `kMaxImagePixels` total) before allocating, never throws and
+  leaves `out` untouched on failure. libjpeg-turbo's libjpeg API cannot convert CMYK/YCCK to RGB
+  (`JERR_CONVERSION_NOTIMPL`), so those streams decode to `JCS_CMYK` and are folded with the
+  conventional inverted-Adobe formula `channel = sample * black / 255`. EXIF orientation, ICC
+  profiles and other metadata are ignored (pixels are decoded in stored orientation). Truncation
+  warnings (`Premature end of JPEG file`, `Corrupt JPEG data: premature end of data segment`) are
+  promoted to decode errors so a partial image is never returned as complete; benign warnings (for
+  example extraneous bytes before a marker) are tolerated silently and nothing is printed. A crash
+  in the first implementation (the libjpeg error manager was recovered from the wrong struct
+  offset, so `longjmp` used a corrupt context) was caught by the shell task and fixed with a
+  standard-layout `ErrorManager { jpeg_error_base; context* }` plus `offsetof`/standard-layout
+  static assertions and a truncated-input regression test.
+- `shell`: the private image loader now calls `DecodeImage` instead of `DecodePng` at the same point,
+  so pages may mix PNG and JPEG sources; failures stay silently skipped and remembered per resolved
+  URL, page loads never fail because of an image, and the M13 per-page URL dedup/cache semantics are
+  unchanged.
+- Fixtures/tests: self-authored committed JPEG fixtures plus a committed libjpeg-based generator
+  (`tests/fixtures/images/generate_jpeg.cpp`): baseline RGB quadrants, grayscale, progressive,
+  Adobe CMYK, a 9000x1 too-wide case and a truncated stream; the fixture README documents the pixel
+  content, per-fixture tolerances (JPEG is lossy), the CMYK/warning policies and the regeneration
+  command (decoded levels may differ by a couple of levels on another libjpeg build; tests compare
+  within tolerances, never whole files). New `render.jpeg` covers decoding, bounds, error/`out`
+  untouched, `DecodeImage` dispatch, malformed/garbage data and determinism;
+  `tests/fixtures/jpeg_site/` plus `shell.jpeg`/`shell.jpeg_dump_boxes` cover mixed PNG/JPEG pages,
+  intrinsic sizes/CSS scaling, missing/truncated silent skips and Browser pixels within tolerance;
+  88 tests total.
+- Acceptance reached: all 85 pre-M17 tests plus the 3 new tests pass under GCC and Clang with
+  warnings as errors (88 tests); every pre-M17 output (PNG image pages, CSS pages, dumps, screenshots,
+  exit status) is byte-identical to the pre-JPEG binary (25-case gate, no normalization needed) and
+  GCC/Clang outputs are identical; manual real-site checks on directly reachable pages show JPEG
+  images applying: gnu.org's `<img>` boxes went 8 -> 13 and its five distro screenshot JPEGs are now
+  painted (800x1600 pixel diff 7.98%), debian.org's boxes went 3 -> 8 with five JPEG photos
+  (5.79%); w3.org's three JPEGs decode but remain invisible because they are `display:block`
+  replaced elements, a pre-existing M8a layout limitation (M15 scope). No new runtime dependency
+  beyond the approved libjpeg.
+- Known limits after M17: JPEG metadata is ignored (no EXIF orientation, no ICC/color management);
+  CMYK decoding assumes Adobe-style inverted samples (the standard for CMYK JPEGs; non-Adobe
+  four-component files are rare and treated the same); decoded channel levels are lossy and may
+  differ slightly with the libjpeg build (tests use tolerances); GIF/WebP/SVG and `background-image`/
+  `srcset` remain unsupported; the pre-existing `display:block` replaced-element layout limitation
+  still hides some real-site JPEGs until M15.
+
 ## Deferred — JavaScript subset
 
 - The user shelved the JavaScript subset on 2026-10-31; it is not the next milestone. It remains a
   large optional milestone (lexer, parser, small interpreter, DOM bindings and event handlers);
   do not start it without an explicit user priority decision.
 
-## M17+ — Opportunistic
+## M18+ — Opportunistic
 
 More CSS (additional flex/grid, tables), forms, more image formats, better text handling,
 conformance suites and further performance. Each item starts only after the previous slice is clean
@@ -615,8 +672,9 @@ and the maintainer agrees on priority.
 
 ## Backlog — planned follow-ups
 
-- **More image formats and background images** — JPEG/GIF/WebP, `background-image`,
-  `srcset`, an image cache and lazy loading; scheduled after M8a on demand, blocking no milestone.
+- **More image formats and background images** — GIF/WebP/SVG, `background-image`,
+  `srcset`, an image cache and lazy loading; JPEG shipped in M17, the rest are scheduled on demand
+  and block no milestone.
 - **Web fonts and richer text** — `@font-face`/font downloads, synthetic bold/italic, variable
   font instances, bidi/RTL and full Unicode line breaking (UAX#14), dictionary breaking for Thai/
   Khmer/Lao and complex-script refinements; M10 deliberately covers English and Chinese first,

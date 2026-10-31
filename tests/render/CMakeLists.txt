@@ -25,6 +25,11 @@ toybrowser_set_warnings(render_image_test)
 target_link_libraries(render_image_test PRIVATE toy_render toy_test_support)
 add_test(NAME render.image COMMAND render_image_test "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/images")
 
+add_executable(render_jpeg_test jpeg_test.cpp)
+toybrowser_set_warnings(render_jpeg_test)
+target_link_libraries(render_jpeg_test PRIVATE toy_render toy_test_support)
+add_test(NAME render.jpeg COMMAND render_jpeg_test "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/images")
+
 add_executable(render_font_ttf_test font_ttf_test.cpp)
 toybrowser_set_warnings(render_font_ttf_test)
 target_link_libraries(render_font_ttf_test PRIVATE toy_render toy_test_support)

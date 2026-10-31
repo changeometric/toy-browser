@@ -21,7 +21,7 @@
 需要 Linux、CMake 3.20 或更新版本，以及 C++20 编译器。Debian/Ubuntu：
 
 ```sh
-sudo apt install cmake g++ clang libx11-dev libpng-dev libfreetype-dev \
+sudo apt install cmake g++ clang libx11-dev libpng-dev libjpeg-dev libfreetype-dev \
     libharfbuzz-dev libfontconfig1-dev libssl-dev
 ```
 
