@@ -21,11 +21,17 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M8b | Real fonts: `render::Font` (freetype metrics/rasterization + harfbuzz shaping, 4096 px effective size cap) behind a frozen pimpl, anti-aliased `DrawTextWithFont` with baseline placement, `--font PATH` / `--font-family NAME` (fontconfig) selection, self-authored font fixture and `tests/fixtures/font_site/`, 55 tests; the bitmap path stayed byte-identical |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-Not implemented yet: JavaScript (M9), `https`/TLS, proxies, external stylesheets, borders,
-horizontal scrolling/scrollbars, hover/active link styling and form controls, and CSS-driven font
-selection (`font-family`/`font-weight`/`font-style`, fallback chains, `@font-face`). PNG images work
-since M8a and real TTF text since M8b, both opt-in for fonts (see the M8a/M8b known limits in
-[roadmap.md](roadmap.md)). The window and `--screenshot` paint a real page when a URL is given and
+**Next planned milestone: M9 — most-basic HTTPS (documented, not started).** The user approved
+OpenSSL for TLS on 2026-10-31 (recorded in [dependencies.md](dependencies.md)); it is not linked
+yet. M10 (HTTP proxy) is planned after it, and the JavaScript subset was shelved by the user. This
+is a documentation/planning round: no M9 code exists yet, so the current behaviour and the 55
+tests are unchanged.
+
+Not implemented yet: `https`/TLS (planned M9), proxies (planned M10), JavaScript (deferred),
+external stylesheets, borders, horizontal scrolling/scrollbars, hover/active link styling and form
+controls, and CSS-driven font selection (`font-family`/`font-weight`/`font-style`, fallback chains,
+`@font-face`). PNG images work since M8a and real TTF text since M8b, both opt-in for fonts (see
+the M8a/M8b known limits in [roadmap.md](roadmap.md)). The window and `--screenshot` paint a real page when a URL is given and
 the M1 placeholder page otherwise; with a page URL the window is also browsable (links,
 wheel/keyboard scrolling, Alt+Left/Right history, `<title>`). The `--dump-*` modes remain the
 primary debugging path.
@@ -63,14 +69,14 @@ headers (all approved dependencies); only windowed mode needs a running display.
     "file://$PWD/tests/fixtures/img_site/index.html" | grep '<img>'
 
 # Real fonts: the committed self-authored fixture is deterministic and installed fonts are only
-# for manual demos (e.g. --font-family "DejaVu Sans").
+# for manual demos (e.g. --font-family "sans-serif").
 "$BUILD"/toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x600 \
     --screenshot /tmp/toybrowser-font.ppm "file://$PWD/tests/fixtures/font_site/index.html" \
     && file /tmp/toybrowser-font.ppm
 "$BUILD"/toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x200 --dump-boxes \
     "file://$PWD/tests/fixtures/font_site/index.html"
-"$BUILD"/toybrowser --font-family "DejaVu Sans" --size 400x200 \
-    --screenshot /tmp/toybrowser-dejavu.ppm "file://$PWD/tests/fixtures/nav_site/index.html"
+"$BUILD"/toybrowser --font-family "sans-serif" --size 400x200 \
+    --screenshot /tmp/toybrowser-system-font.ppm "file://$PWD/tests/fixtures/nav_site/index.html"
 ```
 
 Expected: the image screenshot renders the committed PNG fixtures (flags, alpha, gray, palette) and
@@ -87,27 +93,44 @@ Window demo (needs a display):
 
 ```sh
 "$BUILD"/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"
-"$BUILD"/toybrowser --font-family "DejaVu Sans" --size 400x200 \
+"$BUILD"/toybrowser --font-family "sans-serif" --size 400x200 \
     "file://$PWD/tests/fixtures/nav_site/index.html"
 # img page: check the PNG images are painted; real-font page: check anti-aliased text; nav page:
 # click "About page", scroll with the wheel/arrows/PageUp/PageDown/Home/End, Alt+Left/Right for
 # history; the title follows <title>.
 ```
 
-## Next round: M9 — JavaScript subset (optional, large; needs the user's priority)
+## Next round: M9 — most-basic HTTPS (planned; OpenSSL approved, not started)
 
-- Goal: a tiny ES5-like subset: lexer, parser, small interpreter, DOM bindings and event handlers,
-  enough for a fixture page's script to mutate the DOM and have the change painted.
-- This is a large, optional milestone: confirm with the user that it is the desired next step (the
-  backlog below is the alternative). It needs new modules/packages design work
-  (`docs/architecture.md` lists a `js` module), but no new dependency.
-- Acceptance sketch: a fixture page runs a script, mutates the DOM and the mutated content renders
-  headlessly (`--screenshot`/a dump), with the existing 55 tests and GCC/Clang warning-free builds.
-- Still out of scope for now: forms, `https`/TLS, proxies, external CSS.
+**Status:** the design is frozen in [roadmap.md](roadmap.md) and [decisions.md](decisions.md) but
+**no M9 code has been written**. OpenSSL was approved on 2026-10-31 and is not linked yet
+([dependencies.md](dependencies.md)); implementation starts only on the user's go-ahead and needs
+the OpenSSL development headers (agents never install packages).
 
-Backlog instead of/after M9 (details in [roadmap.md](roadmap.md)): proxy support, TLS, CSS font
-selection/fallback chains, more image formats/background images, and test-helper migration.
+- Goal: `Fetch()` accepts absolute `https://` URLs so HTTPS pages/images render through the
+  existing pipeline. MVP bar: connect and issue the request; everything beyond that is out.
+- Settled decisions (details in the roadmap/decisions): `https` default port 443; HTTP/1.1 over
+  OpenSSL with always-on certificate/hostname verification and SNI, system/default trust store and
+  no insecure mode; existing timeouts and `FetchOptions` unchanged; redirects via
+  `net::ResolveUrl` (relative/protocol-relative, http<->https allowed); no proxy (M10), HTTP/2,
+  compression, cookies, HSTS or HTTP caching; deterministic tests use a committed self-signed test
+  CA/leaf certificate and an in-process TLS loopback server, never the public network.
+- Task split: (1) `net` URL + OpenSSL TLS transport + tests (`src/net/`, `tests/net/`,
+  `tests/fixtures/tls/`); (2) shell/test end-to-end HTTPS page (`tests/shell/`,
+  `tests/fixtures/https_site/`). The Lead freezes contracts, integrates, runs GCC+Clang WERROR and
+  the byte-compatibility gate, and makes one grouped commit.
+- Acceptance: existing 55 tests plus new URL/TLS/HTTPS tests green on GCC and Clang; a local HTTPS
+  page with an image renders headlessly; certificate/hostname/timeout failures are explicit;
+  http/file output stays byte-identical. Direct real-site checking is manual and network-dependent
+  (restricted networks wait for M10).
+- Main risk: non-blocking OpenSSL I/O/handshake timeouts. Verification stays on and no insecure
+  bypass is added. Real sites may still render poorly (HTTP/2, compression, cookies, JS).
 
+After M9: **M10 — HTTP proxy** (http absolute-form + https `CONNECT`) unlocks real-site testing on
+restricted networks.
+
+## Map of the repository
+## Map of the repository
 ## Map of the repository
 
 - `src/<module>/` — one CMake library target per module (`base` does not exist yet; see
@@ -245,7 +268,9 @@ selection/fallback chains, more image formats/background images, and test-helper
   Layout is deliberately iterative (10,000 nested divs are a test): do not turn it back into DOM
   recursion.
 - Build artifacts and object files must never be committed; use isolated build directories.
-- No `https` yet: most real-world sites cannot be fetched; `http://` and `file://` work.
+- `https` is not implemented yet (M9 planned): `http://` and `file://` work. The M9 plan above is
+  the only agreed direction; do not start it without the user's go-ahead, and do not add an
+  insecure TLS mode.
 - The HTML/CSS/URL parsers are error-tolerant by design; they never fail on malformed input, so
   "it didn't error" is not evidence of correctness — compare dumps with the golden tests.
 - `--dump-boxes` uses `--size`'s width as the viewport and ignores the height; heights come from
@@ -280,9 +305,9 @@ selection/fallback chains, more image formats/background images, and test-helper
   M7 limits); do not 'fix' either without a contract change.
 - The window loop rebuilds the layout and display list on expose, resize and scroll. That is
   correct and deliberately simple for the MVP; only optimize it with evidence.
-- The built-in 8x16 glyph table is hand-authored and its shapes are reviewed visually (the user's
-  preference): there is deliberately no frozen glyph-bitmap/fingerprint test. Changing a glyph is a
-  visual change — render a sample and look at it before committing.
+- The built-in 8x16 glyph table is hand-authored and its shapes are reviewed visually: there is
+  deliberately no frozen glyph-bitmap/fingerprint test. Changing a glyph is a visual change —
+  render a sample and look at it before committing.
 - libpng is a required build dependency now (`find_package(PNG REQUIRED)` in
   `src/render/CMakeLists.txt`); a build without its development headers fails at configure time.
   Do not hardcode versions or paths, and keep `png.h` out of public headers.
@@ -314,7 +339,8 @@ selection/fallback chains, more image formats/background images, and test-helper
   Rerun a `git worktree` baseline of the previous commit after any painting/font change.
 - Real-font tests must use the committed self-authored fixture `tests/fixtures/fonts/toy_test.ttf`
   and never installed fonts; the fontconfig CLI test points `FONTCONFIG_FILE` at a generated config
-  whose only `<dir>` is the fixture fonts. Installed fonts (e.g. DejaVu Sans) are for manual demos.
+  whose only `<dir>` is the fixture fonts. Installed fonts are for manual demos only (any
+  fontconfig family works, e.g. `sans-serif`).
 - Do not assert exact freetype coverage bytes in tests: anti-aliased pixels are library-version
   dependent. `render.paint` asserts ink regions, AA presence, clip bounds, no-ops and determinism;
   `shell.fonts` asserts page regions and the frozen layout geometry. GCC and Clang must still

@@ -27,15 +27,19 @@
 | M8 拆成 M8a（PNG 图片）与 M8b（真实字体）两轮 | 两个更小、可独立审查的轮次；图片与字体相互独立且风险更低 | [roadmap.md](roadmap.md) |
 | 图片以整数设备像素的显示列表 `DrawImage` 命令绘制，使用冻结的最近邻源映射与和填充相同的 SrcOver 公式；没有解码图片的页面产出与 M8a 之前完全相同的命令列表 | MVP 中缩放与混合确定、逐字节兼容，不做插值或抗锯齿 | [architecture.md](architecture.md), `src/render/include/toy/render/paint.h` |
 | replaced 元素的固有尺寸以调用方提供的、按 DOM 节点 id 索引的映射传给布局；布局从不依赖 render 或图片 | 保持 layout → render 边界，并让布局可用假尺寸测试 | [architecture.md](architecture.md), `src/layout/include/toy/layout/box.h` |
-| 手写位图字形表靠肉眼复核；不保留冻结的字形位图/指纹测试 | 用户更愿意自己看字形，而不是维护硬编码期望；real-font 测试同样断言着墨区域/AA 存在性，而不是依赖库版本、会变化的覆盖率字节 | `src/render/font.cpp`, [handoff.md](handoff.md) |
+| 手写位图字形表靠肉眼复核；不保留冻结的字形位图/指纹测试 | 冻结位图/指纹测试脆弱且不值得维护；real-font 测试同样断言着墨区域与 AA 存在性，而不是依赖库版本、会变化的覆盖率字节 | `src/render/font.cpp`, [handoff.md](handoff.md) |
 | HTML/CSS 支持是显式子集，已知限制有文档 | 这是浏览器玩具，不是规范符合性项目 | [roadmap.md](roadmap.md) |
 | 文本默认使用内置位图字体；真实 TTF 字体是按运行可选（M8b），通过 `--font PATH` 或 fontconfig 的 `--font-family NAME` 选择（freetype + harfbuzz + fontconfig） | 在布局存在前避免字体依赖；opt-in 让 M8b 之前的 dump 与截图逐字节不变，并让测试不依赖已安装字体 | [roadmap.md](roadmap.md), [handoff.md](handoff.md) |
-| 只支持 HTTP/1.1；尚无 TLS 与代理（用户已推迟） | 与玩具范围相称；需要时再考虑 | [roadmap.md](roadmap.md), [open-questions.md](open-questions.md) |
+| 只支持 HTTP/1.1；TLS 使用已批准的 OpenSSL（计划 M9，尚未链接）；HTTP 代理计划为 M10；JavaScript 子集已暂缓 | 用户 2026-10-31 的优先级：需要 HTTPS 来测试真实站点，但从零实现 TLS 不合比例，因此使用已批准库；代理是独立的小轮次；JS 暂缓 | [roadmap.md](roadmap.md), [dependencies.md](dependencies.md), [open-questions.md](open-questions.md) |
 | 假定输入为 UTF-8（剥离 BOM）；无编码检测 | 让 M2–M4 保持小；编码以后再加 | [roadmap.md](roadmap.md) |
 | 每轮一个合并提交；仓库文件用英语，`README.zh.md` / `docs/zh/**` 除外 | 历史可读、仓库统一 | [AGENTS.md](../../AGENTS.md), [conventions.md](conventions.md) |
 
 | Real-font 文本使用抗锯齿：freetype 8-bit 字形覆盖率用冻结的 SrcOver 公式混合，显示列表命令把文本放在基线上（`round(box.y) - scroll_y + round(font ascent)`）；位图路径保持 cell 顶部、不透明、无抗锯齿的像素 | 让真实文本观感正常，同时保持默认位图渲染器及其 golden 测试不变 | [architecture.md](architecture.md), `src/render/include/toy/render/paint.h` |
 | real-font 的有效字号被钳制到 `kMaxRealFontSizePx`（4096 px），用于度量、整形与光栅化 | 对抗性 CSS 字号不能让 freetype 分配无界的字形覆盖率位图；钳制让布局与绘制一致并让内存有界 | `src/render/include/toy/render/font.h`, [roadmap.md](roadmap.md) |
 | 字体选择由 shell 每次运行解析一次：字体文件（`--font`）或 fontconfig 对字体族的最佳匹配（`--font-family`），只用 face 0，整个会话一个 face；未知字体族回退而不是报错 | 最小且确定性的字体选择契约；fontconfig 的回退行为符合其正常语义，每会话一个 face 保持 MVP 范围清晰 | [architecture.md](architecture.md), `src/shell/include/toy/shell/application.h` |
+| M9（计划）是最小 HTTP/1.1-over-TLS 切片：用 OpenSSL 抓取绝对 `https://` URL，始终校验证书与主机名（使用系统/默认信任库，含 SNI），没有 insecure 模式，也不做 HTTP/2/ALPN、压缩、cookie/会话、HSTS、客户端证书、TLS 会话复用或 HTTP 缓存 | 用户要求“最基础的 HTTPS 请求”并强调 MVP；安全基本线的正确性不可妥协，其他都刻意排除 | [roadmap.md](roadmap.md), [dependencies.md](dependencies.md) |
+| M9（计划）保持 `FetchOptions` 不变并复用现有超时参数：TCP 连接用 `connect_timeout_ms`，TLS 握手与 TLS 读用 `read_timeout_ms` | MVP 不增加新配置面；现有阻塞 `Fetch()` 契约与错误风格保持不变 | [roadmap.md](roadmap.md) |
+| M9（计划）用 `net::ResolveUrl` 解析重定向 `Location`，允许 http<->https 目标并拒绝 file 目标 | 复用已测试的 RFC 3986 解析器而不是旧的手写重定向解析器，改动更小，同时修复相对/协议相加重定向 | [roadmap.md](roadmap.md), [handoff.md](handoff.md) |
+| M9（计划）TLS 测试使用提交的自签测试 CA 加 `localhost` 叶证书/私钥与进程内 TLS loopback 服务器；没有测试访问公网 | 确定性、headless、独立于机器连通性与公共 CA 轮换；仅测试用的证书在 fixture README 中文档化 | [roadmap.md](roadmap.md), [handoff.md](handoff.md) |
 
 如果某个决策变得不合适，不要悄悄偏离：在 [open-questions.md](open-questions.md) 中提出，或与用户讨论，然后在同一轮更新本文件、受影响的文档与代码。

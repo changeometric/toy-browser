@@ -11,13 +11,13 @@
 | `base` | 小型共享工具（几何、日志、UTF-8），只在出现需要时才存在 | — | 首次需要时 |
 | `platform` | 窗口、输入事件、事件循环、呈现像素表面 | `base` | M1 |
 | `render` | 显示列表、软件光栅化器、内置位图字体（度量与字形）、PNG 图片解码（已批准的 libpng）、真实字体引擎（已批准的 freetype + harfbuzz） | `base` | M1 |
-| `net` | URL 解析、socket、HTTP/1.1 抓取 | `base` | M2 |
+| `net` | URL 解析、socket、HTTP/1.1 抓取、经由已批准 OpenSSL 的 TLS（计划 M9） | `base` | M2 |
 | `dom` | HTML tokenizer（词法分析器）、树构建器、DOM arena（区域分配器） | `base` | M3 |
 | `css` | CSS tokenizer、规则/声明解析器、选择器 | `base` | M4 |
 | `style` | 层叠与计算样式、默认样式表 | `dom`、`css` | M4 |
 | `layout` | 盒树、块级/行内布局、换行 | `dom`、`style`、来自 `shell` 的文本度量回调 | M5 |
 | `paint` | 从盒树构建显示列表（元素背景与文本） | `dom`、`style`、`layout`、`render` | M6 |
-| `js` | 小型 JavaScript 引擎与 DOM 绑定（可选，最后） | `dom`、`base` | M9 |
+| `js` | 小型 JavaScript 引擎与 DOM 绑定（可选，用户已暂缓） | `dom`、`base` | 暂缓 |
 | `shell` | 导航、流水线编排、窗口外壳、字体选择（字体族查找使用已批准的 fontconfig） | 所有模块 | M1 |
 
 依赖只向下指向；没有环。`render` 完全不了解 HTML/CSS（它消费显示列表）；`paint` 认识 DOM/样式/布局数据但从不光栅化；`platform` 不了解页面内容（它 blit 像素并上报输入）。只有 `shell` 能看到所有模块并把它们接在一起。`base` 尚不存在：M1–M6 的模块只用标准库与标准 POSIX 接口，只有当共享工具确实需要时该模块才出现。
@@ -40,7 +40,9 @@
 
 MVP 保持整条链路同步、单线程。每个阶段接收普通数据并返回普通数据，因此每个阶段都能在测试中通过 `--dump-*` 命令单独驱动。
 
-网络（M2）：`net` 拥有 URL、socket 和 HTTP。抓取是阻塞式 HTTP/1.1 GET——每个连接一个请求、连接与读取超时、`Content-Length` 或 chunked body、重定向、无 TLS、无 keep-alive——封装在 `Fetch()` 之后，因此以后可以改成非阻塞而不改调用方。`net` 是唯一允许触碰 socket 的模块；页面代码永远看不到 socket。代理支持（先支持 HTTP 代理）计划放在 `FetchOptions` 后面并保持在 `net` 内部；它不需要新依赖。
+网络（M2）：`net` 拥有 URL、socket 和 HTTP。抓取是阻塞式 HTTP/1.1 GET——每个连接一个请求、连接与读取超时、`Content-Length` 或 chunked body、重定向、尚无 TLS、无 keep-alive——封装在 `Fetch()` 之后，因此以后可以改成非阻塞而不改调用方。`net` 是唯一允许触碰 socket 的模块；页面代码永远看不到 socket。代理支持（先支持 HTTP 代理）计划为 M10，放在 `FetchOptions` 后面并保持在 `net` 内部；它不需要新依赖。
+
+TLS / HTTPS（M9，已计划；尚无代码）：`net` 将接受 `https` scheme（默认端口 443），并让同一套 HTTP/1.1 请求/响应代码运行在一个很小的字节流抽象之上，使纯 socket 与 TLS 共享同一份 HTTP 实现。TLS 使用已批准的 OpenSSL 库并位于 `Fetch()` 之后：`SSL_CTX` 从 OpenSSL 默认信任库初始化一次，每连接设置 SNI 与主机名校验，证书校验始终开启，握手/读取循环使用现有非阻塞 socket + `poll` 超时（TCP 连接用 `connect_timeout_ms`，TLS 握手与读取用 `read_timeout_ms`）。重定向将用 `net::ResolveUrl` 解析，并允许在 http 与 https 之间切换。M9 不计划 ALPN/HTTP/2、压缩、cookie、HSTS、客户端证书或 insecure 模式；由于 shell 已经全部经过 `ParseUrl`/`ResolveUrl`/`Fetch`，预计无需改动 shell 的 API 或 CLI。
 
 HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM。解析是容错的，且总是产生一个带 `head` 和 `body` 子节点的 `html` 元素；tokenizer 覆盖支持的子集（元素与属性、注释、doctype、raw-text 与 RCDATA 元素、少量实体），遇到畸形输入也永不失败。`DumpDocument()` 是确定性的文本形式，供 `--dump-dom` 与解析器测试使用。节点用整数 id 寻址（没有持有指针、没有环）；DOM 完全不了解 CSS、布局或脚本。
 
@@ -154,6 +156,7 @@ freetype/harfbuzz 类型，加载失败是普通错误，字体自己持有 face
 - 解析器/布局的 golden 文件是逐行比较的文本 dump。截图是确定性的（整数像素、无抗锯齿），因此绘制测试精确比较像素，跨编译器运行产出逐字节相同的 PPM；不需要图像容差。
 - 测试是确定性的，从不需要网络、显示器、已安装字体或特定 locale。
 - M8b real-font 测试使用提交的自造 `tests/fixtures/fonts/toy_test.ttf`（从不使用已安装字体）：`render.font_ttf` 覆盖加载/度量/整形/钳制，扩展后的 `render.paint` 覆盖 AA 覆盖率/裁剪/基线/no-op，`shell.fonts` 覆盖端到端 real-font 页面，CLI 检查覆盖 `--font`、`--font-family`（配合测试局部 `FONTCONFIG_FILE`）、错误退出码与截图输出。
+- M9（计划）TLS 测试将使用提交的自签测试 CA 加 `localhost` 叶证书/私钥与进程内 TLS loopback 服务器；`net.tls` 将覆盖握手成功、不受信任证书、主机名不匹配、超时与 http<->https 重定向，shell 测试将通过 TLS 提供提交的 HTML+PNG 页面以证明渲染 pipeline。没有测试会访问公网或公共 CA。
 - M8a 图片测试使用像素内容有文档的手工生成 PNG fixtures（`tests/fixtures/images/`）与提交的图片演示站点（`tests/fixtures/img_site/`）：解码器被直接测试，布局用假 replaced 尺寸测试，shell 端到端通过 `shell::Browser` 以及 CLI 的 `--dump-boxes`/`--screenshot` 检查。
 
 ## 参考资料
@@ -167,7 +170,8 @@ freetype/harfbuzz 类型，加载失败是普通错误，字体自己持有 face
 - Selectors Level 3：<https://www.w3.org/TR/selectors-3/>
 - CSS Cascading and Inheritance Level 4：<https://www.w3.org/TR/css-cascade-4/>
 - CSS Values and Units Level 3：<https://www.w3.org/TR/css-values-3/>
-- HTTP Semantics（RFC 9110）与 HTTP/1.1（RFC 9112）
+- HTTP Semantics（RFC 9110）与 HTTP/1.1（RFC 9112）；TLS 1.2/1.3（RFC 5246/RFC 8446）
+- OpenSSL 文档（M9 已批准依赖，尚未链接）：<https://docs.openssl.org/>
 - PNG（第三版）：<https://www.w3.org/TR/png-3/> 与 libpng 手册（M8a 已批准依赖）：<https://www.libpng.org/pub/png/libpng.html>
 - FreeType、HarfBuzz 与 fontconfig 文档（M8b 已链接依赖）：<https://freetype.org/>、<https://harfbuzz.github.io/>、<https://fontconfig.pages.freedesktop.org/fontconfig/>
 - Web Platform Tests：<https://github.com/web-platform-tests/wpt>

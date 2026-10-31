@@ -282,7 +282,7 @@ the round when possible. Clean up stale build directories and stray files.
   on layout disagreements.
 - M6: window mode was smoke-tested without extra tooling by launching the browser, finding its
   specific client window in `xwininfo -root -tree`, and capturing it with ImageMagick `import`
-  (no `xdotool` needed on this machine); capture only the client window, not the root.
+  (no `xdotool` needed); capture only the client window, not the root.
 - M7: freezing all five public headers up front (net/layout/paint/platform/shell) let three modules
   plus the shell session be written in parallel against explicit contracts; the cost is that the
   default full build is broken in `toy_shell` until the shell wave lands, so every kickoff prompt
@@ -306,9 +306,8 @@ the round when possible. Clean up stale build directories and stray files.
   glyph as ASCII art, compare against the intended character) found 11 real shape/alignment errors
   that every existing pixel test missed, because those tests only rendered `H` and `H` is
   invariant under mirroring/flipping. The fixes were verified by rendering a zoomed before/after
-  sheet; the user explicitly prefers eyeballing the font over hardcoded expectations, so the
-  project keeps no frozen glyph-table/fingerprint test. Render a sample when glyph quality is
-  questioned — and do not re-add the removed `render.glyphs` test.
+  sheet. Glyphs are reviewed visually rather than by a frozen fingerprint test; render a sample
+  when glyph quality is questioned — and do not re-add the removed `render.glyphs` test.
 - M8a: publishing all frozen interface headers before spawning (`render::Image`/`DecodePng`,
   `DrawImage` on the display list, `LayoutOptions::replaced_sizes`, `paint::ImageMap`) let render,
   layout+paint and shell work in parallel without negotiating signatures; the only contract defect
@@ -356,7 +355,7 @@ the round when possible. Clean up stale build directories and stray files.
 - M8b: anti-aliased pixels are library-version dependent, so real-font tests assert ink regions, AA
   presence (blended values between text color and background), clip bounds, no-ops and determinism
   instead of hardcoded coverage bytes; GCC/Clang byte-identical PPM `cmp` remains the cross-compiler
-  gate. This is the same "eyeball shapes, no frozen fingerprints" preference as the bitmap font.
+  gate. This follows the same visual-review approach as the bitmap font.
 - M8b: keeping real fonts opt-in (default stays the bitmap font) made the M8a byte-compatibility
   gate trivial and kept all goldens meaningful; the tiny header bridge plus the opt-in CLI meant no
   existing test needed a pixel update, only the paint call sites gained a null font argument.

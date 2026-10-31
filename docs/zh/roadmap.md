@@ -4,8 +4,9 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M8 已完成（M8a 图片、M8b 真实字体）；下一步是可选的 M9（JavaScript 子集）。**
-快照与接管指南见 [handoff.md](handoff.md)。
+**当前状态：M0–M8 已完成（M8a 图片、M8b 真实字体）。M9（最基础 HTTPS）已计划并写入文档，但尚未
+开始；之后是 M10（HTTP 代理）；JavaScript 子集已暂缓。** 快照与接管指南见
+[handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
 
@@ -24,7 +25,7 @@
 - 对绝对 `http` 和 `file` URL 的 URL 解析：百分号解码、默认端口，尚无 base 解析。
 - `net` 模块：基于 POSIX socket 的阻塞 HTTP/1.1 GET，每个连接一个请求，连接与读取超时，`Content-Length` 与 chunked body，重定向（301/302/303/307/308），16 MiB body 上限；`file://` 读取本地文件。
 - CLI：`--dump-body <url>` 把原始 body 写到 stdout。全部 headless；不需要显示器。
-- 已达成验收：对 `file://` 和对一个 loopback HTTP 服务器得到逐字节相同的 dump；错误路径以非零退出；`net.url`、`net.http`、`net.file`、`shell.dump_body_file` 和 `shell.dump_body_missing_file` 在 GCC 和 Clang 下、警告视为错误时通过。无 TLS。
+- 已达成验收：对 `file://` 和对一个 loopback HTTP 服务器得到逐字节相同的 dump；错误路径以非零退出；`net.url`、`net.http`、`net.file`、`shell.dump_body_file` 和 `shell.dump_body_missing_file` 在 GCC 和 Clang 下、警告视为错误时通过。M2 时尚无 TLS（HTTPS 计划在 M9）。
 - M2 已知限制：非 2xx 响应仍然算成功的抓取（状态在 API 中暴露；错误页与导航以后再说），并且 shell 层端到端测试覆盖 `file://`，而 HTTP 由进程内服务器测试覆盖。
 
 ## M3 — HTML 到 DOM ✅（已完成）
@@ -110,7 +111,8 @@
   每个 `<img>` 处各抓取一次），HTML `width`/`height` 属性被忽略（只用 CSS px），
   `display:block` 的 replaced 元素以及 replaced 元素的 margin/padding 不支持，replaced 盒顶部
   对齐（没有基线对齐，同 M5），缩放为无抗锯齿的最近邻，元素不可见时也会抓取图片（没有懒加载），
-  图片 URL 只支持 `http`/`file`（没有 `https`），并且 `--dump-dom`/`--dump-style` 不抓取图片。
+  图片 URL 在 M8a 时只支持 `http`/`file`（M9 计划解除这一限制），并且 `--dump-dom`/`--dump-style`
+不抓取图片。
 
 ## M8b — 真实字体 ✅（已完成）
 
@@ -140,19 +142,56 @@
   分段），fontconfig 总是返回最佳匹配，因此未知字体族会静默回退，只支持 face 0（忽略 TTC/face
   index），缺失码点渲染字体的 `.notdef` 字形，real-font 字号超过 4096 px 时等同 4096 px，且不
   支持整形 advance 之外的亚像素定位/kerning。位图回退仍只有 ASCII。
-## M9 — JavaScript 子集（可选，工作量大；下一步）
+## M9 — 最基础 HTTPS（已计划；OpenSSL 已批准，尚未开始）
 
-- 面向类似 ES5 的极小子集的词法分析器、解析器、小型解释器、DOM 绑定和事件处理器。
-- 当 fixture 页面的脚本修改 DOM 且修改被绘制出来时完成。
+- 目标：抓取绝对 `https://` URL，让 HTTPS 站点的页面与图片走现有 pipeline 渲染。MVP 定义刻意很小：
+  **能连上并发出请求**——不要过度构建。
+- MVP 范围：
+  - `net` URL 层：`https` scheme（默认端口 443），解析/序列化/base 解析；链接、导航、重定向与图片
+    加载自动复用。
+  - `net` TLS：现有阻塞 `Fetch()` 之后接 OpenSSL 客户端，通过一个很小的字节流抽象与纯 HTTP 共享
+    HTTP/1.1 请求/响应代码。SNI、主机名校验与证书校验（OpenSSL 默认信任库，即系统 CA；标准
+    `SSL_CERT_FILE`/`SSL_CERT_DIR` 覆盖仍可用于特殊情况）。证书始终校验，没有 insecure 模式。
+  - 超时：TCP 连接沿用 `connect_timeout_ms`；TLS 握手与 TLS 读沿用 `read_timeout_ms`。M9 不新增
+    `FetchOptions` 字段。
+  - `shell`：预计无需改动公开 API 或 CLI——`--dump-body`、`--dump-*`、`--screenshot`、窗口模式与
+    导航通过现有代码路径接受 `https://`。
+  - 测试（确定性、不依赖公网）：提交的自签测试 CA + `localhost` 叶证书/私钥（仅测试用，README 记录
+    重新生成方法）与进程内 TLS loopback 服务器；`net` 测试覆盖成功、不受信任证书、主机名不匹配、
+    超时与 http<->https 重定向；shell 测试通过 TLS 提供提交的 HTML+PNG 页面并断渲染像素。
+- 冻结的设计决策（kickoff 前冻结，记录在 [decisions.md](decisions.md)）：
+  - scheme 集合为 `file`、`http`、`https`；`https` 默认端口 443；`ResolveUrl`/`SerializeUrl` 遵循
+    与 http 相同的 RFC 3986 子集。
+  - 重定向用 `net::ResolveUrl` 解析（支持相对与协议相对 `Location`）；重定向目标必须是 http/https，
+    允许二者互切；拒绝 file 目标。
+  - 不做 ALPN/HTTP/2：保持 HTTP/1.1 + `Connection: close`；不做压缩、cookie、会话、HSTS、混合内容
+    拦截、客户端证书、TLS 会话复用或 HTTP 缓存。
+  - M9 中 `FetchOptions` 保持不变；失败是可读的 fetch 错误（CLI 退出码 1）。
+- 验收：所有 55 个既有测试加新的 URL/TLS/https 测试在 GCC 与 Clang 下、警告视为错误时通过；本地
+  HTTPS 页面（含图片）可 headless 渲染；证书、主机名与超时失败给出明确错误；`http://`/`file://`
+  的 dump 与截图逐字节不变；真实站点直连检查是手动的，取决于网络（受限网络需要 M10 代理）。
+- M9 之后的已知限制：没有 HTTP/2、压缩、cookie、代理（M10）、依赖 JS 的站点或 HSTS；真实站点渲染
+  仍受现有 HTML/CSS 子集限制。
 
-## M10+ — 机会性工作
+## M10 — HTTP 代理（M9 之后计划）
+
+- `http://` 通过 HTTP 代理的 absolute-form 请求抓取；`https://` 通过代理 `CONNECT` 隧道后再做 TLS
+  握手。
+- CLI `--proxy host:port` 加标准 `http_proxy`/`https_proxy` 环境变量回退；进程内假代理测试。这是在
+  直连受限网络上测试真实站点的关键。
+- 范围与契约在那一轮开始时冻结；预计不需要新依赖。
+
+## 暂缓 —— JavaScript 子集
+
+- 用户于 2026-10-31 暂缓 JavaScript 子集；它不是下一个里程碑。它仍是一个大的可选里程碑（词法
+  分析器、解析器、小型解释器、DOM 绑定与事件处理器）；没有用户明确的优先级决定不要开始。
+
+## M11+ — 机会性工作
 
 更多 CSS（flex、表格）、表单、更好的文本处理、性能、一致性测试套件。每一项都只在前一个切片干净、且用户同意优先级之后才开始。
 
 ## Backlog — 计划中的后续工作
 
-- **代理支持（M2.1）**——通过 HTTP 代理抓取 `http://` URL：`FetchOptions` 中的代理设置、`--proxy host:port` CLI 标志与 `http_proxy` 环境变量回退；发往代理的请求使用 absolute-form 请求目标。测试使用进程内的假代理。用户于 2026-10-31 推迟：只有当真实站点测试需要它，或它成本低且明显有用时才实现。
-- **TLS / `https://`**——用户于 2026-10-31 推迟；OpenSSL 未获批准。访问 Google 之类的站点需要 `https`，仅靠代理支持不够。
 - **更多图片格式与背景图**——JPEG/GIF/WebP、`background-image`、`srcset`、图片缓存与懒加载；这些都在 M8a 之后按需排期，不阻塞任何里程碑。
 - **CSS 字体选择与更丰富的文本**——把 CSS `font-family`/`font-weight`/`font-style` 映射到字体栈，加入 fallback 链、`@font-face`/字体下载与更丰富的整形；M8b 的 CLI 选择刻意是每会话一个 face。
 - **测试辅助代码合并**——较旧的测试可执行文件里仍然重复着每个文件各自的 `Check`/`g_failures` 测试支架。header-only 的 `tests/support/check.h`（接口目标 `toy_test_support`）已在 M5 引入，新测试都在使用；旧文件只在被改动时迁移。不引入框架依赖。

@@ -3,8 +3,9 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M8 are done (M8a images, M8b real fonts); M9 (JavaScript subset) is the
-next optional milestone.** For a snapshot and takeover guide, read [handoff.md](handoff.md).
+**Current status: M0–M8 are done (M8a images, M8b real fonts). M9 (most-basic HTTPS) is planned
+and documented but not started; M10 (HTTP proxy) follows; the JavaScript subset is deferred.** For
+a snapshot and takeover guide, read [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
 
@@ -31,7 +32,8 @@ next optional milestone.** For a snapshot and takeover guide, read [handoff.md](
 - CLI: `--dump-body <url>` writes the raw body to stdout. Everything is headless; no display needed.
 - Acceptance reached: byte-identical dumps for `file://` and for a loopback HTTP server; error paths
   exit non-zero; `net.url`, `net.http`, `net.file`, `shell.dump_body_file` and
-  `shell.dump_body_missing_file` pass under GCC and Clang with warnings as errors. No TLS.
+  `shell.dump_body_missing_file` pass under GCC and Clang with warnings as errors. No TLS at M2
+  (HTTPS is planned in M9).
 - Known M2 limits: a non-2xx response is still a successful fetch (the status is exposed in the API;
   error pages and navigation arrive later), and the shell-level end-to-end test covers `file://`
   while HTTP is covered by the in-process-server tests.
@@ -178,8 +180,8 @@ next optional milestone.** For a snapshot and takeover guide, read [handoff.md](
   `display:block` replaced elements and margins/padding on replaced elements are unsupported,
   replaced boxes are top-aligned (no baseline alignment, as in M5), scaling is nearest-neighbour
   without anti-aliasing, images are fetched even when their element is not visible (no lazy
-  loading), only `http`/`file` image URLs work (no `https`), and `--dump-dom`/`--dump-style` do not
-  fetch images.
+  loading), only `http`/`file` image URLs work at M8a (M9 plans to lift this), and
+  `--dump-dom`/`--dump-style` do not fetch images.
 
 ## M8b — Real fonts ✅ (done)
 
@@ -219,25 +221,67 @@ next optional milestone.** For a snapshot and takeover guide, read [handoff.md](
   above 4096 px behave like 4096 px, and anti-aliased subpixel positioning/kerning beyond the
   shaped advances is not implemented. The bitmap fallback stays ASCII-only.
 
-## M9 — JavaScript subset (next optional, large)
+## M9 — Most-basic HTTPS (planned; OpenSSL approved, not started)
 
-- Lexer, parser, small interpreter, DOM bindings and event handlers for a tiny ES5-like subset.
-- Done when a fixture page's script mutates the DOM and the change gets painted.
+- Goal: fetch absolute `https://` URLs so pages and images from HTTPS sites render through the
+  existing pipeline. The MVP definition is deliberately small: **connect and issue the request** —
+  do not over-build.
+- MVP scope:
+  - `net` URL layer: `https` scheme (default port 443), parsing/serialization/base resolution;
+    links, navigation, redirects and image loading reuse it automatically.
+  - `net` TLS: an OpenSSL-backed client behind the existing blocking `Fetch()`, sharing the HTTP/1.1
+    request/response code with plain HTTP through a small byte-stream abstraction. SNI, hostname
+    verification and certificate verification against OpenSSL's default trust store (system CAs;
+    the standard `SSL_CERT_FILE`/`SSL_CERT_DIR` overrides keep working for special cases).
+    Certificates are always verified; there is no insecure mode.
+  - Timeouts: TCP connect keeps `connect_timeout_ms`; the TLS handshake and TLS reads use the
+    existing `read_timeout_ms`. No new `FetchOptions` fields in M9.
+  - `shell`: no public API or CLI change expected — `--dump-body`, `--dump-*`, `--screenshot`,
+    window mode and navigation accept `https://` through the existing code paths.
+  - Tests (deterministic, no public network): a committed self-signed test CA plus a `localhost`
+    leaf certificate/key (test-only, README documents regeneration) and an in-process TLS loopback
+    server; `net` tests cover success, untrusted certificate, hostname mismatch, timeout and
+    http<->https redirects; a shell test serves a committed HTML+PNG page over TLS and asserts the
+    rendered pixels.
+- Frozen design decisions (frozen before kickoff, recorded in [decisions.md](decisions.md)):
+  - Scheme set is `file`, `http`, `https`; `https` default port 443; `ResolveUrl`/`SerializeUrl`
+    follow the same RFC 3986 subset as http.
+  - Redirects are resolved with `net::ResolveUrl` (relative and protocol-relative `Location`
+    supported); redirect targets must be http/https and may switch between them; file targets are
+    rejected.
+  - No ALPN/HTTP/2: keep HTTP/1.1 with `Connection: close`; no compression, cookies, sessions,
+    HSTS, mixed-content blocking, client certificates, TLS session reuse or HTTP caching.
+  - `FetchOptions` stays unchanged in M9; failures are readable fetch errors (CLI exit 1).
+- Acceptance: all 55 existing tests plus the new URL/TLS/https tests pass under GCC and Clang with
+  warnings as errors; a local HTTPS page with an image renders headlessly; certificate, hostname
+  and timeout failures produce explicit errors; `http://`/`file://` dumps and screenshots stay
+  byte-identical; a direct real-site check is manual and depends on the network (restricted
+  networks need the M10 proxy).
+- Known limits after M9: no HTTP/2, compression, cookies, proxies (M10), JS-dependent sites or
+  HSTS; real-world rendering stays limited by the existing HTML/CSS subset.
 
-## M10+ — Opportunistic
+## M10 — HTTP proxy (planned after M9)
+
+- Fetch `http://` through an HTTP proxy with absolute-form request targets, and `https://` through
+  a proxy `CONNECT` tunnel followed by the TLS handshake.
+- CLI `--proxy host:port` plus the standard `http_proxy`/`https_proxy` environment fallback;
+  in-process fake-proxy tests. This is what makes real-site testing possible on networks where
+  direct outbound traffic is restricted.
+- Scope and contracts are frozen at the start of that round; no new dependency is expected.
+
+## Deferred — JavaScript subset
+
+- The user shelved the JavaScript subset on 2026-10-31; it is not the next milestone. It remains a
+  large optional milestone (lexer, parser, small interpreter, DOM bindings and event handlers);
+  do not start it without an explicit user priority decision.
+
+## M11+ — Opportunistic
 
 More CSS (flex, tables), forms, better text handling, performance, conformance suites. Each item
 starts only after the previous slice is clean and the user agrees on priority.
 
 ## Backlog — planned follow-ups
 
-- **Proxy support (M2.1)** — fetch `http://` URLs through an HTTP proxy: a proxy setting in
-  `FetchOptions`, a `--proxy host:port` CLI flag and `http_proxy` environment fallback; requests to
-  a proxy use absolute-form request targets. Tests use an in-process fake proxy. Deferred by the
-  user on 2026-10-31: implement only when real-site testing needs it, or when it is cheap and
-  clearly useful.
-- **TLS / `https://`** — deferred by the user on 2026-10-31; OpenSSL is not approved. Reaching
-  sites such as Google needs `https`, and proxy support alone is not enough for them.
 - **More image formats and background images** — JPEG/GIF/WebP, `background-image`,
   `srcset`, an image cache and lazy loading; scheduled after M8a on demand, blocking no milestone.
 - **CSS font selection and richer text** — map CSS `font-family`/`font-weight`/`font-style` to the

@@ -7,7 +7,9 @@ page given by an optional URL, including `<img src="...png">` images (approved l
 real font is selected with `--font PATH` or `--font-family NAME` (approved freetype/harfbuzz/
 fontconfig), anti-aliased true-type text; without a font flag the built-in bitmap font is used and
 all pre-M8b output is byte-identical. In the window, links are clickable, the wheel and keyboard
-scroll, Alt+Left/Right move through history and the title follows `<title>`. Committed demos:
+scroll, Alt+Left/Right move through history and the title follows `<title>`. **Next planned
+milestone: M9 — most-basic HTTPS** (OpenSSL approved, design documented in the
+[roadmap](docs/roadmap.md); no `https` support yet). Committed demos:
 [`tests/fixtures/font_site/`](tests/fixtures/font_site/) for real text + images,
 [`tests/fixtures/img_site/`](tests/fixtures/img_site/) for images and
 [`tests/fixtures/nav_site/`](tests/fixtures/nav_site/) for navigation. The `--dump-*` modes remain
@@ -34,7 +36,7 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --headless --screenshot out.ppm file:///path/page.html  # page, no display
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/font_site/index.html" \
     --font tests/fixtures/fonts/toy_test.ttf   # real TTF text + image demo (fixture font)
-./build/toybrowser --size 400x200 --font-family "DejaVu Sans" \
+./build/toybrowser --size 400x200 --font-family "sans-serif" \
     "file://$PWD/tests/fixtures/nav_site/index.html"   # any installed font family
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"   # images demo
 ./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # the committed nav demo site
@@ -72,8 +74,9 @@ machine's paths, toolchain version or installed package set.
 ## Dependencies
 
 Five third-party packages are linked today (libX11, libpng + zlib, freetype, harfbuzz and
-fontconfig); the browser engine itself has no ready-made components (no HTML parser, CSS engine, JS
-engine, layout or rendering engine).
+fontconfig); OpenSSL is approved for the planned M9 HTTPS milestone but not linked yet. The browser
+engine itself has no ready-made components (no HTML parser, CSS engine, JS engine, layout or
+rendering engine).
 
 | Component | Purpose | License | Status |
 | --- | --- | --- | --- |
@@ -83,6 +86,7 @@ engine, layout or rendering engine).
 | freetype | font metrics and glyph rasterization | FreeType License | linked since M8b |
 | harfbuzz | OpenType text shaping | MIT | linked since M8b |
 | fontconfig | installed-font discovery and matching | MIT-style | linked since M8b |
+| OpenSSL | TLS for `https://` | Apache-2.0 | approved, not linked yet (planned M9) |
 
 The policy, the approval log and from-scratch alternatives live in
 [dependencies.md](docs/dependencies.md).

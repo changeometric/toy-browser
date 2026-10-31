@@ -4,13 +4,10 @@
 
 仍需用户决定的事项。目前所有已批准内容记录在 [dependencies.md](dependencies.md) 和 [roadmap.md](roadmap.md)。
 
-## 1. HTTPS / TLS —— 用户已推迟
+HTTPS/TLS 问题已于 2026-10-31 解决：用户批准 OpenSSL 用于计划中的 M9 HTTPS 里程碑（见
+[dependencies.md](dependencies.md) 与 [roadmap.md](roadmap.md)）；HTTP 代理计划为 M10，不需要新依赖。
 
-**问题：** 最终是否应支持 `https://`？如果支持，是使用已批准的 TLS 库（例如 OpenSSL），还是完全不支持？
-
-**建议：** 目前不做 TLS：只支持 `http://` 和 `file://`。对玩具项目来说从零实现 TLS 不合比例；当真实页面成为目标时再考虑。OpenSSL 当前未获批准。用户于 2026-10-31 推迟了 TLS（以及代理支持）；注意，代理支持并不能消除这个决定：Google 之类的站点只能通过 `https` 访问。
-
-## 2. 外部测试语料 —— 可选，目前不需要
+## 1. 外部测试语料 —— 可选，目前不需要
 
 **问题：** 以后可以下载测试数据（例如 html5lib-tests 或 WPT 子集）作为 golden 文件吗？这些是测试 fixtures，不是运行时依赖。
 

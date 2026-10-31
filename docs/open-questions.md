@@ -3,17 +3,11 @@
 Decisions that still need the user. Everything approved so far is recorded in
 [dependencies.md](dependencies.md) and [roadmap.md](roadmap.md).
 
-## 1. HTTPS / TLS — deferred by the user
+The HTTPS/TLS question was resolved on 2026-10-31: the user approved OpenSSL for the planned M9
+HTTPS milestone (see [dependencies.md](dependencies.md) and [roadmap.md](roadmap.md)); the HTTP
+proxy is planned as M10 and does not need a new dependency.
 
-**Question:** should `https://` be supported eventually, and if so with an approved TLS library
-(e.g. OpenSSL) or not at all?
-
-**Recommendation:** no TLS for now: support `http://` and `file://` only. TLS from scratch is out
-of proportion for a toy project; revisit when real pages become the goal. OpenSSL is currently not
-approved. The user deferred TLS (and proxy support) on 2026-10-31; note that proxy support does not
-remove this decision: sites such as Google are only reachable over `https`.
-
-## 2. External test corpora — optional, not needed so far
+## 1. External test corpora — optional, not needed so far
 
 **Question:** may we download test data later (e.g. html5lib-tests or WPT subsets) as golden
 files? These are test fixtures, not runtime dependencies.

@@ -10,13 +10,13 @@ speculative — abstractions are added when a real slice needs them.
 | `base` | Small shared utilities (geometry, logging, UTF-8), only when a need appears | — | when first needed |
 | `platform` | Window, input events, event loop, presenting pixel surfaces | `base` | M1 |
 | `render` | Display list, software rasterizer, built-in bitmap font (metrics and glyphs), PNG image decoding (approved libpng), real-font engine (approved freetype + harfbuzz) | `base` | M1 |
-| `net` | URL parsing, sockets, HTTP/1.1 fetch | `base` | M2 |
+| `net` | URL parsing, sockets, HTTP/1.1 fetch, TLS via approved OpenSSL (planned M9) | `base` | M2 |
 | `dom` | HTML tokenizer, tree builder, DOM arena | `base` | M3 |
 | `css` | CSS tokenizer, rule/declaration parser, selectors | `base` | M4 |
 | `style` | Cascade and computed styles, default stylesheet | `dom`, `css` | M4 |
 | `layout` | Box tree, block/inline layout, line breaking | `dom`, `style`, a text-measurement callback from `shell` | M5 |
 | `paint` | Display list construction from the box tree (element backgrounds and text) | `dom`, `style`, `layout`, `render` | M6 |
-| `js` | Small JavaScript engine and DOM bindings (optional, last) | `dom`, `base` | M9 |
+| `js` | Small JavaScript engine and DOM bindings (optional, deferred by the user) | `dom`, `base` | deferred |
 | `shell` | Navigation, pipeline orchestration, window chrome, font selection (approved fontconfig for family lookup) | all | M1 |
 
 Dependencies point downward only; no cycles. `render` knows nothing about HTML/CSS (it consumes
@@ -50,10 +50,21 @@ returns plain data, so each one can be exercised through a `--dump-*` command in
 
 Networking (M2): `net` owns URLs, sockets and HTTP. Fetching is a blocking HTTP/1.1 GET — one
 request per connection, connect and read timeouts, `Content-Length` or chunked bodies, redirects,
-no TLS and no keep-alive — behind `Fetch()`, so it can become non-blocking later without changing
-callers. `net` is the only module allowed to touch sockets; page code never sees them. Proxy
-support (HTTP proxy first) is planned behind `FetchOptions` and stays inside `net`; it needs no new
-dependency.
+no TLS yet and no keep-alive — behind `Fetch()`, so it can become non-blocking later without
+changing callers. `net` is the only module allowed to touch sockets; page code never sees them.
+Proxy support (HTTP proxy first) is planned as M10 behind `FetchOptions` and stays inside `net`; it
+needs no new dependency.
+
+TLS / HTTPS (M9, planned; no code yet): `net` will accept the `https` scheme (default port 443) and
+wrap the same HTTP/1.1 request/response code around a small byte-stream abstraction, so plain
+sockets and TLS share one HTTP implementation. TLS uses the approved OpenSSL library behind
+`Fetch()`: an `SSL_CTX` initialised once from OpenSSL's default trust store, per-connection SNI and
+hostname verification, always-on certificate verification, and a handshake/read loop driven by the
+existing non-blocking socket + `poll` timeouts (TCP connect uses `connect_timeout_ms`, the TLS
+handshake and reads use `read_timeout_ms`). Redirects will be resolved with `net::ResolveUrl` and
+may switch between http and https. No ALPN/HTTP/2, compression, cookies, HSTS, client certificates
+or insecure mode is planned for M9; the shell should need no API or CLI change because it already
+goes through `ParseUrl`/`ResolveUrl`/`Fetch`.
 
 HTML and DOM (M3): `dom` owns the tokenizer, the simplified tree builder and the arena DOM. Parsing
 is error-tolerant and always produces one `html` element with `head` and `body` children; the
@@ -270,6 +281,11 @@ can't form ownership cycles. Revisit only if it actually hurts.
   `render.paint` covers AA coverage/clip/baseline/no-ops, `shell.fonts` covers the end-to-end
   real-font page, and CLI checks cover `--font`, `--font-family` (with a test-local
   `FONTCONFIG_FILE`), error exit codes and screenshot output.
+- M9 (planned) TLS tests will use a committed self-signed test CA plus a `localhost` leaf
+  certificate/key and an in-process TLS loopback server; `net.tls` will cover handshake success,
+  untrusted certificate, hostname mismatch, timeout and http<->https redirects, and a shell test
+  will serve a committed HTML+PNG page over TLS to prove the render pipeline. No test will use the
+  public network or public CAs.
 - M8a image tests use hand-generated PNG fixtures with documented pixel content
   (`tests/fixtures/images/`) and a committed image demo site (`tests/fixtures/img_site/`): the
   decoder is exercised directly, layout with fake replaced sizes, and the shell end to end through
@@ -287,7 +303,8 @@ only — their code is never copied:
 - Selectors Level 3: <https://www.w3.org/TR/selectors-3/>
 - CSS Cascading and Inheritance Level 4: <https://www.w3.org/TR/css-cascade-4/>
 - CSS Values and Units Level 3: <https://www.w3.org/TR/css-values-3/>
-- HTTP Semantics (RFC 9110) and HTTP/1.1 (RFC 9112)
+- HTTP Semantics (RFC 9110) and HTTP/1.1 (RFC 9112); TLS 1.2/1.3 (RFC 5246/RFC 8446)
+- OpenSSL documentation (approved M9 dependency, not linked yet): <https://docs.openssl.org/>
 - PNG (Third Edition): <https://www.w3.org/TR/png-3/> and the libpng manual (approved M8a
   dependency): <https://www.libpng.org/pub/png/libpng.html>
 - FreeType, HarfBuzz and fontconfig documentation (linked M8b dependencies):

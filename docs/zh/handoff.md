@@ -22,7 +22,14 @@
 | M8b | 真实字体：冻结 pimpl 后的 `render::Font`（freetype 度量/光栅化 + harfbuzz 整形、4096 px 有效字号上限）、按基线放置的抗锯齿 `DrawTextWithFont`、`--font PATH` / `--font-family NAME`（fontconfig）选择、自造字体 fixture 与 `tests/fixtures/font_site/`、55 个测试；位图路径保持逐字节不变 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-尚未实现：JavaScript（M9）、`https`/TLS、代理、外部样式表、border、水平滚动/滚动条、hover/active 链接样式与表单控件，以及 CSS 驱动的字体选择（`font-family`/`font-weight`/`font-style`、fallback 链、`@font-face`）。PNG 图片自 M8a 起可用、真实 TTF 文本自 M8b 起可用，字体都是 opt-in（M8a/M8b 已知限制见 [roadmap.md](roadmap.md)）。窗口与 `--screenshot` 在给出 URL 时绘制真实页面，否则显示 M1 占位页；给出页面 URL 时窗口也可浏览（链接、滚轮/键盘滚动、Alt+Left/Right 历史、`<title>`）。`--dump-*` 模式仍是主要调试路径。
+**下一计划里程碑：M9 —— 最基础 HTTPS（已写入文档，尚未开始）。** 用户于 2026-10-31 批准 OpenSSL
+用于 TLS（记录在 [dependencies.md](dependencies.md)）；它尚未链接。之后计划 M10（HTTP 代理），
+JavaScript 子集已被用户暂缓。这是一个文档/计划轮：目前还没有 M9 代码，因此当前行为与 55 个测试
+不变。
+
+尚未实现：`https`/TLS（计划 M9）、代理（计划 M10）、JavaScript（已暂缓）、外部样式表、border、
+水平滚动/滚动条、hover/active 链接样式与表单控件，以及 CSS 驱动的字体选择
+（`font-family`/`font-weight`/`font-style`、fallback 链、`@font-face`）。PNG 图片自 M8a 起可用、真实 TTF 文本自 M8b 起可用，字体都是 opt-in（M8a/M8b 已知限制见 [roadmap.md](roadmap.md)）。窗口与 `--screenshot` 在给出 URL 时绘制真实页面，否则显示 M1 占位页；给出页面 URL 时窗口也可浏览（链接、滚轮/键盘滚动、Alt+Left/Right 历史、`<title>`）。`--dump-*` 模式仍是主要调试路径。
 
 ## 验证当前状态（无需上下文）
 
@@ -53,14 +60,14 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/tests/fixtures/img_site/index.html" | grep '<img>'
 
 # 真实字体：提交的自造 fixture 是确定性的；已安装字体只用于手工演示（如
-# --font-family "DejaVu Sans"）。
+# --font-family "sans-serif"）。
 "$BUILD"/toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x600 \
     --screenshot /tmp/toybrowser-font.ppm "file://$PWD/tests/fixtures/font_site/index.html" \
     && file /tmp/toybrowser-font.ppm
 "$BUILD"/toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x200 --dump-boxes \
     "file://$PWD/tests/fixtures/font_site/index.html"
-"$BUILD"/toybrowser --font-family "DejaVu Sans" --size 400x200 \
-    --screenshot /tmp/toybrowser-dejavu.ppm "file://$PWD/tests/fixtures/nav_site/index.html"
+"$BUILD"/toybrowser --font-family "sans-serif" --size 400x200 \
+    --screenshot /tmp/toybrowser-system-font.ppm "file://$PWD/tests/fixtures/nav_site/index.html"
 ```
 
 预期：图片截图绘制提交的 PNG fixtures（旗子、alpha、灰度、调色板），盒 dump 包含带固有/CSS 尺寸的
@@ -76,25 +83,40 @@ ctest --test-dir "$BUILD" --output-on-failure
 
 ```sh
 "$BUILD"/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"
-"$BUILD"/toybrowser --font-family "DejaVu Sans" --size 400x200 \
+"$BUILD"/toybrowser --font-family "sans-serif" --size 400x200 \
     "file://$PWD/tests/fixtures/nav_site/index.html"
 # 图片页：确认 PNG 图片被绘制；真实字体页：确认抗锯齿文本；导航页：点击 "About page"，用滚轮/
 # 方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right 前进后退；窗口标题跟随 <title>。
 ```
 
-## 下一轮：M9 —— JavaScript 子集（可选，工作量大；需要用户确定优先级）
+## 下一轮：M9 —— 最基础 HTTPS（已计划；OpenSSL 已批准，尚未开始）
 
-- 目标：类似 ES5 的极小子集：词法分析器、解析器、小型解释器、DOM 绑定与事件处理器，足以让 fixture
-  页面的脚本修改 DOM 并让修改被绘制出来。
-- 这是可选的大里程碑：先与用户确认它确实是下一步（backlog 是替代选项）。它需要新的模块/包设计
-  （`docs/architecture.md` 列出 `js` 模块），但不需要新依赖。
-- 验收草案：fixture 页面运行脚本、修改 DOM，且修改后的内容可 headless 渲染（`--screenshot` 或
-  dump），同时既有 55 个测试与 GCC/Clang 无警告构建通过。
-- 目前仍不在范围内：表单、`https`/TLS、代理、外部 CSS。
+**状态：** 设计已冻结在 [roadmap.md](roadmap.md) 与 [decisions.md](decisions.md) 中，但**还没有写
+任何 M9 代码**。OpenSSL 于 2026-10-31 批准，尚未链接（[dependencies.md](dependencies.md)）；只有
+用户确认开始后才进入实现，并且需要安装 OpenSSL 开发头文件（agent 从不安装包）。
 
-替代/之后的 backlog（细节见 [roadmap.md](roadmap.md)）：代理支持、TLS、CSS 字体选择/fallback
-链、更多图片格式/背景图，以及测试辅助代码迁移。
+- 目标：`Fetch()` 接受绝对 `https://` URL，让 HTTPS 页面/图片走现有 pipeline 渲染。MVP 标准：
+  能连上并发出请求，其余都不做。
+- 已定决策（细节见 roadmap/decisions）：`https` 默认端口 443；HTTP/1.1 over OpenSSL，始终校验
+  证书/主机名并发送 SNI，使用系统/默认信任库，没有 insecure 模式；沿用现有超时与
+  `FetchOptions`；重定向用 `net::ResolveUrl`（支持相对/协议相对，允许 http<->https）；不做代理
+  （M10）、HTTP/2、压缩、cookie、HSTS 或 HTTP 缓存；确定性测试使用提交的自签测试 CA/叶证书与
+  进程内 TLS loopback 服务器，从不访问公网。
+- 任务拆分：(1) `net` URL + OpenSSL TLS 传输 + 测试（`src/net/`、`tests/net/`、
+  `tests/fixtures/tls/`）；(2) shell/测试端到端 HTTPS 页面（`tests/shell/`、
+  `tests/fixtures/https_site/`）。Lead 冻结契约、集成、跑 GCC+Clang WERROR 与字节兼容门禁，并做
+  一个合并提交。
+- 验收：既有 55 个测试加新的 URL/TLS/HTTPS 测试在 GCC 与 Clang 下通过；本地 HTTPS 页面（含图片）
+  可 headless 渲染；证书/主机名/超时失败给出明确错误；http/file 输出逐字节不变。真实站点直连
+  检查是手动的且依赖网络（受限网络要等 M10）。
+- 主要风险：非阻塞 OpenSSL I/O/握手超时。证书校验保持开启，不加入 insecure 绕过。真实站点可能
+  仍因 HTTP/2、压缩、cookie、JS 而表现有限。
 
+M9 之后：**M10 —— HTTP 代理**（http absolute-form + https `CONNECT`）在受限网络上解锁真实站点
+测试。
+
+## 仓库地图
+## 仓库地图
 ## 仓库地图
 
 - `src/<module>/` —— 每个模块一个 CMake 库目标（`base` 尚不存在；模块图与依赖方向见 [architecture.md](architecture.md)）。
@@ -176,7 +198,8 @@ ctest --test-dir "$BUILD" --output-on-failure
 - 能用 `--dump-*` 模式证明同一件事时，不要用显示器测试；一切设计都以 headless 优先。
 - 深层嵌套输入曾让 dump 变成二次复杂度；任何新的 dump 都要保持有深度上限并有测试。布局是刻意做成迭代式的（10,000 层嵌套 div 是一个测试）：不要把它改回 DOM 递归。
 - 构建产物与目标文件绝不能提交；使用隔离的构建目录。
-- 还没有 `https`：大多数真实站点无法抓取；`http://` 和 `file://` 可用。
+- `https` 尚未实现（M9 已计划）：`http://` 和 `file://` 可用。上面的 M9 计划是唯一已同意的方向；
+  没有用户许可不要开始，也不要加入 insecure TLS 模式。
 - HTML/CSS/URL 解析器按设计是容错的；它们遇到畸形输入永不失败，所以“没有报错”不是正确性的证据——把 dump 与 golden 测试比较。
 - `--dump-boxes` 用 `--size` 的宽度作为视口并忽略高度；高度由内容决定。`layout` 绝不能包含 `render` 头文件——文本度量只通过回调到达。
 - 绘制刻意使用整数像素、不做抗锯齿：改变取整、字形缩放或绘制顺序都会改变 golden 像素测试。GCC 与 Clang 必须产出逐字节相同的 PPM——用 `cmp` 比较两套构建的截图是很便宜的确定性门。
@@ -198,8 +221,8 @@ ctest --test-dir "$BUILD" --output-on-failure
   不要“修复”它们。
 - 窗口循环在 expose、resize 与滚动时重建布局与显示列表。这是正确且刻意简单的 MVP 实现；只有在有
   证据时才优化。
-- 内置 8x16 字形表是手写的，字形形状靠肉眼复核（用户偏好）：刻意不保留冻结的字形位图/指纹测试。
-  改字形就是视觉改动——提交前渲染一个样例看一眼。
+- 内置 8x16 字形表是手写的，字形形状靠肉眼复核：刻意不保留冻结的字形位图/指纹测试。改字形就是
+  视觉改动——提交前渲染一个样例看一眼。
 - libpng 现在是必需的构建依赖（`src/render/CMakeLists.txt` 中的 `find_package(PNG REQUIRED)`）；
   缺少开发头文件的机器会在 configure 阶段失败。不要硬编码版本或路径，也不要把 `png.h` 放进公开头文件。
 - PNG 解码只经由 `render::DecodePng`。尺寸在分配前校验，输出是直通 alpha 的 ARGB，失败是普通错误。
@@ -224,7 +247,7 @@ ctest --test-dir "$BUILD" --output-on-failure
   `git worktree` 基线重跑。
 - real-font 测试必须使用提交的自造 fixture `tests/fixtures/fonts/toy_test.ttf`，从不使用已安装字体；
   fontconfig CLI 测试把 `FONTCONFIG_FILE` 指向生成配置，其唯一 `<dir>` 是 fixture 字体目录。已安装
-  字体（如 DejaVu Sans）只用于手工演示。
+  字体只用于手工演示（任意 fontconfig 字体族都可用，例如 `sans-serif`）。
 - 不要在测试里断言精确的 freetype 覆盖率字节：抗锯齿像素依赖库版本。`render.paint` 断言着墨区域、
   AA 存在性、裁剪边界、no-op 与确定性；`shell.fonts` 断言页面区域与冻结的布局几何。GCC 与 Clang
   在同一机器/库版本下仍必须产出逐字节相同的 PPM。

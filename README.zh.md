@@ -32,7 +32,7 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --headless --screenshot out.ppm file:///path/page.html  # 同一页面，无需显示器
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/font_site/index.html" \
     --font tests/fixtures/fonts/toy_test.ttf   # 真实 TTF 文本 + 图片演示（fixture 字体）
-./build/toybrowser --size 400x200 --font-family "DejaVu Sans" \
+./build/toybrowser --size 400x200 --font-family "sans-serif" \
     "file://$PWD/tests/fixtures/nav_site/index.html"   # 任意已安装字体族
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"   # 图片演示
 ./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # 提交的导航演示站点
