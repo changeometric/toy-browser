@@ -160,6 +160,7 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
 .
 ├── .github/workflows/ci.yml        # 与本地门禁一致的 GCC + Clang 构建/测试 CI
 ├── AGENTS.md
+├── AI-DISCLOSURE.md                # 显眼的“大量使用 AI”声明
 ├── CMakeLists.txt
 ├── CMakePresets.json               # 便捷 presets：default（普通构建）、dev（测试 + WERROR）
 ├── CONTRIBUTING.md

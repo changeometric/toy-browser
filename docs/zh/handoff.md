@@ -4,6 +4,9 @@
 
 本文件是接手仓库的团队所用的快照。规范的阅读顺序在 [docs/README.md](README.md)；硬性规则在 [AGENTS.md](../../AGENTS.md)。
 
+> **AI 使用：** 本仓库大量使用 AI 构建。在依赖代码或文档之前，请先阅读
+> [AI-DISCLOSURE.md](AI-DISCLOSURE.md)。
+
 ## 项目当前状态
 
 已完成的阶段（细节与验收见 [roadmap.md](roadmap.md)）：
@@ -187,8 +190,9 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
   `tests/fixtures/images/generate.py`（只用标准库、输出确定；见各 fixture README）。
   `tests/support/tls_server.h` 是 `net.tls`/`net.http`/`shell.https` 共用的 header-only 进程内 TLS
   loopback 服务器；没有任何测试访问公网。
-- 根目录公开文件 —— `README.md`/`README.zh.md`（面向使用者的入口）、`CONTRIBUTING.md`、
-  `SECURITY.md`、`CMakePresets.json`、`.github/workflows/ci.yml` 与 `docs/assets/` 截图。
+- 根目录公开文件 —— `README.md`/`README.zh.md`（面向使用者的入口）、`AI-DISCLOSURE.md`、
+  `CONTRIBUTING.md`、`SECURITY.md`、`CMakePresets.json`、`.github/workflows/ci.yml` 与
+  `docs/assets/` 截图。
 - `docs/` —— 架构、路线图、约定、团队流程、决策、依赖、待决问题（本文件是快照）。
 - 共享任务板 —— 由 agent 运行时提供（任务 create/claim/update，带 revision）；如果运行时没有，则用 `docs/tasks/<milestone>.md`，字段相同。见 [team-workflow.md](team-workflow.md)。
 - `README.md` / `README.zh.md` 与 `docs/zh/` —— 面向用户的入口（英语为权威）。

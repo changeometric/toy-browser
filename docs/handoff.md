@@ -3,6 +3,9 @@
 This is the snapshot for a team taking over the repository. The canonical reading order is in
 [docs/README.md](README.md); the hard rules are in [AGENTS.md](../AGENTS.md).
 
+> **AI use:** this repository is built with heavy use of AI. Read
+> [AI-DISCLOSURE.md](../AI-DISCLOSURE.md) before relying on the code or the documentation.
+
 ## Where the project is
 
 Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
@@ -221,8 +224,9 @@ round starts.
   deterministic; see the fixture READMEs).
   `tests/support/tls_server.h` is the header-only in-process TLS loopback server shared by
   `net.tls`/`net.http`/`shell.https`; no test ever contacts the public network.
-- Root public files — `README.md`/`README.zh.md` (user-facing entry points), `CONTRIBUTING.md`,
-  `SECURITY.md`, `CMakePresets.json`, `.github/workflows/ci.yml` and `docs/assets/` screenshots.
+- Root public files — `README.md`/`README.zh.md` (user-facing entry points), `AI-DISCLOSURE.md`,
+  `CONTRIBUTING.md`, `SECURITY.md`, `CMakePresets.json`, `.github/workflows/ci.yml` and
+  `docs/assets/` screenshots.
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
   questions (this file is the snapshot).
 - Shared task board — provided by the agent runtime (task create/claim/update with revision); if

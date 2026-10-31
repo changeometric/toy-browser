@@ -3,6 +3,9 @@
 The [top-level README](../README.md) is the user-facing entry point: what the browser does, how to
 build and run it, and where the demos are. This page is the map for everything deeper.
 
+**AI use disclosure:** this project is built with heavy use of AI. Read
+[../AI-DISCLOSURE.md](../AI-DISCLOSURE.md) before relying on the code or the documentation.
+
 ## Learn how it works
 
 1. [architecture.md](architecture.md) — module map, data flow, data model, rendering and threading.

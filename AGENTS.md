@@ -15,6 +15,8 @@ stays out of git.
 
 - From-scratch toy web browser: experimental, fun, learning project. Not commercial, not
   production-ready, not security-hardened.
+- The project uses AI heavily and says so prominently in `AI-DISCLOSURE.md`: keep that disclosure
+  visible and accurate; never downplay, hide or remove it.
 - Long-lived effort. Every step is an MVP: the smallest change that produces a working,
   verifiable result. Do not design for hypothetical future needs, do not pre-build abstractions
   that nothing uses yet, prefer the simplest thing that works.

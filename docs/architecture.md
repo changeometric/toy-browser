@@ -313,6 +313,7 @@ can't form ownership cycles. Revisit only if it actually hurts.
 .
 ├── .github/workflows/ci.yml        # GCC + Clang build/test CI mirroring the local gates
 ├── AGENTS.md
+├── AI-DISCLOSURE.md                # prominent disclosure of heavy AI use
 ├── CMakeLists.txt
 ├── CMakePresets.json               # convenience presets: default build, dev (tests + WERROR)
 ├── CONTRIBUTING.md

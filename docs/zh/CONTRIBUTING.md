@@ -4,6 +4,9 @@
 
 感谢你的关注。这是一个从零实现的玩具浏览器：小而可审查、能保持既有测试通过的改动最受欢迎。
 
+> **AI 使用：** 本仓库大量使用 AI 构建，见 [AI-DISCLOSURE.md](AI-DISCLOSURE.md)。贡献会在这一背景下
+> 被审查。
+
 ## 开始之前
 
 - 先读 [architecture.md](architecture.md) 了解模块划分与依赖方向。

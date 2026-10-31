@@ -3,6 +3,9 @@
 Thanks for your interest. This is a from-scratch learning browser: small, reviewable changes that
 keep the existing tests green are the most welcome kind.
 
+> **AI use:** this repository is built with heavy use of AI — see
+> [AI-DISCLOSURE.md](AI-DISCLOSURE.md). Contributions are reviewed in that context.
+
 ## Before you start
 
 - Read [docs/architecture.md](docs/architecture.md) for the module map and dependency direction.

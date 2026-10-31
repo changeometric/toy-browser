@@ -5,6 +5,9 @@
 [顶层 README](../../README.zh.md)（仓库根目录的 `README.zh.md`）面向使用者：浏览器能做什么、如何
 构建与运行、演示页面在哪里。本页是更深层内容的索引。
 
+**AI 使用声明：** 本项目大量使用 AI 构建。在依赖代码或文档之前，请先阅读
+[AI-DISCLOSURE.md](AI-DISCLOSURE.md)。
+
 ## 了解实现
 
 1. [architecture.md](architecture.md) —— 模块划分、数据流、数据模型、渲染与线程模型。

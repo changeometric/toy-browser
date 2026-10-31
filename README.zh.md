@@ -1,5 +1,10 @@
 # toybrowser
 
+> [!IMPORTANT]
+> **AI 使用声明——请先阅读。** 本项目大量使用 AI：代码、测试、文档与提交消息中的很大一部分由大语言
+> 模型编码 agent 在人类指导下生成并审查。人类维护者设定目标、批准依赖、审查改动，并对最终结果负责。
+> 详见 [AI-DISCLOSURE.md](docs/zh/AI-DISCLOSURE.md)。
+
 一个用 C++20 从零实现的浏览器引擎：URL 抓取、HTML/CSS 解析、样式计算、布局、绘制、真实字体与
 PNG 图片，可 headless 运行，也可在小型 X11 窗口中浏览。浏览器功能都在本仓库实现，而不是交给现成
 引擎；第三方库只用于 TLS、图片解码、字体机制与窗口系统。
@@ -150,6 +155,7 @@ flexbox/position/float 子集（M15）。HTTP 代理（M16）与 JavaScript 子�
 
 | 文档 | 内容 |
 | --- | --- |
+| [AI-DISCLOSURE.md](docs/zh/AI-DISCLOSURE.md) | 本项目如何使用 AI，以及对读者意味着什么 |
 | [docs/zh/README.md](docs/zh/README.md) | 文档索引与阅读顺序 |
 | [docs/zh/architecture.md](docs/zh/architecture.md) | 模块划分、数据流、数据模型、渲染与线程模型 |
 | [docs/zh/roadmap.md](docs/zh/roadmap.md) | 里程碑、验收标准、已知限制与 backlog |
