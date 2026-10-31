@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "font_internal.h"
@@ -32,6 +33,18 @@ void DisplayList::DrawText(std::string_view text_utf8, int x, int y, float font_
   command.text = std::string(text_utf8);
   command.font_size_px = font_size_px;
   commands_.push_back(command);
+}
+
+void DisplayList::DrawImage(std::shared_ptr<const Image> image, int x, int y, int width,
+                            int height) {
+  Command command;
+  command.kind = CommandKind::kDrawImage;
+  command.x = x;
+  command.y = y;
+  command.width = width;
+  command.height = height;
+  command.image = std::move(image);
+  commands_.push_back(std::move(command));
 }
 
 void DisplayList::PushClip(int x, int y, int width, int height) {
@@ -213,6 +226,66 @@ void PaintText(const Command& command, Surface& surface, const Rect& clip) {
   }
 }
 
+// Paints one kDrawImage command into the command rectangle with nearest-neighbour
+// sampling, then composites each sampled pixel with the frozen SrcOver formula.
+// The mapping is exactly the frozen contract:
+//   source_x = (column - command.x) * image.width / command.width
+//   source_y = (row - command.y) * image.height / command.height
+// using integer floor division. The visited area is intersected with the clip
+// first, so every difference is non-negative (floor division is plain C++
+// division), the work is bounded by the clip area, and the 64-bit products keep
+// large rectangles from overflowing. The sampled coordinates are in
+// [0, image.width) and [0, image.height), so no extra bounds check is needed.
+void PaintImage(const Command& command, Surface& surface, const Rect& clip) {
+  if (command.width <= 0 || command.height <= 0 || command.image == nullptr) {
+    return;
+  }
+  const Image& image = *command.image;
+  if (image.width <= 0 || image.height <= 0) {
+    return;
+  }
+  const std::size_t image_pixel_count =
+      static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height);
+  if (image.pixels.size() != image_pixel_count) {
+    // A malformed image cannot be sampled safely; invalid commands are no-ops.
+    return;
+  }
+  const Rect area = Intersect(clip, Rect{command.x, command.y, command.width, command.height});
+  if (IsEmpty(area)) {
+    return;
+  }
+
+  for (int row = area.y; row < area.y + area.height; ++row) {
+    const long long source_y =
+        (static_cast<long long>(row) - command.y) * image.height / command.height;
+    const std::size_t source_row =
+        static_cast<std::size_t>(source_y) * static_cast<std::size_t>(image.width);
+    Argb* row_start = RowOf(surface, row);
+    for (int column = area.x; column < area.x + area.width; ++column) {
+      const long long source_x =
+          (static_cast<long long>(column) - command.x) * image.width / command.width;
+      const Argb source = image.pixels[source_row + static_cast<std::size_t>(source_x)];
+      const unsigned int alpha = (source >> 24) & 0xFFu;
+      if (alpha == 0) {
+        continue;
+      }
+      if (alpha == 255) {
+        row_start[column] = 0xFF000000u | (source & 0x00FFFFFFu);
+        continue;
+      }
+      const Argb destination = row_start[column];
+      const unsigned int inverse_alpha = 255u - alpha;
+      const unsigned int red =
+          BlendChannel((source >> 16) & 0xFFu, (destination >> 16) & 0xFFu, alpha, inverse_alpha);
+      const unsigned int green =
+          BlendChannel((source >> 8) & 0xFFu, (destination >> 8) & 0xFFu, alpha, inverse_alpha);
+      const unsigned int blue =
+          BlendChannel(source & 0xFFu, destination & 0xFFu, alpha, inverse_alpha);
+      row_start[column] = 0xFF000000u | (red << 16) | (green << 8) | blue;
+    }
+  }
+}
+
 }  // namespace
 
 void DrawDisplayList(const DisplayList& list, Surface& surface) {
@@ -226,6 +299,9 @@ void DrawDisplayList(const DisplayList& list, Surface& surface) {
         break;
       case CommandKind::kDrawText:
         PaintText(command, surface, clip);
+        break;
+      case CommandKind::kDrawImage:
+        PaintImage(command, surface, clip);
         break;
       case CommandKind::kPushClip:
         clip = Intersect(clip, Rect{command.x, command.y, command.width, command.height});

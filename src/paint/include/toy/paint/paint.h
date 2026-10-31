@@ -1,5 +1,8 @@
 #pragma once
 
+#include <memory>
+#include <unordered_map>
+
 #include "toy/dom/node.h"
 #include "toy/layout/box.h"
 #include "toy/render/paint.h"
@@ -18,15 +21,25 @@ struct Viewport {
   int scroll_y = 0;
 };
 
+// Decoded images of one page keyed by DOM element node id, supplied by the
+// caller (shell). Layout received the same keys as replaced-element sizes, so an
+// inline replaced box and its image share a node id. The display list keeps a
+// shared reference to each image, so the map may be destroyed while a built list
+// is still alive.
+using ImageMap = std::unordered_map<dom::NodeId, std::shared_ptr<const render::Image>>;
+
 // Paints a laid-out page into a display list: it walks the box tree in pre-order
 // and emits one background FillRect per element box whose computed background is
-// not fully transparent, then one DrawText per text box.
+// not fully transparent, then one DrawImage per inline replaced box whose node id
+// is present in `images` (after that box's background, before its children), then
+// one DrawText per text box.
 //
 // The list is pure data: paint never rasterizes and render never learns about
 // HTML or CSS. Geometry is converted from CSS pixels to device pixels with
 // std::lround (the same rounding as the box dump) and every command's y is then
 // translated by -viewport.scroll_y; x is unchanged. Negative coordinates pass
-// through and the rasterizer clips them. Pure and deterministic: the same inputs
+// through and the rasterizer clips them. An empty `images` map produces exactly
+// the M7 command list for the same page. Pure and deterministic: the same inputs
 // always produce the same commands, and an empty box tree yields an empty list.
 //
 // The list is clipped to the viewport: when it is not empty, the first command
@@ -35,6 +48,7 @@ struct Viewport {
 // stops scrolled content from painting outside the viewport; it is frozen paint
 // behavior (M7) and asserted by the paint tests.
 render::DisplayList BuildDisplayList(const dom::Document& document, const style::StyleTree& styles,
-                                     const layout::BoxTree& boxes, const Viewport& viewport);
+                                     const layout::BoxTree& boxes, const Viewport& viewport,
+                                     const ImageMap& images);
 
 }  // namespace toy::paint

@@ -3,7 +3,7 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M7 are done; M8 (real fonts and images, needs approval) is next.** For a
+**Current status: M0–M7 and M8a are done; M8b (real fonts, libraries approved) is next.** For a
 snapshot and takeover guide, read [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
@@ -108,13 +108,13 @@ snapshot and takeover guide, read [handoff.md](handoff.md).
   pixel end-to-end test proves the red heading/black paragraph geometry on a 200x100 surface, and
   GCC/Clang render byte-identical PPMs; the window shows the same page.
 - Known M6 limits: all painting is integer device pixels with no anti-aliasing or subpixel layout
-  (1 CSS px = 1 device px); no borders, images or real TTF fonts (M8); the canvas is always filled
-  white by the shell, and `html`/`body` `background-color` paints only its element box (no canvas
-  background propagation); paint order is pre-order with no stacking contexts/z-index; text is
-  ASCII bitmap glyphs only (other code points render `?`, and links are colored but not underlined
-  because `text-decoration` is not in the property set); overflow is clipped by the surface only —
-  scrolling and navigation arrive in M7; the rasterizer is bounded by the clip area, including for
-  adversarial font sizes.
+  (1 CSS px = 1 device px); no borders or real TTF fonts (images arrived in M8a, real fonts are
+  M8b); the canvas is always filled white by the shell, and `html`/`body` `background-color` paints
+  only its element box (no canvas background propagation); paint order is pre-order with no stacking
+  contexts/z-index; text is ASCII bitmap glyphs only (other code points render `?`, and links are
+  colored but not underlined because `text-decoration` is not in the property set); overflow is
+  clipped by the surface only — scrolling and navigation arrive in M7; the rasterizer is bounded by
+  the clip area, including for adversarial font sizes.
 
 ## M7 — Navigation ✅ (done)
 
@@ -146,10 +146,56 @@ snapshot and takeover guide, read [handoff.md](handoff.md).
   (unsupported schemes report an error on stderr); a failed load keeps the current page and prints
   an error on stderr; no hover/active link styling, cursor changes, forms or in-page error pages.
 
-## M8 — Real fonts and images (needs approval)
+## M8a — PNG images ✅ (done)
 
-- TTF text and `<img>` decoding, either with approved libraries or with our own implementations.
-- Done when a page with real font text and at least one image renders.
+- `render`: `Image` (straight-alpha ARGB, size caps) and `DecodePng()` wrapping the approved libpng
+  dependency behind a frozen interface (no libpng types leave the module; failures are ordinary
+  errors; sizes are rejected before allocation). The display list gains `DrawImage` with shared
+  image ownership, a frozen nearest-neighbour integer source mapping and the existing SrcOver/clip
+  semantics; image-less pages produce exactly the pre-M8a command list.
+- `layout`: inline elements with a caller-supplied intrinsic size (`LayoutOptions::replaced_sizes`,
+  keyed by DOM node id) become atomic inline replaced boxes: CSS `width`/`height` (px) override the
+  intrinsic size, one specified side keeps the intrinsic ratio, the box wraps as a whole, raises
+  the line height and is top-aligned. `layout` still has no render dependency and pages without
+  entries keep their old geometry and `<tag> inline` dump format.
+- `paint`: emits one `DrawImage` per inline replaced box whose node id has a decoded image, after
+  its background and before its children; empty image maps keep the M7 list.
+- `shell`: a private page loader (final URL, DOM, styles, boxes, replaced sizes and image map)
+  resolves each `<img src>` against the page's final URL, fetches it with the existing
+  `net::Fetch` (http/file only), decodes it with `render::DecodePng`, and skips failed/missing
+  images silently (no broken-image UI, no error output, no image cache). `shell::Browser` owns the
+  page and its images, paints them, and re-lays-out on resize without refetching; `--dump-boxes`
+  uses the same loader, so reserved image boxes appear in the box dump. The CLI is unchanged.
+- Fixtures: hand-generated PNG files with documented pixel content
+  (`tests/fixtures/images/`) and a committed `tests/fixtures/img_site/` demo page.
+- Acceptance reached: `render.image`, `layout.replaced`, `shell.images`, the image CLI checks and
+  every pre-existing test pass under GCC and Clang with warnings as errors (46 tests total);
+  image-less dumps and screenshots are byte-identical to M7; GCC and Clang produce byte-identical
+  image PPMs; the window shows the image page.
+- Known M8a limits: PNG only (whatever libpng converts to 8-bit RGBA; no JPEG/GIF/WebP/SVG), no
+  `background-image`, `srcset`, `alt` text or broken-image indicator, no image cache (a duplicate
+  URL is fetched once per `<img>`), HTML `width`/`height` attributes are ignored (CSS px only),
+  `display:block` replaced elements and margins/padding on replaced elements are unsupported,
+  replaced boxes are top-aligned (no baseline alignment, as in M5), scaling is nearest-neighbour
+  without anti-aliasing, images are fetched even when their element is not visible (no lazy
+  loading), only `http`/`file` image URLs work (no `https`), and `--dump-dom`/`--dump-style` do not
+  fetch images.
+
+## M8b — Real fonts (next; libraries approved)
+
+- TTF text: load a font file, use freetype for metrics and glyph rasterization and harfbuzz for
+  shaping; fontconfig may discover installed fonts so a page can ask for a family instead of a
+  hand-supplied file. The approved dependencies (freetype, harfbuzz, fontconfig) are recorded in
+  [dependencies.md](dependencies.md); development packages must be installed by the user where
+  missing.
+- `layout` keeps consuming text metrics through the existing `MeasureText` callback; `paint`/`render` gain the baseline/advance information needed for real glyph placement and anti-aliased
+  coverage text, while the built-in bitmap font stays the fallback path so all pre-M8b output that
+  does not opt into a real font is unchanged. The exact font-selection contract and the AA-text
+  contract change are frozen at the start of the round.
+- Tests must stay deterministic and must not depend on installed fonts: a committed/generated font
+  fixture drives the tests, while manual demos may use any installed TTF.
+- Done when a page with real TTF text and at least one image renders (the original M8 acceptance),
+  with all existing tests, GCC/Clang warning-free builds and the M8a image behavior still green.
 
 ## M9 — JavaScript subset (optional, large)
 
@@ -170,6 +216,8 @@ starts only after the previous slice is clean and the user agrees on priority.
   clearly useful.
 - **TLS / `https://`** — deferred by the user on 2026-10-31; OpenSSL is not approved. Reaching
   sites such as Google needs `https`, and proxy support alone is not enough for them.
+- **More image formats and background images** — JPEG/GIF/WebP, `background-image`,
+  `srcset`, an image cache and lazy loading; scheduled after M8a on demand, blocking no milestone.
 - **Test helper consolidation** — the per-file `Check`/`g_failures` test harness is still
   duplicated in the older test executables. The header-only `tests/support/check.h` (interface
   target `toy_test_support`) was introduced in M5 and is used by the new tests; migrate the older

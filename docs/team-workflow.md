@@ -306,3 +306,30 @@ the round when possible. Clean up stale build directories and stray files.
   sheet; the user explicitly prefers eyeballing the font over hardcoded expectations, so the
   project keeps no frozen glyph-table/fingerprint test. Render a sample when glyph quality is
   questioned — and do not re-add the removed `render.glyphs` test.
+- M8a: publishing all frozen interface headers before spawning (`render::Image`/`DecodePng`,
+  `DrawImage` on the display list, `LayoutOptions::replaced_sizes`, `paint::ImageMap`) let render,
+  layout+paint and shell work in parallel without negotiating signatures; the only contract defect
+  was a boundary-wording ambiguity ("at or above" vs "larger than") caught by an owner. Freeze the
+  exact inclusive/exclusive boundary semantics in the header, not just the constant name.
+- M8a: the user's clarification that "from scratch" means browser functionality, not low-level
+  codecs/font machinery, unblocked M8; scope clarifications must be recorded in
+  `docs/decisions.md` and `docs/dependencies.md` immediately so later rounds do not re-litigate them.
+- M8a: hand-generated fixtures with documented exact pixel content (a throwaway script in `.tmp/`,
+  only the PNGs committed, `tests/fixtures/images/README.md` describing every pixel) enabled both
+  decoder tests and end-to-end pixel assertions without any third-party test data.
+- M8a: the M7 `git worktree` byte-compat gate paid off again — image-less dumps and screenshots
+  were `cmp`-identical to HEAD after adding a new display-list command and an image map, so the
+  round could prove it changed nothing for existing pages.
+- M8a: giving `layout` a caller-supplied intrinsic-size map keyed by DOM node id (instead of a
+  render dependency) kept the layer boundary intact and let layout be tested with fake sizes;
+  `shell` builds the layout sizes and the paint image map from one page load so they cannot disagree.
+- M8a: a pimpl-style public header (forward-declared page type, `std::unique_ptr`, out-of-line
+  destructor) kept the growing private page model out of `toy/shell/browser.h` while the public
+  session API stayed unchanged; `Browser` becoming non-copyable was fine because nothing copied it.
+- M8a: libpng's simplified API plus an explicit byte-wise RGBA→ARGB conversion avoided host-endian
+  assumptions, and checking the header size caps before allocation made adversarial images cheap to
+  reject; the owner's ASan/UBSan plus randomized-decode scratch run found nothing and is a habit
+  worth keeping for every new decoder.
+- M8a: CTest cannot cheaply express "the command succeeds and writes a file of the right size" in
+  C++, so a small `cmake -P` helper was used for the CLI/screenshot path only, leaving pixel
+  assertions to the C++ test; keep such helpers narrow.

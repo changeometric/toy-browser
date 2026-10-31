@@ -19,12 +19,3 @@ remove this decision: sites such as Google are only reachable over `https`.
 files? These are test fixtures, not runtime dependencies.
 
 **Recommendation:** start with hand-written fixtures; ask before downloading anything.
-
-## 3. Image / font strategy — when M8 starts
-
-**Question:** the libraries (libpng/zlib, freetype) are approved, but should we use them or write
-our own minimal PNG/TTF support first?
-
-**Recommendation:** implement a minimal PNG decoder (own inflate) and a minimal TTF loader first,
-because that is the educational core of the project; fall back to the approved libraries if it
-drags on.

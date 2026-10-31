@@ -1,0 +1,44 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "toy/render/surface.h"
+
+namespace toy::render {
+
+// Bounds for decoded images, mirroring the shell's surface limits. Decoding
+// rejects an image before allocating when either side or the total pixel count
+// exceeds them, so a hostile or corrupt header cannot request unbounded memory.
+inline constexpr int kMaxImageDimension = 8192;
+inline constexpr std::int64_t kMaxImagePixels = 16'777'216;
+
+// A decoded image ready for painting. Pixels use the Surface representation
+// (0xAARRGGBB, straight alpha), row-major, top-left origin, no row padding.
+// A valid image has positive dimensions and pixels.size() == width * height.
+struct Image {
+  int width = 0;
+  int height = 0;
+  std::vector<Argb> pixels;
+
+  // Pixel at (x, y); x and y must be inside the image (asserted in debug builds).
+  Argb At(int x, int y) const;
+};
+
+// Decodes one PNG image from `bytes` and fills `out`. The decoder is the approved
+// libpng dependency behind this interface, so render owns image decoding and the
+// rest of the project never includes a PNG header. Every PNG color type, bit
+// depth and interlace mode that libpng converts to 8-bit RGBA is accepted; the
+// output is always straight-alpha ARGB. The bounds are inclusive maxima, matching
+// the shell's surface limits: a side larger than kMaxImageDimension or a pixel
+// count larger than kMaxImagePixels is rejected before the pixel buffer is
+// allocated.
+//
+// Returns true on success; on failure returns false, stores a human-readable
+// message in *error (when not null) and leaves `out` untouched. Never throws:
+// malformed, truncated or unsupported data is an ordinary error.
+bool DecodePng(std::string_view bytes, Image* out, std::string* error);
+
+}  // namespace toy::render

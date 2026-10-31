@@ -2,10 +2,13 @@
 
 一个从零实现的玩具网页浏览器：C++20、CMake，不使用现成的浏览器组件。
 
-**状态：M7 —— 页面可导航。** 窗口与 `--headless --screenshot` 渲染可选 URL 指定的页面；
-在窗口中链接可点击、滚轮与键盘可滚动、Alt+Left/Right 在历史中前进后退，窗口标题跟随 `<title>`。
-一个提交的演示站点在 [`tests/fixtures/nav_site/`](tests/fixtures/nav_site/)，`--dump-*` 模式仍是
-主要的 headless 调试路径。详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
+**状态：M8a —— 页面可以显示 PNG 图片。** 窗口与 `--headless --screenshot` 渲染可选 URL 指定的
+页面，包括通过已批准的 libpng 依赖抓取并解码的 `<img src="...png">` 图片；在窗口中链接可点击、
+滚轮与键盘可滚动、Alt+Left/Right 在历史中前进后退，窗口标题跟随 `<title>`。下一步是真实 TTF
+字体（M8b，使用已批准的 freetype/harfbuzz/fontconfig 组合）。仓库中有两个提交的演示站点：
+[`tests/fixtures/img_site/`](tests/fixtures/img_site/)（图片）与
+[`tests/fixtures/nav_site/`](tests/fixtures/nav_site/)（导航）。`--dump-*` 模式仍是主要的 headless
+调试路径。详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
 
 **新团队 / 新 agent？** 先读[接管指南](docs/zh/handoff.md)（当前状态与接手方式），再看
 [文档索引](docs/zh/README.md)。
@@ -20,16 +23,17 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser file:///path/page.html            # 窗口：点击链接、滚轮/键盘滚动、Alt+Left/Right
 ./build/toybrowser                                   # 打开窗口显示占位页
 ./build/toybrowser --headless --screenshot out.ppm file:///path/page.html  # 同一页面，无需显示器
-./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # 提交的演示站点
+./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"   # 图片演示
+./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # 提交的导航演示站点
 ./build/toybrowser --dump-body file:///etc/hostname  # 抓取 URL，原始字节输出到 stdout
 ./build/toybrowser --dump-dom  file:///etc/hostname  # 抓取并输出解析后的 DOM 树
 ./build/toybrowser --dump-style file:///etc/hostname # 抓取、计算样式并输出样式树
 ./build/toybrowser --dump-boxes file:///etc/hostname # 抓取、计算样式、布局并输出盒树
 ```
 
-窗口后端链接 libX11（已批准，见[依赖说明](docs/zh/dependencies.md)），因此即使只用 headless 模式，
-构建时仍然需要 X11 开发头文件。headless 运行不需要显示器，是测试和调试的主要模式：所有渲染结果
-都能不开窗口检查。
+窗口后端链接 libX11，图片解码链接 libpng（两者都已批准，见[依赖说明](docs/zh/dependencies.md)），
+因此即使只用 headless 模式，构建时仍然需要 X11 与 libpng 开发头文件。headless 运行不需要显示器，
+是测试和调试的主要模式：所有渲染结果都能不开窗口检查。
 
 CMake 3.20 或更新版本与任何 C++20 编译器都能构建；仓库不依赖某台机器的路径、工具链版本或
 已安装的包集合。
@@ -44,8 +48,8 @@ CMake 3.20 或更新版本与任何 C++20 编译器都能构建；仓库不依�
 | [decisions.md](docs/zh/decisions.md) | 已锁定的技术决策及其理由 |
 | [roadmap.md](docs/zh/roadmap.md) | 里程碑，每个都是最小垂直切片 |
 | [dependencies.md](docs/zh/dependencies.md) | 第三方依赖策略与审批记录 |
-| [conventions.md](docs/zh/conventions.md) | C++、CMake 与测试约定 |
 | [team-workflow.md](docs/zh/team-workflow.md) | 轮次制团队流程：角色、阶段、质量门与经验 |
+| [conventions.md](docs/zh/conventions.md) | C++、CMake 与测试约定 |
 | [open-questions.md](docs/zh/open-questions.md) | 等待用户决策的问题 |
 | [AGENTS.md](AGENTS.md) | AI agent 工作规则 |
 
@@ -54,26 +58,28 @@ CMake 3.20 或更新版本与任何 C++20 编译器都能构建；仓库不依�
 
 ## 依赖
 
-目前只链接了一个第三方库；浏览器引擎本身没有任何现成组件（没有 HTML 解析器、CSS 引擎、JS 引擎、
-布局或渲染引擎）。
+目前只链接了两个第三方库（libX11，以及 libpng + zlib）；浏览器引擎本身没有任何现成组件
+（没有 HTML 解析器、CSS 引擎、JS 引擎、布局或渲染引擎）。
 
 | 组件 | 用途 | 许可证 | 状态 |
 | --- | --- | --- | --- |
 | C++20 标准库 + POSIX | 基础（容器、socket、文件） | 标准 / 系统 | 始终 |
 | libX11 | 窗口、输入、像素呈现 | MIT/X11 | 自 M1 起链接 |
-| libpng + zlib | 图片解码（M8，如使用） | libpng 许可证 / zlib 许可证 | 已批准，未链接 |
-| freetype | 字体光栅化（M8，如使用） | FreeType 许可证 | 已批准，未链接 |
+| libpng + zlib | PNG 图片解码 | libpng 许可证 / zlib 许可证 | 自 M8a 起链接 |
+| freetype | 字体度量与字形光栅化 | FreeType 许可证 | 已批准，未链接（M8b） |
+| harfbuzz | OpenType 文本整形 | MIT | 已批准，未链接（M8b） |
+| fontconfig | 已安装字体的发现与匹配 | MIT 风格 | 已批准，未链接（M8b） |
 
 依赖策略、审批记录与自写替代方案见 [dependencies.md](docs/zh/dependencies.md)。
 
 ## 许可证
 
-MIT —— 见 [LICENSE](LICENSE)。所有已批准的依赖都使用与 MIT 兼容的宽松许可证
-（libX11 为 MIT/X11；libpng/zlib/freetype 各有自己的宽松许可证）。
+MIT —— 见 [LICENSE](LICENSE)。所有已批准的依赖都使用与 MIT 兼容的宽松许可证。
 
 ## 基本原则
 
 - C++20 与 CMake，目标平台为 Linux 桌面。
 - 不使用现成的 HTML 解析器、CSS 引擎、JS 引擎、布局引擎或浏览器内核：这些由本项目自己实现。
-- 底层库在使用前必须获得用户明确批准。
+- 底层库在使用前必须获得用户明确批准；“从零”仅指浏览器功能部分，因此已批准的编解码与字体
+  机制可以使用。
 - 每个里程碑只交付最小可用、可验证的切片——不做超前设计。

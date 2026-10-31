@@ -5,8 +5,10 @@
 
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "support/check.h"
@@ -19,11 +21,14 @@ using toy::render::Command;
 using toy::render::CommandKind;
 using toy::render::DisplayList;
 using toy::render::DrawDisplayList;
+using toy::render::Image;
 using toy::render::Surface;
 
 constexpr Argb kBlack = 0xFF000000u;
 constexpr Argb kWhite = 0xFFFFFFFFu;
 constexpr Argb kRed = 0xFFFF0000u;
+constexpr Argb kGreen = 0xFF00FF00u;
+constexpr Argb kBlue = 0xFF0000FFu;
 
 int CountPixels(const Surface& surface, Argb color) {
   int count = 0;
@@ -74,6 +79,15 @@ Surface DrawSurface(int width, int height, Argb background, const DisplayList& l
   surface.Fill(background);
   DrawDisplayList(list, surface);
   return surface;
+}
+
+// Builds a shared image from row-major ARGB pixels.
+std::shared_ptr<const Image> MakeImage(int width, int height, std::vector<Argb> pixels) {
+  auto image = std::make_shared<Image>();
+  image->width = width;
+  image->height = height;
+  image->pixels = std::move(pixels);
+  return image;
 }
 
 std::vector<Argb> RenderText(std::string_view text, int width, int height, float font_size_px) {
@@ -414,6 +428,198 @@ void TestPrintableGlyphs() {
   toy_test::Check(every_printable_draws, "every printable ASCII glyph paints at least one pixel");
 }
 
+void TestDrawImageCommandFields() {
+  const auto image = MakeImage(2, 1, {kRed, kBlue});
+  DisplayList list;
+  list.DrawImage(image, 3, 4, 5, 6);
+
+  toy_test::Check(list.size() == 1, "one DrawImage appends one command");
+  const Command& command = list.commands()[0];
+  toy_test::Check(command.kind == CommandKind::kDrawImage, "the command kind is kDrawImage");
+  toy_test::Check(command.x == 3 && command.y == 4 && command.width == 5 && command.height == 6,
+                  "the image command keeps its destination rectangle");
+  toy_test::Check(command.image == image, "the image command keeps the shared image");
+  toy_test::Check(command.color == 0 && command.text.empty() && command.font_size_px == 0.0f,
+                  "the image command leaves the other fields at their defaults");
+}
+
+void TestDrawImageExactPixels() {
+  // A 2x2 source drawn 1:1 at an offset copies its pixels exactly.
+  const auto image = MakeImage(2, 2, {kRed, kGreen, kBlue, kWhite});
+  DisplayList list;
+  list.DrawImage(image, 1, 1, 2, 2);
+  const Surface surface = DrawSurface(4, 4, kBlack, list);
+  toy_test::Check(surface.At(1, 1) == kRed, "a 1:1 draw copies the top-left source pixel");
+  toy_test::Check(surface.At(2, 1) == kGreen, "a 1:1 draw copies the top-right source pixel");
+  toy_test::Check(surface.At(1, 2) == kBlue, "a 1:1 draw copies the bottom-left source pixel");
+  toy_test::Check(surface.At(2, 2) == kWhite, "a 1:1 draw copies the bottom-right source pixel");
+  toy_test::Check(CountPixels(surface, kBlack) == 12,
+                  "a 1:1 draw leaves the rest of the surface alone");
+}
+
+void TestDrawImageUpscale() {
+  // The frozen mapping is nearest-neighbour: destination (dx, dy) samples
+  // source (dx * width / dest_width, dy * height / dest_height), so a 2x2 image
+  // drawn at 4x4 becomes four 2x2 blocks.
+  const auto image = MakeImage(2, 2, {kRed, kGreen, kBlue, kWhite});
+  DisplayList list;
+  list.DrawImage(image, 0, 0, 4, 4);
+  const Surface surface = DrawSurface(4, 4, kBlack, list);
+
+  bool matches = true;
+  for (int y = 0; y < 4; ++y) {
+    for (int x = 0; x < 4; ++x) {
+      const Argb expected = y < 2 ? (x < 2 ? kRed : kGreen) : (x < 2 ? kBlue : kWhite);
+      matches = matches && surface.At(x, y) == expected;
+    }
+  }
+  toy_test::Check(matches, "a 2x upscale maps each source pixel to a 2x2 destination block");
+  toy_test::Check(CountPixels(surface, kBlack) == 0, "a 4x4 draw covers the whole surface");
+}
+
+void TestDrawImageDownscale() {
+  // Source coordinates use integer floor division. Drawing a 3-pixel-wide image
+  // into 2 destination pixels samples source columns 0 and 1: the second
+  // destination column computes 1 * 3 / 2 == 1, never the last source column.
+  const auto image = MakeImage(3, 1, {kRed, kGreen, kBlue});
+  DisplayList list;
+  list.DrawImage(image, 0, 0, 2, 1);
+  const Surface surface = DrawSurface(2, 1, kBlack, list);
+  toy_test::Check(surface.At(0, 0) == kRed, "downscale samples source column 0 first");
+  toy_test::Check(surface.At(1, 0) == kGreen, "downscale floors 1 * 3 / 2 to source column 1");
+  toy_test::Check(CountPixels(surface, kBlue) == 0,
+                  "floor mapping never samples the last source column in this case");
+}
+
+void TestDrawImageClipping() {
+  // Image pixel (x, y) is 0xFF000000 | (x << 16) | y, so every source pixel is
+  // distinct and the sampled coordinates are visible in the result.
+  std::vector<Argb> pixels;
+  for (int y = 0; y < 4; ++y) {
+    for (int x = 0; x < 4; ++x) {
+      pixels.push_back(0xFF000000u | (static_cast<Argb>(x) << 16) | static_cast<Argb>(y));
+    }
+  }
+  const auto image = MakeImage(4, 4, std::move(pixels));
+
+  DisplayList clipped;
+  clipped.PushClip(1, 1, 2, 2);
+  clipped.DrawImage(image, 0, 0, 4, 4);
+  const Surface surface = DrawSurface(4, 4, kBlack, clipped);
+  toy_test::Check(surface.At(1, 1) == 0xFF010001u, "the clip keeps source pixel (1, 1)");
+  toy_test::Check(surface.At(2, 1) == 0xFF020001u, "the clip keeps source pixel (2, 1)");
+  toy_test::Check(surface.At(1, 2) == 0xFF010002u, "the clip keeps source pixel (1, 2)");
+  toy_test::Check(surface.At(2, 2) == 0xFF020002u, "the clip keeps source pixel (2, 2)");
+  toy_test::Check(CountPixels(surface, kBlack) == 12, "an image draw is bounded by the clip");
+
+  // A negative destination origin is clipped, and the source mapping still uses
+  // the command origin: destination (0, 0) samples source (1, 1).
+  const auto corners = MakeImage(2, 2, {kRed, kGreen, kBlue, kWhite});
+  DisplayList negative;
+  negative.DrawImage(corners, -1, -1, 2, 2);
+  const Surface corner_surface = DrawSurface(3, 3, kBlack, negative);
+  toy_test::Check(corner_surface.At(0, 0) == kWhite,
+                  "a negative origin samples source (1, 1) for destination (0, 0)");
+  toy_test::Check(CountPixels(corner_surface, kWhite) == 1,
+                  "only the single visible pixel of a negative-origin draw is painted");
+
+  // Completely off-surface draws are no-ops.
+  DisplayList outside;
+  outside.DrawImage(corners, 10, 10, 2, 2);
+  outside.DrawImage(corners, -10, -10, 2, 2);
+  const Surface untouched = DrawSurface(3, 3, kBlack, outside);
+  toy_test::Check(CountPixels(untouched, kBlack) == 9, "off-surface image draws are no-ops");
+}
+
+void TestDrawImageAlphaBlending() {
+  // Images use the same frozen SrcOver formula as fills.
+  const auto translucent_red = MakeImage(1, 1, {0x80FF0000u});
+  DisplayList white_list;
+  white_list.DrawImage(translucent_red, 0, 0, 1, 1);
+  const Surface over_white = DrawSurface(1, 1, kWhite, white_list);
+  toy_test::Check(over_white.At(0, 0) == 0xFFFF7F7Fu,
+                  "alpha 128 red image over white blends to 0xFFFF7F7F");
+
+  const auto translucent_blue = MakeImage(1, 1, {0x80406080u});
+  DisplayList dark_list;
+  dark_list.DrawImage(translucent_blue, 0, 0, 1, 1);
+  const Surface over_dark = DrawSurface(1, 1, 0xFF102030u, dark_list);
+  toy_test::Check(over_dark.At(0, 0) == 0xFF284058u,
+                  "alpha 128 0x406080 image over 0x102030 matches the frozen channel formula");
+
+  const auto transparent = MakeImage(1, 1, {0x00FF0000u});
+  DisplayList transparent_list;
+  transparent_list.DrawImage(transparent, 0, 0, 1, 1);
+  const Surface over_white_alpha0 = DrawSurface(1, 1, kWhite, transparent_list);
+  toy_test::Check(over_white_alpha0.At(0, 0) == kWhite, "alpha 0 image pixels are a no-op");
+  Surface transparent_black(1, 1);
+  DrawDisplayList(transparent_list, transparent_black);
+  toy_test::Check(transparent_black.At(0, 0) == 0x00000000u,
+                  "alpha 0 image pixels do not write an opaque pixel over transparent black");
+
+  const auto opaque = MakeImage(1, 1, {0xFF0000FFu});
+  DisplayList opaque_list;
+  opaque_list.DrawImage(opaque, 0, 0, 1, 1);
+  Surface transparent_black_opaque(1, 1);
+  DrawDisplayList(opaque_list, transparent_black_opaque);
+  toy_test::Check(transparent_black_opaque.At(0, 0) == 0xFF0000FFu,
+                  "alpha 255 image pixels write 0xFF000000 | rgb");
+}
+
+void TestDrawImageNoOps() {
+  const auto image = MakeImage(1, 1, {kRed});
+  DisplayList list;
+  list.DrawImage(nullptr, 0, 0, 4, 4);
+  list.DrawImage(MakeImage(0, 0, {}), 0, 0, 4, 4);
+  list.DrawImage(MakeImage(2, 2, {}), 0, 0, 2, 2);
+  list.DrawImage(image, 0, 0, 0, 4);
+  list.DrawImage(image, 0, 0, 4, 0);
+  list.DrawImage(image, 0, 0, -2, 4);
+  list.DrawImage(image, 0, 0, 4, -2);
+  const Surface surface = DrawSurface(4, 4, kBlack, list);
+  toy_test::Check(CountPixels(surface, kBlack) == 16,
+                  "null, empty, malformed and non-positive-size image commands are no-ops");
+
+  DisplayList empty_clip;
+  empty_clip.PushClip(0, 0, 0, 4);
+  empty_clip.DrawImage(image, 0, 0, 4, 4);
+  const Surface clipped_surface = DrawSurface(4, 4, kBlack, empty_clip);
+  toy_test::Check(CountPixels(clipped_surface, kBlack) == 16,
+                  "a zero-size clip hides an image draw");
+}
+
+void TestDrawImageKeepsImageAlive() {
+  auto image = MakeImage(1, 1, {kRed});
+  std::weak_ptr<const Image> weak = image;
+  {
+    DisplayList list;
+    list.DrawImage(image, 0, 0, 1, 1);
+    image.reset();
+    toy_test::Check(!weak.expired(), "the display list keeps the image alive");
+    const Surface surface = DrawSurface(1, 1, kBlack, list);
+    toy_test::Check(surface.At(0, 0) == kRed,
+                    "a command still draws after the caller releases its image reference");
+  }
+  toy_test::Check(weak.expired(), "destroying the display list releases the image");
+}
+
+void TestDrawImageDeterminism() {
+  const auto image = MakeImage(2, 2, {kRed, 0x80FF0000u, kBlue, kWhite});
+  DisplayList list;
+  list.PushClip(1, 1, 3, 3);
+  list.DrawImage(image, 0, 0, 4, 4);
+  list.PopClip();
+
+  Surface first(4, 4);
+  Surface second(4, 4);
+  first.Fill(kWhite);
+  second.Fill(kWhite);
+  DrawDisplayList(list, first);
+  DrawDisplayList(list, second);
+  toy_test::Check(CopyPixels(first) == CopyPixels(second),
+                  "drawing the same image list twice is pixel-identical");
+}
+
 }  // namespace
 
 int main() {
@@ -429,6 +635,15 @@ int main() {
   TestTextAdvance();
   TestTextFallback();
   TestTextClipping();
+  TestDrawImageCommandFields();
+  TestDrawImageExactPixels();
+  TestDrawImageUpscale();
+  TestDrawImageDownscale();
+  TestDrawImageClipping();
+  TestDrawImageAlphaBlending();
+  TestDrawImageNoOps();
+  TestDrawImageKeepsImageAlive();
+  TestDrawImageDeterminism();
   TestDeterminism();
   TestPrintableGlyphs();
   return toy_test::Finish("render.paint");

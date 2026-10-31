@@ -17,14 +17,15 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M5 | `layout` box tree with block/inline/anonymous boxes and line breaking, bitmap-font metrics in `render`, deterministic box dump (`--dump-boxes`) |
 | M6 | `render` display list + software rasterizer + hand-authored 8x16 ASCII glyphs, `paint` box-tree-to-display-list module, window/`--screenshot` painting with an optional positional page URL |
 | M7 | Navigation: headless `shell::Browser` (final URL, history, scroll, title), `net::ResolveUrl`, box hit-testing, scroll-clipped painting, X11 click/wheel/keys + window titles, committed demo site, `shell.navigation` test |
+| M8a | PNG images: `render::Image` + libpng decoder behind `render::DecodePng`, `DrawImage` display-list command/rasterizer, replaced inline `<img>` layout from caller-supplied intrinsic sizes, private shell page loader (fetch/resolve/decode/skip failures), image fixtures and `tests/fixtures/img_site/`, 46 tests |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-Not implemented yet: images, real TTF fonts (M8), JavaScript (M9), `https`/TLS, proxies, external
+Not implemented yet: real TTF fonts (M8b), JavaScript (M9), `https`/TLS, proxies, external
 stylesheets, borders, anti-aliased text, horizontal scrolling/scrollbars, hover/active link styling
-and form controls. The window and `--screenshot` paint a real page when a URL is given and the M1
-placeholder page otherwise; with a page URL the window is also browsable (links, wheel/keyboard
-scrolling, Alt+Left/Right history, `<title>`). The `--dump-*` modes remain the primary debugging
-path.
+and form controls. PNG images work since M8a (see the M8a known limits in [roadmap.md](roadmap.md)). The window and
+`--screenshot` paint a real page when a URL is given and the M1 placeholder page otherwise; with a
+page URL the window is also browsable (links, wheel/keyboard scrolling, Alt+Left/Right history,
+`<title>`). The `--dump-*` modes remain the primary debugging path.
 
 ## Verify the current state (no context needed)
 
@@ -45,11 +46,22 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 40/40 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 46/46 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
-or newer is required; building needs the X11 development headers (approved dependency); only
-windowed mode needs a running display.
+or newer is required; building needs the X11 development headers and the libpng development
+headers (both approved dependencies); only windowed mode needs a running display.
+
+```sh
+"$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
+    "file://$PWD/tests/fixtures/img_site/index.html" && file /tmp/toybrowser-img.ppm
+"$BUILD"/toybrowser --size 320x200 --dump-boxes \
+    "file://$PWD/tests/fixtures/img_site/index.html" | grep '<img>'
+```
+
+Expected: the screenshot renders the committed PNG fixtures (flags, alpha, gray, palette) and the
+box dump contains `<img> inline` boxes with their intrinsic/CSS sizes; `missing.png` reserves no
+box.
 
 ```sh
 "$BUILD"/toybrowser --size 400x200 --screenshot /tmp/toybrowser-nav.ppm \
@@ -59,41 +71,51 @@ windowed mode needs a running display.
 Window demo (needs a display):
 
 ```sh
+"$BUILD"/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"
 "$BUILD"/toybrowser --size 400x200 "file://$PWD/tests/fixtures/nav_site/index.html"
-# click "About page", scroll with the wheel/arrows/PageUp/PageDown/Home/End, Alt+Left/Right for
-# history; the window title follows <title>.
+# img page: check the PNG images are painted; nav page: click "About page", scroll with the
+# wheel/arrows/PageUp/PageDown/Home/End, Alt+Left/Right for history; the title follows <title>.
 ```
 
-## Next round: M8 — real fonts and images (needs approval)
+## Next round: M8b — real fonts (libraries approved)
 
-- Goal: real TTF text and `<img>` decoding, either with approved libraries or with our own minimal
-  implementations. The choice is open question 3 in [open-questions.md](open-questions.md) and needs
-  the user's approval before any dependency or decoder work (see [dependencies.md](dependencies.md)).
-- Preliminary scope: `render` gains a font backend (metrics and glyph rasterization replacing or
-  extending the built-in 8x16 bitmap font) and an image decoder plus a `DrawImage` display-list
-  command; `layout` keeps consuming text metrics only; `paint` emits images; `net`/`shell` add the
-  URL/base-fetch path for image sources (external `<link>` CSS stays separate).
-- Still out of scope: JavaScript (M9), forms, `https`/TLS, proxies.
-- Acceptance sketch: a page with real font text and at least one image renders; determinism/pixel
-  tests and all existing tests keep passing under both compilers.
-- Do not start M8 without the user's decision on the font/image strategy.
+- Goal: real TTF text: freetype for metrics and glyph rasterization, harfbuzz for shaping and
+  fontconfig for installed-font discovery/matching. The user approved all three libraries on
+  2026-10-31 and clarified that "from scratch" applies to browser functionality, not low-level
+  codecs/font machinery (recorded in [dependencies.md](dependencies.md) and
+  [decisions.md](decisions.md)). Development packages must be installed by the user where missing;
+  agents never install anything.
+- Preliminary scope: `render` gains a font backend (loading, metrics, shaped advances, anti-aliased
+  glyph coverage) replacing or extending the built-in 8x16 bitmap font on the TTF path; `layout`
+  keeps consuming text metrics through the existing `MeasureText` callback (baseline information
+  may be added to the contract); `paint` places real glyphs and paint emits coverage text; font
+  selection/fallback (a default or configured font) is frozen at the start of the round. Bitmap-font
+  output for pages that do not opt into a TTF font should stay unchanged.
+- Tests must stay deterministic and must not depend on installed fonts: a committed/generated font
+  fixture drives the tests; real installed fonts are for manual demos only.
+- Done when a page with real TTF text and at least one image renders (the original M8 acceptance),
+  with all existing tests (46), GCC/Clang warning-free builds and M8a image behavior green.
+- Still out of scope: JavaScript (M9), forms, `https`/TLS, proxies, external CSS.
 
-Backlog after M8 (details in [roadmap.md](roadmap.md)): image/font library decisions, proxy support,
-TLS, and test-helper migration.
+Backlog after M8b (details in [roadmap.md](roadmap.md)): proxy support, TLS, more image formats/
+background images, and test-helper migration.
 
 ## Map of the repository
 
 - `src/<module>/` — one CMake library target per module (`base` does not exist yet; see
   [architecture.md](architecture.md) for the module map and dependency direction).
-- `src/main.cpp` — CLI parsing only; `shell` orchestrates fetch → parse → style → layout → paint →
-  dump/present, and `toy/shell/browser.h` owns one browser session (history, scroll, clicks, title).
-- `src/render/include/toy/render/font.h` — bitmap-font metrics; `layout` consumes them through a
-  `shell`-supplied callback and has no `render` dependency. `src/render/include/toy/render/paint.h`
-  is the display list + rasterizer; `src/paint/` builds the list from the box tree and never
-  rasterizes.
+- `src/main.cpp` — CLI parsing only; `shell` orchestrates fetch → parse → style → images → layout →
+  paint → dump/present, and `toy/shell/browser.h` owns one browser session (history, scroll, clicks,
+  title).
+- `src/shell/page.h` — shell-private page loader (final URL, DOM, styles, box tree, decoded images);
+  `src/render/include/toy/render/image.h` — `Image` and the libpng-backed `DecodePng`; the display
+  list + rasterizer live in `toy/render/paint.h`, and `src/paint/` builds the list from the box tree
+  without rasterizing. `src/render/include/toy/render/font.h` — bitmap-font metrics; `layout`
+  consumes them through a `shell`-supplied callback and has no `render` dependency.
 - `tests/<module>/` — one executable per subject, registered with CTest; new tests use the
-  header-only `tests/support/check.h`. `tests/fixtures/nav_site/` is the committed three-page demo
-  and navigation-test site.
+  header-only `tests/support/check.h`. Committed fixtures: `tests/fixtures/nav_site/` (three-page
+  navigation demo), `tests/fixtures/img_site/` (image pipeline demo), `tests/fixtures/images/`
+  (hand-generated PNGs with documented pixel content).
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
   questions (this file is the snapshot).
 - Shared task board — provided by the agent runtime (task create/claim/update with revision); if
@@ -113,29 +135,59 @@ TLS, and test-helper migration.
   `<tag> block|inline`, `anonymous block` or `text "..."` followed by `x= y= width= height=`, all
   integers (`std::lround`) of absolute CSS pixels; indent is two spaces per box depth, capped at 64
   levels.
-- Layout semantics frozen through the layout tests and the M5 known limits: viewport width from
+- Layout semantics frozen through the layout tests and the M5/M8a known limits: viewport width from
   `--size`, no margin collapsing, top-aligned lines, word-level text boxes, ASCII-only line
-  breaking.
-- Painting semantics frozen through the M6 tests: display-list commands are integer device pixels
-  (`FillRect`, `DrawText`, `PushClip`/`PopClip`); fills use the SrcOver formula
+  breaking. M8a replaced elements: `LayoutOptions::replaced_sizes` (DOM node id → intrinsic CSS px)
+  makes an inline element an atomic inline-level box; CSS `width`/`height` px override the
+  intrinsic size, one specified side keeps the intrinsic ratio, the box wraps as a whole, raises
+  the line height and is top-aligned; its dump line stays `<tag> inline x= y= width= height=`, it
+  has no children, `display:block` replaced elements are unsupported, and margins/padding on
+  replaced boxes are ignored. A page without entries keeps its old geometry byte for byte.
+- Painting semantics frozen through the M6/M7 tests: display-list commands are integer device pixels
+  (`FillRect`, `DrawText`, `DrawImage`, `PushClip`/`PopClip`); fills use the SrcOver formula
   `(src * a + dst * (255 - a) + 127) / 255` over an opaque destination; the initial clip is the
   whole surface and rasterizer work is bounded by the clip; the shell fills the canvas white; paint
-  order is box-tree pre-order (background, then children); text uses the built-in 8x16 ASCII glyphs
-  with nearest-neighbour scaling, no anti-aliasing, `?` for non-ASCII, and opaque text pixels.
-  M7 painting: a non-empty page is wrapped in exactly one `PushClip(0, 0, viewport)`/
-  `PopClip` pair and every command's y is translated by `-scroll_y` (integer device pixels, x
-  unchanged); a scroll-0 render must stay byte-identical to M6.
+  order is box-tree pre-order (background, then image, then children/text); text uses the built-in
+  8x16 ASCII glyphs with nearest-neighbour scaling, no anti-aliasing, `?` for non-ASCII, and
+  opaque text pixels. M7 painting: a non-empty page is wrapped in exactly one
+  `PushClip(0, 0, viewport)`/`PopClip` pair and every command's y is translated by `-scroll_y`
+  (integer device pixels, x unchanged); a scroll-0 render must stay byte-identical to M6/M7 when
+  the page has no images. M8a images: one `DrawImage` per inline replaced box whose node id is in
+  the `paint::ImageMap`, emitted after that box's background; the command holds a
+  `shared_ptr<const render::Image>`; destination pixel (dx, dy) samples source
+  `((dx - x) * image.width / width, (dy - y) * image.height / height)` with integer floor division
+  (nearest-neighbour, no interpolation/AA), composited with the same SrcOver formula (alpha 0 no-op,
+  alpha 255 writes `0xFF000000 | rgb`, result opaque); an empty image map reproduces the pre-M8a
+  command list exactly.
+- Image decoding contract (`render::DecodePng`): PNG only, via the approved libpng dependency behind
+  the interface, output straight-alpha ARGB `render::Image`; accepted sizes are each side at most
+  8192 px and at most 16,777,216 pixels in total (inclusive maxima), rejected before allocation;
+  failures return false with a human-readable error and leave `*out` untouched; no exceptions; no
+  libpng type crosses a public header.
+- Shell page loader contract (`src/shell/page.h`, private): after fetching/parsing/styling, load
+  every `<img>` in document order (iterative walk), take its first `src`, resolve it against the
+  page's final URL, fetch it with `net::Fetch` (http/file only), decode it, and keep
+  `layout::ReplacedSizes` + `paint::ImageMap` keyed by the img DOM node id. Missing/failed/unsupported
+  images are skipped silently (no broken-image UI, no stderr, page load still succeeds, the element
+  lays out as an empty inline); there is no image cache (one fetch per occurrence) and images are
+  fetched even if the element would not be visible. `--dump-boxes` uses the same loader;
+  `--dump-dom`/`--dump-style` do not fetch images.
 - Navigation/session contract (`toy/shell/browser.h`): one history entry per successful load,
   failed loads change nothing, every successful load resets the scroll offset to 0, a reference
   that only changes the fragment is a no-op, the title is the first `<title>` text (collapsed,
-  falling back to the serialized final URL), and only `http`/`file` links navigate.
+  falling back to the serialized final URL), and only `http`/`file` links navigate. M8a keeps the
+  public methods identical but hides the page (DOM/styles/boxes/images) behind a forward
+  declaration, an out-of-line destructor and a `std::unique_ptr`, so the header no longer exposes
+  the page data and `Browser` is non-copyable.
 - Platform input contract (`toy/platform/window.h`): `kMouseDown` is the primary button in window
   device pixels, `kMouseWheel` carries `wheel_delta` (positive = towards the document end), and
   `kKeyDown` carries the normalized `Key` plus alt/ctrl/shift; `SetTitle` is best effort and never
   fails the window.
 - Module boundaries and dependency direction in [architecture.md](architecture.md).
-- `--size` is clamped to 1..8192 per side and at most 16M pixels; bodies are capped by
-  `FetchOptions::max_body_bytes` (16 MiB by default); dump indentation is capped at 64 levels.
+- `--size` is clamped to 1..8192 per side and at most 16M pixels; decoded images use the same
+  inclusive bounds (each side at most 8192 px, at most 16,777,216 pixels in total); bodies are
+  capped by `FetchOptions::max_body_bytes` (16 MiB by default); dump indentation is capped at 64
+  levels.
 - HTML/CSS/JS support is deliberately partial: read the known-limits entries in `roadmap.md`
   instead of assuming spec behavior.
 
@@ -198,3 +250,29 @@ TLS, and test-helper migration.
 - The built-in 8x16 glyph table is hand-authored and its shapes are reviewed visually (the user's
   preference): there is deliberately no frozen glyph-bitmap/fingerprint test. Changing a glyph is a
   visual change — render a sample and look at it before committing.
+- libpng is a required build dependency now (`find_package(PNG REQUIRED)` in
+  `src/render/CMakeLists.txt`); a build without its development headers fails at configure time.
+  Do not hardcode versions or paths, and keep `png.h` out of public headers.
+- PNG decoding goes through `render::DecodePng` only. Sizes are validated before allocation, the
+  output is straight-alpha ARGB, and failures are ordinary errors. The hand-generated fixtures in
+  `tests/fixtures/images/` document their exact pixel content; keep the README and the tests in
+  sync if a fixture ever changes.
+- Image-less dumps and screenshots must stay byte-identical to M7 and image PPMs must be identical
+  between GCC and Clang: `cmp` a fresh build against a `git worktree` of the previous commit at the
+  end of any round that touches painting. This M7 gate has already caught drift cheaply.
+- Layout and paint must receive images keyed by the same DOM node ids (`layout::ReplacedSizes` and
+  `paint::ImageMap`); `shell` builds both from one load. `RelayoutPage` reuses the stored sizes and
+  decoded images and never refetches on resize.
+- A display list image command owns a `shared_ptr<const render::Image>`; a built list may outlive
+  the page, so never keep a raw image pointer in a command.
+- The image tests (`shell.images*`, and the dump regexes for `tests/fixtures/img_site/`) hardcode
+  geometry taken from `toybrowser --size 320x200 --dump-boxes`, the same way the navigation test
+  hardcodes link coordinates: changing the fixture, the replaced-element layout or the text metrics
+  means updating those constants in the same change.
+- `shell.images_screenshot` is a `cmake -P` helper that only checks exit status, the P6 header and
+  the file size; the pixel content of the same page is asserted by `shell.images`.
+- `--dump-boxes` now loads and decodes the page's images too (that is how `<img>` boxes appear);
+  image failures are still skipped, so the dump never fails because of a broken image.
+- Image loading has no cache and no lazy loading: every `<img>` occurrence is fetched, even one
+  hidden by `display:none` or far below the viewport. That is a documented M8a MVP limit, not a
+  bug; only add caching/lazy loading with a contract change.

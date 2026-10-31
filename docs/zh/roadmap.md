@@ -4,7 +4,7 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M7 已完成；下一步是 M8（真实字体与图像，需要审批）。** 快照与接管指南见
+**当前状态：M0–M7 与 M8a 已完成；下一步是 M8b（真实字体，库已批准）。** 快照与接管指南见
 [handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
@@ -56,7 +56,7 @@
 - `paint` 模块：把盒树转换成显示列表——按前序先画元素背景，再为每个文本盒用计算出的颜色/字号画一次文本。它不做光栅化，`render` 仍然完全不了解 HTML/CSS。
 - `shell`/CLI：可选的位置参数页面 URL（`toybrowser [options] [url]`），由窗口模式和 `--screenshot` 使用；页面被抓取、解析、计算样式、按 surface 宽度布局、绘制并呈现/写成 PPM。不给 URL 时两种模式都保留 M1 占位页。
 - 已达成验收：`render.paint`、`paint.display_list`、`shell.screenshot_page` 与位置参数 URL 的 CLI 测试在 GCC 和 Clang 下、警告视为错误时通过（共 37 个测试）；200x100 surface 上的像素端到端测试验证了红色标题/黑色段落的几何；GCC/Clang 产出逐字节相同的 PPM；窗口显示同一页面。
-- M6 已知限制：所有绘制都是整数设备像素，无抗锯齿、无子像素布局（1 CSS px = 1 设备 px）；没有 border、图片或真实 TTF 字体（M8）；canvas 始终由 shell 填白，`html`/`body` 的 `background-color` 只绘制其元素盒（不会传播为 canvas 背景）；绘制顺序是前序，没有层叠上下文/z-index；文本只有 ASCII 位图字形（其他码点渲染 `?`，链接只有颜色没有下划线，因为属性集里没有 `text-decoration`）；溢出只被 surface 裁剪——滚动与导航在 M7；光栅化器的工作量受裁剪区域限制，对抗性字号也不例外。
+- M6 已知限制：所有绘制都是整数设备像素，无抗锯齿、无子像素布局（1 CSS px = 1 设备 px）；没有 border 或真实 TTF 字体（图片在 M8a 到来，真实字体是 M8b）；canvas 始终由 shell 填白，`html`/`body` 的 `background-color` 只绘制其元素盒（不会传播为 canvas 背景）；绘制顺序是前序，没有层叠上下文/z-index；文本只有 ASCII 位图字形（其他码点渲染 `?`，链接只有颜色没有下划线，因为属性集里没有 `text-decoration`）；溢出只被 surface 裁剪——滚动与导航在 M7；光栅化器的工作量受裁剪区域限制，对抗性字号也不例外。
 
 ## M7 — 导航 ✅（已完成）
 
@@ -83,10 +83,47 @@
   （不支持的 scheme 在 stderr 报错）；加载失败保留当前页面并在 stderr 报错；没有 hover/active
   链接样式、光标变化、表单或页内错误页。
 
-## M8 — 真实字体与图像（需要审批）
+## M8a — PNG 图片 ✅（已完成）
 
-- TTF 文本与 `<img>` 解码，使用已批准的库或我们自己的实现。
-- 当一个带真实字体文本和至少一张图片的页面渲染出来时完成。
+- `render`：`Image`（直通 alpha 的 ARGB、尺寸上限）与 `DecodePng()`，把已批准的 libpng 依赖封装在
+  冻结接口之后（libpng 类型不离开模块；失败是普通错误；尺寸在分配前校验）。显示列表新增
+  `DrawImage`，共享图片所有权，使用冻结的最近邻整数源映射与既有 SrcOver/裁剪语义；没有图片的
+  页面产出与 M8a 之前完全相同的命令列表。
+- `layout`：带调用方提供的固有尺寸（`LayoutOptions::replaced_sizes`，按 DOM 节点 id 索引）的行内
+  元素成为原子行内 replaced 盒：CSS `width`/`height`（px）覆盖固有尺寸，只指定一侧时保持固有
+  宽高比，盒整体换行、抬高行高并顶部对齐。`layout` 仍然不依赖 render，没有条目的页面保持原有
+  几何与 `<tag> inline` dump 格式。
+- `paint`：对节点 id 有解码图片的行内 replaced 盒，在其背景之后、子内容之前发出一条 `DrawImage`；
+  空图片映射保持 M7 的列表。
+- `shell`：私有页面加载器（最终 URL、DOM、样式、盒树、replaced 尺寸与图片映射）把每个
+  `<img src>` 相对页面最终 URL 解析，用既有 `net::Fetch` 抓取（仅 http/file），用
+  `render::DecodePng` 解码；失败或缺失的图片被静默跳过（没有 broken-image UI、没有错误输出、
+  没有图片缓存）。`shell::Browser` 持有页面及其图片并绘制它们，resize 时重新布局而不重新抓取；
+  `--dump-boxes` 使用同一个加载器，因此保留的图片盒会出现在盒 dump 中。CLI 不变。
+- Fixtures：像素内容有文档的手工生成 PNG（`tests/fixtures/images/`）与提交的
+  `tests/fixtures/img_site/` 演示页。
+- 已达成验收：`render.image`、`layout.replaced`、`shell.images`、图片 CLI 检查与所有既有测试在
+  GCC 与 Clang 下、警告视为错误时通过（共 46 个测试）；无图片的 dump 与截图与 M7 逐字节一致；
+  GCC 与 Clang 产出逐字节相同的图片 PPM；窗口显示图片页面。
+- M8a 已知限制：只支持 PNG（libpng 能转换成 8-bit RGBA 的全部格式；没有 JPEG/GIF/WebP/SVG），
+  没有 `background-image`、`srcset`、`alt` 文本或 broken-image 提示，没有图片缓存（同一 URL 在
+  每个 `<img>` 处各抓取一次），HTML `width`/`height` 属性被忽略（只用 CSS px），
+  `display:block` 的 replaced 元素以及 replaced 元素的 margin/padding 不支持，replaced 盒顶部
+  对齐（没有基线对齐，同 M5），缩放为无抗锯齿的最近邻，元素不可见时也会抓取图片（没有懒加载），
+  图片 URL 只支持 `http`/`file`（没有 `https`），并且 `--dump-dom`/`--dump-style` 不抓取图片。
+
+## M8b — 真实字体（下一步；库已批准）
+
+- TTF 文本：加载字体文件，用 freetype 做度量与字形光栅化、harfbuzz 做整形；fontconfig 可以发现
+  已安装字体，让页面按字体族请求字体而不必手动提供文件。已批准的依赖（freetype、harfbuzz、
+  fontconfig）记录在 [dependencies.md](dependencies.md)；缺失的开发包需要用户安装。
+- `layout` 继续通过既有 `MeasureText` 回调消费文本度量；`paint`/`render` 获得真实字形放置与
+  抗锯齿覆盖率文本所需的基线/advance 信息，同时内置位图字体保留为回退路径，使所有未选择真实
+  字体的既有输出保持不变。具体的字体选择契约与 AA 文本契约变更在本轮开始时冻结。
+- 测试必须保持确定性，且不得依赖已安装字体：由提交/生成的字体 fixture 驱动测试，手工演示可以
+  使用任意已安装 TTF。
+- 当一个带真实 TTF 文本和至少一张图片的页面渲染出来时完成（即最初的 M8 验收），且所有既有测试
+  （46 个）、GCC/Clang 无警告构建与 M8a 图片行为仍然通过。
 
 ## M9 — JavaScript 子集（可选，工作量大）
 
@@ -101,6 +138,7 @@
 
 - **代理支持（M2.1）**——通过 HTTP 代理抓取 `http://` URL：`FetchOptions` 中的代理设置、`--proxy host:port` CLI 标志与 `http_proxy` 环境变量回退；发往代理的请求使用 absolute-form 请求目标。测试使用进程内的假代理。用户于 2026-10-31 推迟：只有当真实站点测试需要它，或它成本低且明显有用时才实现。
 - **TLS / `https://`**——用户于 2026-10-31 推迟；OpenSSL 未获批准。访问 Google 之类的站点需要 `https`，仅靠代理支持不够。
+- **更多图片格式与背景图**——JPEG/GIF/WebP、`background-image`、`srcset`、图片缓存与懒加载；这些都在 M8a 之后按需排期，不阻塞任何里程碑。
 - **测试辅助代码合并**——较旧的测试可执行文件里仍然重复着每个文件各自的 `Check`/`g_failures` 测试支架。header-only 的 `tests/support/check.h`（接口目标 `toy_test_support`）已在 M5 引入，新测试都在使用；旧文件只在被改动时迁移。不引入框架依赖。
 
 ## 规则

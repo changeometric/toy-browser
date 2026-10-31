@@ -230,3 +230,24 @@ Lead 从不只信一份报告。审查：
   镜像与垂直翻转下不变。修复通过渲染放大的前后对比图复核；用户明确更愿意自己看字形、不要硬编码
   期望，所以项目刻意不保留冻结的字形表/指纹测试。质疑字形质量时渲染一个样例——不要重新加回已删除
   的 `render.glyphs` 测试。
+- M8a：在 spawn 之前发布全部冻结接口头文件（`render::Image`/`DecodePng`、显示列表的 `DrawImage`、
+  `LayoutOptions::replaced_sizes`、`paint::ImageMap`），让 render、layout+paint 与 shell 无需协商
+  签名即可并行；唯一的契约缺陷是边界措辞歧义（“at or above” 与 “larger than”），由 owner 发现。
+  在头文件里冻结精确的包含/排除边界语义，而不只是常量名。
+- M8a：用户澄清“从零”指浏览器功能而不是底层编解码/字体机制，解除了 M8 的阻塞；范围澄清必须立即
+  记录到 `docs/decisions.md` 与 `docs/dependencies.md`，避免后续轮次重新争论。
+- M8a：像素内容有文档的手工 fixtures（`.tmp/` 里的一次性脚本，只提交 PNG，
+  `tests/fixtures/images/README.md` 描述每个像素）让解码器测试与端到端像素断言都不需要任何第三方
+  测试数据。
+- M8a：M7 的 `git worktree` 逐字节兼容门禁再次奏效——在新增显示列表命令与图片映射之后，无图片的
+  dump 与截图仍与 HEAD `cmp` 一致，因此本轮能证明它没有改变既有页面。
+- M8a：给 `layout` 传按 DOM 节点 id 索引的固有尺寸映射（而不是引入 render 依赖）保持了层边界，也让
+  布局能用假尺寸测试；`shell` 从一个页面加载同时构建布局尺寸与绘制图片映射，两者不可能不一致。
+- M8a：pimpl 风格的公开头文件（前向声明的页面类型、`std::unique_ptr`、out-of-line 析构函数）把不断
+  增长的私有页面模型挡在 `toy/shell/browser.h` 之外，公开会话 API 保持不变；`Browser` 变成不可拷贝
+  没有问题，因为没有地方拷贝它。
+- M8a：libpng 简化 API 加上显式的逐字节 RGBA→ARGB 转换避免了主机字节序假设，分配前检查头文件尺寸
+  上限让对抗性图片被便宜地拒绝；owner 的 ASan/UBSan 加随机解码 scratch 验证没有发现问题，这个习惯
+  值得在每个新解码器上保留。
+- M8a：CTest 无法廉价表达“命令成功且写出正确大小的文件”，因此只对 CLI/截图路径用了小型
+  `cmake -P` 辅助脚本，像素断言仍留给 C++ 测试；这类辅助脚本要尽量窄。

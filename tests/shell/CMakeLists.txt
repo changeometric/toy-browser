@@ -134,3 +134,43 @@ add_test(NAME shell.cli_screenshot_missing_page
           --screenshot "${CMAKE_CURRENT_BINARY_DIR}/missing_page.ppm"
           "file://${CMAKE_CURRENT_BINARY_DIR}/missing_screenshot_page.html")
 set_tests_properties(shell.cli_screenshot_missing_page PROPERTIES WILL_FAIL TRUE)
+
+# M8a image pipeline: the committed image fixture site loads through the same
+# shell page loader as the window/screenshot path, so the decoded images reserve
+# real boxes in the box dump and paint end to end. file:// only, no display, no
+# network. Geometry is frozen from `toybrowser --size 320x200 --dump-boxes`.
+set(shell_img_site "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/img_site")
+
+add_executable(images_test images_test.cpp)
+target_link_libraries(images_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(images_test)
+
+add_test(NAME shell.images COMMAND images_test "${shell_img_site}")
+
+# The 1:1 image keeps the decoded intrinsic size (16x8) and the CSS-scaled image
+# reserves its specified 64x32 box, while the page keeps its frozen height: this
+# proves --dump-boxes goes through the same image loader as painting.
+add_test(NAME shell.images_dump_boxes
+  COMMAND $<TARGET_FILE:toybrowser> --size 320x200 --dump-boxes
+          "file://${shell_img_site}/index.html")
+set_tests_properties(shell.images_dump_boxes PROPERTIES
+  PASS_REGULAR_EXPRESSION
+    "  <body> block x=8 y=8 width=304 height=552\n    <p> block x=8 y=24 width=304 height=16\n      text \"Before\" x=8 y=24 width=48 height=16\n      <img> inline x=64 y=24 width=16 height=8\n      text \"after\" x=88 y=24 width=40 height=16\n    <p> block x=8 y=72 width=304 height=32\n      <img> inline x=8 y=72 width=64 height=32\n")
+
+# The deliberately missing image is skipped: the two text boxes are adjacent in
+# the dump (no broken-image box between them) and the page still loads and dumps.
+add_test(NAME shell.images_dump_boxes_missing_image
+  COMMAND $<TARGET_FILE:toybrowser> --size 320x200 --dump-boxes
+          "file://${shell_img_site}/index.html")
+set_tests_properties(shell.images_dump_boxes_missing_image PROPERTIES
+  PASS_REGULAR_EXPRESSION
+    "      text \"Missing\" x=8 y=272 width=56 height=16\n      text \"image\" x=72 y=272 width=40 height=16\n")
+
+# --screenshot over the image fixture must succeed and write one binary PPM of
+# the requested size (the pixel content is asserted by shell.images).
+add_test(NAME shell.images_screenshot
+  COMMAND ${CMAKE_COMMAND}
+          -DTOYBROWSER=$<TARGET_FILE:toybrowser>
+          -DFIXTURE_DIR=${shell_img_site}
+          -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/images_screenshot.ppm
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/images_screenshot_check.cmake")

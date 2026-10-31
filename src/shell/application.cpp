@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 
-#include "text_metrics.h"
+#include "page.h"
 #include "toy/dom/node.h"
 #include "toy/layout/box.h"
 #include "toy/net/http.h"
@@ -139,19 +139,16 @@ int RunDumpBoxes(const Options& options) {
     return 1;
   }
 
-  net::Response response;
-  if (!net::Fetch(*url, net::FetchOptions{}, &response, &error)) {
-    std::fprintf(stderr, "toybrowser: cannot fetch '%s': %s\n", options.dump_boxes_url.c_str(),
-                 error.c_str());
+  // The box dump goes through the same page loader as painting, so the reserved
+  // image boxes appear here exactly as they are laid out for the window. Image
+  // failures are skipped by the loader and never fail the dump; parsing, styling
+  // and layout are error-tolerant and only a page fetch error is reported.
+  Page page;
+  if (!LoadPage(*url, options.width, &page, &error)) {
+    std::fprintf(stderr, "toybrowser: %s\n", error.c_str());
     return 1;
   }
-
-  // Parsing, styling and layout are error-tolerant: they never fail on bad input.
-  const dom::Document document = dom::ParseDocument(response.body);
-  const style::StyleTree styles = style::ComputeStyles(document);
-  const layout::BoxTree boxes = layout::LayoutDocument(
-      document, styles, layout::LayoutOptions{static_cast<float>(options.width)}, MeasureText);
-  const std::string dump = layout::DumpBoxTree(document, boxes);
+  const std::string dump = layout::DumpBoxTree(page.document, page.boxes);
   if (std::fwrite(dump.data(), 1, dump.size(), stdout) != dump.size()) {
     std::fprintf(stderr, "toybrowser: cannot write the box dump to stdout\n");
     return 1;

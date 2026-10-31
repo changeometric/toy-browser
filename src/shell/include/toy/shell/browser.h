@@ -1,18 +1,20 @@
 #pragma once
 
 #include <cstddef>
-#include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "toy/dom/node.h"
-#include "toy/layout/box.h"
 #include "toy/net/url.h"
 #include "toy/render/surface.h"
-#include "toy/style/computed_style.h"
 
 namespace toy::shell {
+
+// The loaded page data owned by a Browser: final URL, DOM, styles, box tree and
+// the decoded page images. Defined by the shell-private page loader (page.h);
+// the session only holds it, so the public header stays free of private types.
+struct Page;
 
 // One browser session: the current page (fetched, parsed, styled and laid out),
 // the navigation history, the scroll offset and painting, without a window or an
@@ -33,6 +35,8 @@ class Browser {
   // Creates an empty session with the given viewport size. Both must be positive
   // (asserted in debug builds).
   Browser(int viewport_width, int viewport_height);
+  // Out of line: the page data type is complete only inside the shell module.
+  ~Browser();
 
   // Loads the absolute http:// or file:// URL `url` as the current page and
   // appends a history entry on success; the scroll offset resets to 0. On failure
@@ -96,15 +100,8 @@ class Browser {
   void Paint(render::Surface& surface) const;
 
  private:
-  // The parts of the current page that are re-created on every successful load.
-  struct Page {
-    dom::Document document;
-    style::StyleTree styles;
-    layout::BoxTree boxes;
-  };
-
-  // Fetches, parses, styles and lays out `url` and, on success, makes it the
-  // current page at scroll 0. Does not touch the history.
+  // Fetches, parses, styles, loads the images and lays out `url` and, on
+  // success, makes it the current page at scroll 0. Does not touch the history.
   bool Load(const net::Url& url, std::string* error);
   void Relayout();
   void ClampScroll();
@@ -115,7 +112,8 @@ class Browser {
   int viewport_height_ = 0;
   int scroll_y_ = 0;
   net::Url current_url_;
-  std::optional<Page> page_;
+  // Current page, or null when nothing has loaded successfully yet.
+  std::unique_ptr<Page> page_;
   std::vector<net::Url> history_;
   std::size_t history_index_ = 0;
 };

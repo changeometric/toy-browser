@@ -1,10 +1,11 @@
 // Tests for toy::paint::BuildDisplayList: a laid-out page becomes an ordered
-// display list of background fills and text draws, wrapped in a viewport clip
-// and translated by the vertical scroll offset.
+// display list of background fills, image draws and text draws, wrapped in a
+// viewport clip and translated by the vertical scroll offset.
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -13,22 +14,28 @@
 #include "toy/layout/box.h"
 #include "toy/paint/paint.h"
 #include "toy/render/font.h"
+#include "toy/render/image.h"
 #include "toy/render/paint.h"
 #include "toy/style/computed_style.h"
 
 namespace {
 
 using toy::dom::Document;
+using toy::dom::NodeId;
 using toy::layout::BoxTree;
 using toy::layout::LayoutDocument;
 using toy::layout::LayoutOptions;
+using toy::layout::ReplacedSize;
+using toy::layout::ReplacedSizes;
 using toy::layout::TextMetrics;
 using toy::paint::BuildDisplayList;
+using toy::paint::ImageMap;
 using toy::paint::Viewport;
 using toy::render::Command;
 using toy::render::CommandKind;
 using toy::render::DisplayList;
 using toy::render::DrawDisplayList;
+using toy::render::Image;
 using toy::render::Surface;
 
 // The real built-in bitmap-font metrics, adapted exactly like shell does for
@@ -39,17 +46,81 @@ TextMetrics MeasureWithBitmapFont(std::string_view text_utf8, float font_size_px
                      toy::render::LineHeightPx(font_size_px)};
 }
 
-// Full pipeline for a fixture page. The layout viewport is the viewport width,
-// exactly like shell does it.
-DisplayList BuildPage(const std::string& html, int viewport_width = 800, int viewport_height = 600,
-                      int scroll_y = 0) {
-  const Document document = toy::dom::ParseDocument(html);
+// Full pipeline for a fixture page with caller-supplied replaced sizes and
+// images. The layout viewport is the viewport width, exactly like shell does it.
+DisplayList BuildPageForDocument(const Document& document, const ReplacedSizes* replaced_sizes,
+                                 const ImageMap& images, int viewport_width, int viewport_height,
+                                 int scroll_y) {
   const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
   LayoutOptions options;
   options.viewport_width_px = static_cast<float>(viewport_width);
+  options.replaced_sizes = replaced_sizes;
   const BoxTree boxes = LayoutDocument(document, styles, options, MeasureWithBitmapFont);
   const Viewport viewport{viewport_width, viewport_height, scroll_y};
-  return BuildDisplayList(document, styles, boxes, viewport);
+  return BuildDisplayList(document, styles, boxes, viewport, images);
+}
+
+// The M7 path: no replaced elements and an empty image map.
+DisplayList BuildPage(const std::string& html, int viewport_width = 800, int viewport_height = 600,
+                      int scroll_y = 0) {
+  const ImageMap images;
+  return BuildPageForDocument(toy::dom::ParseDocument(html), nullptr, images, viewport_width,
+                              viewport_height, scroll_y);
+}
+
+// The DOM id of the first <img> element: layout and paint both key images by it.
+NodeId FindImageNode(const Document& document) {
+  for (std::size_t index = 0; index < document.size(); ++index) {
+    const NodeId id = static_cast<NodeId>(index);
+    const toy::dom::Node& node = document.Get(id);
+    if (node.type == toy::dom::NodeType::kElement && node.name == "img") {
+      return id;
+    }
+  }
+  return toy::dom::kInvalidNode;
+}
+
+// A decoded image with one solid ARGB color. Paint only forwards the shared
+// pointer, so the pixel content does not affect the command list.
+std::shared_ptr<const Image> MakeImage(int width, int height, std::uint32_t argb) {
+  auto image = std::make_shared<Image>();
+  image->width = width;
+  image->height = height;
+  image->pixels.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), argb);
+  return image;
+}
+
+// The pipeline for a page whose first <img> is a replaced box with `intrinsic`
+// size and whose node id maps to `image`.
+DisplayList BuildImagePage(const std::string& html, const ReplacedSize& intrinsic,
+                           const std::shared_ptr<const Image>& image, int viewport_width = 800,
+                           int viewport_height = 600, int scroll_y = 0) {
+  const Document document = toy::dom::ParseDocument(html);
+  const NodeId image_node = FindImageNode(document);
+  ReplacedSizes sizes;
+  if (image_node != toy::dom::kInvalidNode) {
+    sizes.emplace(image_node, intrinsic);
+  }
+  ImageMap images;
+  if (image_node != toy::dom::kInvalidNode) {
+    images.emplace(image_node, image);
+  }
+  return BuildPageForDocument(document, &sizes, images, viewport_width, viewport_height, scroll_y);
+}
+
+// A page laid out with replaced sizes but painted with an empty image map: the
+// image box exists in the box tree and nonetheless paints no DrawImage.
+DisplayList BuildReplacedPageWithoutImages(const std::string& html, const ReplacedSize& intrinsic,
+                                           int viewport_width = 800, int viewport_height = 600,
+                                           int scroll_y = 0) {
+  const Document document = toy::dom::ParseDocument(html);
+  const NodeId image_node = FindImageNode(document);
+  ReplacedSizes sizes;
+  if (image_node != toy::dom::kInvalidNode) {
+    sizes.emplace(image_node, intrinsic);
+  }
+  const ImageMap images;
+  return BuildPageForDocument(document, &sizes, images, viewport_width, viewport_height, scroll_y);
 }
 
 void ExpectSize(const DisplayList& list, std::size_t expected, const char* description) {
@@ -144,17 +215,38 @@ void ExpectDrawText(const DisplayList& list, std::size_t index, std::string_view
   toy_test::Check(matches, description);
 }
 
+void ExpectDrawImage(const DisplayList& list, std::size_t index, int x, int y, int width,
+                     int height, const std::shared_ptr<const Image>& expected_image,
+                     const char* description) {
+  if (index >= list.size()) {
+    std::fprintf(stderr, "paint display list test: missing command %zu: %s\n", index, description);
+    toy_test::Check(false, description);
+    return;
+  }
+  const Command& command = list.commands()[index];
+  const bool matches = command.kind == CommandKind::kDrawImage && command.x == x &&
+                       command.y == y && command.width == width && command.height == height &&
+                       command.image.get() == expected_image.get();
+  if (!matches) {
+    std::fprintf(stderr,
+                 "paint display list test: command %zu is not the expected DrawImage "
+                 "x=%d y=%d width=%d height=%d: %s\n",
+                 index, command.x, command.y, command.width, command.height, description);
+  }
+  toy_test::Check(matches, description);
+}
+
 bool SameCommand(const Command& lhs, const Command& rhs) {
   return lhs.kind == rhs.kind && lhs.x == rhs.x && lhs.y == rhs.y && lhs.width == rhs.width &&
          lhs.height == rhs.height && lhs.color == rhs.color && lhs.text == rhs.text &&
-         lhs.font_size_px == rhs.font_size_px;
+         lhs.font_size_px == rhs.font_size_px && lhs.image == rhs.image;
 }
 
 // Equality of everything except the y screen position, for scroll comparisons.
 bool SameCommandExceptY(const Command& lhs, const Command& rhs) {
   return lhs.kind == rhs.kind && lhs.x == rhs.x && lhs.width == rhs.width &&
          lhs.height == rhs.height && lhs.color == rhs.color && lhs.text == rhs.text &&
-         lhs.font_size_px == rhs.font_size_px;
+         lhs.font_size_px == rhs.font_size_px && lhs.image == rhs.image;
 }
 
 // A default-constructed BoxTree has no root; paint must not touch the other
@@ -163,7 +255,8 @@ void TestEmptyBoxTree() {
   const Document document = toy::dom::ParseDocument("<html></html>");
   const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
   const BoxTree boxes;
-  const DisplayList list = BuildDisplayList(document, styles, boxes, Viewport{800, 600, 0});
+  const ImageMap images;
+  const DisplayList list = BuildDisplayList(document, styles, boxes, Viewport{800, 600, 0}, images);
   ExpectSize(list, 0, "an empty box tree yields an empty display list");
 }
 
@@ -345,6 +438,118 @@ void TestDeepNestingWalk() {
   ExpectViewportClip(list, 800, 600, "the deep page still gets the viewport clip pair");
 }
 
+// A replaced inline box with an image paints one DrawImage with the exact
+// integer geometry of its box; the transparent page contributes no fills.
+void TestDrawImageGeometry() {
+  const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFFFF0000u);
+  const DisplayList list = BuildImagePage("<p><img></p>", ReplacedSize{16.0f, 8.0f}, image);
+  ExpectSize(list, 3, "a replaced image yields one DrawImage between the clip pair");
+  ExpectViewportClip(list, 800, 600, "the image page is clipped to the viewport");
+  ExpectDrawImage(list, 1, 8, 24, 16, 8, image,
+                  "the image command has the replaced box's exact device-pixel geometry");
+}
+
+// The image paints after its own background and before its children (a replaced
+// box has none), exactly like the documented pre-order rule.
+void TestImageAfterBackground() {
+  const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFF00FF00u);
+  const DisplayList own = BuildImagePage("<p><img style=\"background-color: #112233\"></p>",
+                                         ReplacedSize{16.0f, 8.0f}, image);
+  ExpectSize(own, 4, "a replaced box with a background yields a FillRect and a DrawImage");
+  ExpectFillRect(own, 1, 8, 24, 16, 8, 0xFF112233u,
+                 "the replaced box's background is painted before its image");
+  ExpectDrawImage(own, 2, 8, 24, 16, 8, image, "the image is painted after its own background");
+
+  // The image is a child of the inline fragment: the ancestor background is
+  // painted first, then the image.
+  const DisplayList nested =
+      BuildImagePage("<p><span style=\"background-color: #445566\"><img></span></p>",
+                     ReplacedSize{16.0f, 8.0f}, image);
+  ExpectSize(nested, 4, "an inline ancestor background and a child image yield two commands");
+  ExpectFillRect(nested, 1, 8, 24, 16, 8, 0xFF445566u,
+                 "the inline ancestor background is painted before its child image");
+  ExpectDrawImage(nested, 2, 8, 24, 16, 8, image,
+                  "the image is painted inside its inline ancestor, after its background");
+}
+
+// Scrolling translates the image y by -scroll_y and keeps x (M7 rule).
+void TestImageScrollTranslation() {
+  const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFF0000FFu);
+  const std::string html = "<p><img></p>";
+  const DisplayList top = BuildImagePage(html, ReplacedSize{16.0f, 8.0f}, image, 320, 200, 0);
+  const DisplayList scrolled = BuildImagePage(html, ReplacedSize{16.0f, 8.0f}, image, 320, 200, 40);
+  ExpectSize(top, 3, "the unscrolled image page has one DrawImage");
+  ExpectSize(scrolled, 3, "the scrolled image page has the same commands");
+  ExpectDrawImage(top, 1, 8, 24, 16, 8, image, "the image starts at its page position");
+  ExpectDrawImage(scrolled, 1, 8, -16, 16, 8, image,
+                  "scrolling translates the image y by -scroll_y and keeps x");
+  toy_test::Check(SameCommand(top.commands().front(), scrolled.commands().front()),
+                  "the image viewport clip is unchanged by scrolling");
+}
+
+// Geometry is rounded with std::lround, the same rounding as the box dump.
+void TestImageFractionalGeometry() {
+  const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFFFFFFFFu);
+  // width 10.5 keeps the intrinsic 2:1 ratio, so the replaced box is 10.5x5.25.
+  const DisplayList list =
+      BuildImagePage("<p><img style=\"width:10.5px\"></p>", ReplacedSize{16.0f, 8.0f}, image);
+  ExpectSize(list, 3, "a fractional replaced box still yields one DrawImage");
+  ExpectDrawImage(list, 1, 8, 24, 11, 5, image,
+                  "fractional image geometry rounds to device pixels with std::lround");
+}
+
+// An empty image map produces exactly the M7 command list: no DrawImage appears
+// even though the box tree contains a replaced box.
+void TestEmptyImageMapKeepsM7List() {
+  const std::string html = "<p>Hi</p><p><img></p>";
+  const DisplayList m7 = BuildPage(html);
+  const DisplayList replaced = BuildReplacedPageWithoutImages(html, ReplacedSize{16.0f, 8.0f});
+  ExpectSize(m7, 3, "the image-less page is the M7 clip + text + pop list");
+  ExpectSize(replaced, 3, "a replaced box without a decoded image emits no DrawImage");
+  bool identical = m7.size() == replaced.size();
+  for (std::size_t index = 0; identical && index < m7.size(); ++index) {
+    identical = SameCommand(m7.commands()[index], replaced.commands()[index]);
+  }
+  if (!identical) {
+    std::fprintf(stderr,
+                 "paint display list test: an empty image map changed the image-less page list\n");
+  }
+  toy_test::Check(identical, "an empty image map produces exactly the M7 command list");
+}
+
+// An image whose node id is not in the map paints nothing: paint keys images by
+// DOM node id, so a missing (or wrong) key means "no decoded image".
+void TestMissingNodeIdPaintsNoImage() {
+  const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFF00FFFFu);
+  const Document document = toy::dom::ParseDocument("<p><img></p>");
+  const NodeId image_node = FindImageNode(document);
+  toy_test::Check(image_node != toy::dom::kInvalidNode, "the fixture contains an image element");
+  ReplacedSizes sizes;
+  sizes.emplace(image_node, ReplacedSize{16.0f, 8.0f});
+  ImageMap images;
+  // Deliberately key the image by the <p> node instead of the <img> node.
+  for (std::size_t index = 0; index < document.size(); ++index) {
+    const NodeId id = static_cast<NodeId>(index);
+    if (document.Get(id).type == toy::dom::NodeType::kElement && document.Get(id).name == "p") {
+      images.emplace(id, image);
+      break;
+    }
+  }
+  const DisplayList list = BuildPageForDocument(document, &sizes, images, 800, 600, 0);
+  ExpectSize(list, 2, "an image keyed by the wrong node id paints no DrawImage");
+  ExpectViewportClip(list, 800, 600, "the page with an unmatched image key keeps the clip pair");
+}
+
+// A replaced element with display:block is not supported by this MVP: it lays
+// out as an empty block and paint must not draw an image for it.
+void TestBlockReplacedPaintsNoImage() {
+  const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFFFF00FFu);
+  const DisplayList list =
+      BuildImagePage("<p><img style=\"display:block\"></p>", ReplacedSize{16.0f, 8.0f}, image);
+  ExpectSize(list, 2, "a display:block image paints nothing (empty block MVP limit)");
+  ExpectViewportClip(list, 800, 600, "the block-image page keeps the viewport clip pair");
+}
+
 }  // namespace
 
 int main() {
@@ -362,5 +567,12 @@ int main() {
   TestViewportSmallerThanContent();
   TestDeterministic();
   TestDeepNestingWalk();
+  TestDrawImageGeometry();
+  TestImageAfterBackground();
+  TestImageScrollTranslation();
+  TestImageFractionalGeometry();
+  TestEmptyImageMapKeepsM7List();
+  TestMissingNodeIdPaintsNoImage();
+  TestBlockReplacedPaintsNoImage();
   return toy_test::Finish("paint display list");
 }

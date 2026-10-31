@@ -5,12 +5,14 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "page.h"
 #include "text_metrics.h"
 #include "toy/dom/node.h"
 #include "toy/layout/box.h"
@@ -19,7 +21,6 @@
 #include "toy/paint/paint.h"
 #include "toy/render/paint.h"
 #include "toy/render/surface.h"
-#include "toy/style/computed_style.h"
 
 namespace toy::shell {
 namespace {
@@ -146,26 +147,18 @@ Browser::Browser(int viewport_width, int viewport_height)
   assert(viewport_width > 0 && viewport_height > 0);
 }
 
+Browser::~Browser() = default;
+
 bool Browser::Load(const net::Url& url, std::string* error) {
-  net::Response response;
-  std::string fetch_error;
-  if (!net::Fetch(url, net::FetchOptions{}, &response, &fetch_error)) {
-    if (error != nullptr) {
-      *error = "cannot fetch '" + net::SerializeUrl(url) + "': " + fetch_error;
-    }
+  // The loader builds the whole page (fetch, parse, style, images, layout) before
+  // it returns, so a failure leaves the current page, scroll offset and history
+  // unchanged.
+  auto page = std::make_unique<Page>();
+  if (!LoadPage(url, viewport_width_, page.get(), error)) {
     return false;
   }
-
-  // Build the whole page before touching the session: a failure above leaves the
-  // current page, scroll offset and history unchanged.
-  Page page;
-  page.document = dom::ParseDocument(response.body);
-  page.styles = style::ComputeStyles(page.document);
-  page.boxes = layout::LayoutDocument(page.document, page.styles,
-                                      layout::LayoutOptions{static_cast<float>(viewport_width_)},
-                                      MeasureText);
+  current_url_ = page->final_url;
   page_ = std::move(page);
-  current_url_ = response.final_url;
   scroll_y_ = 0;
   if (error != nullptr) {
     error->clear();
@@ -335,7 +328,7 @@ void Browser::SetViewport(int width, int height) {
   ClampScroll();
 }
 
-bool Browser::has_page() const { return page_.has_value(); }
+bool Browser::has_page() const { return page_ != nullptr; }
 
 const net::Url& Browser::current_url() const { return current_url_; }
 
@@ -364,8 +357,8 @@ void Browser::Paint(render::Surface& surface) const {
     return;
   }
   const paint::Viewport viewport{surface.width(), surface.height(), scroll_y_};
-  const render::DisplayList list =
-      paint::BuildDisplayList(page_->document, page_->styles, page_->boxes, viewport);
+  const render::DisplayList list = paint::BuildDisplayList(page_->document, page_->styles,
+                                                           page_->boxes, viewport, page_->images);
   render::DrawDisplayList(list, surface);
 }
 
@@ -373,9 +366,9 @@ void Browser::Relayout() {
   if (!page_) {
     return;
   }
-  page_->boxes = layout::LayoutDocument(page_->document, page_->styles,
-                                        layout::LayoutOptions{static_cast<float>(viewport_width_)},
-                                        MeasureText);
+  // Re-layout only: the DOM, styles and decoded images are reused, so a resize
+  // never refetches the page or its images.
+  RelayoutPage(page_.get(), viewport_width_);
 }
 
 void Browser::ClampScroll() {

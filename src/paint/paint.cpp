@@ -1,6 +1,6 @@
 // Display-list construction: the box tree becomes an ordered list of background
-// fills and text draws, clipped to the viewport and scrolled vertically. No
-// rasterization happens here; render executes the list.
+// fills, image draws and text draws, clipped to the viewport and scrolled
+// vertically. No rasterization happens here; render executes the list.
 
 #include "toy/paint/paint.h"
 
@@ -57,10 +57,29 @@ void AppendText(const style::StyleTree& styles, const layout::Box& box, int scro
   list->DrawText(box.text, ToDevicePixels(box.x), TranslatedY(box, scroll_y), font_size_px, color);
 }
 
+// An inline replaced box paints its image after its own background and before
+// its children (it has none in this MVP). The image map is keyed by DOM node id,
+// the same key layout used for the replaced size; a node without an entry paints
+// nothing, which keeps image-less pages byte-identical to M7. A null image is
+// treated as absent so the list only carries drawable commands.
+void AppendImage(const layout::Box& box, int scroll_y, const ImageMap& images,
+                 render::DisplayList* list) {
+  if (box.kind != layout::BoxKind::kInline || box.node == dom::kInvalidNode) {
+    return;
+  }
+  const auto entry = images.find(box.node);
+  if (entry == images.end() || !entry->second) {
+    return;
+  }
+  list->DrawImage(entry->second, ToDevicePixels(box.x), TranslatedY(box, scroll_y),
+                  ToDevicePixels(box.width), ToDevicePixels(box.height));
+}
+
 }  // namespace
 
 render::DisplayList BuildDisplayList(const dom::Document& document, const style::StyleTree& styles,
-                                     const layout::BoxTree& boxes, const Viewport& viewport) {
+                                     const layout::BoxTree& boxes, const Viewport& viewport,
+                                     const ImageMap& images) {
   assert(viewport.width > 0);
   assert(viewport.height > 0);
   assert(viewport.scroll_y >= 0);
@@ -85,6 +104,7 @@ render::DisplayList BuildDisplayList(const dom::Document& document, const style:
       case layout::BoxKind::kBlock:
       case layout::BoxKind::kInline:
         AppendBackground(document, styles, box, viewport.scroll_y, &list);
+        AppendImage(box, viewport.scroll_y, images, &list);
         break;
       case layout::BoxKind::kText:
         AppendText(styles, box, viewport.scroll_y, &list);

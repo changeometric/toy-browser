@@ -29,3 +29,8 @@ add_executable(layout_hit_test hit_test.cpp)
 toybrowser_set_warnings(layout_hit_test)
 target_link_libraries(layout_hit_test PRIVATE toy_layout toy_test_support)
 add_test(NAME layout.hit_test COMMAND layout_hit_test)
+
+add_executable(layout_replaced_test replaced_test.cpp)
+toybrowser_set_warnings(layout_replaced_test)
+target_link_libraries(layout_replaced_test PRIVATE toy_layout toy_test_support)
+add_test(NAME layout.replaced COMMAND layout_replaced_test)

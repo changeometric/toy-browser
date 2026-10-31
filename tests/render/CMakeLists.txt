@@ -19,3 +19,8 @@ add_executable(render_paint_test paint_test.cpp)
 toybrowser_set_warnings(render_paint_test)
 target_link_libraries(render_paint_test PRIVATE toy_render toy_test_support)
 add_test(NAME render.paint COMMAND render_paint_test)
+
+add_executable(render_image_test image_test.cpp)
+toybrowser_set_warnings(render_image_test)
+target_link_libraries(render_image_test PRIVATE toy_render toy_test_support)
+add_test(NAME render.image COMMAND render_image_test "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/images")

@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "toy/dom/node.h"
@@ -47,8 +48,32 @@ struct TextMetrics {
 // "" (which must return advance 0 and the line height).
 using MeasureText = std::function<TextMetrics(std::string_view text_utf8, float font_size_px)>;
 
+// Intrinsic size of a replaced element (currently an <img>) in CSS pixels, as
+// reported by the caller from decoded image metadata. Layout consumes it only
+// through LayoutOptions, so layout stays independent of render and of images.
+struct ReplacedSize {
+  float width_px = 0.0f;
+  float height_px = 0.0f;
+};
+
+// Replaced-element intrinsic sizes keyed by DOM element node id. Entries with a
+// non-positive side, and elements without an entry, are not replaced elements.
+using ReplacedSizes = std::unordered_map<dom::NodeId, ReplacedSize>;
+
 struct LayoutOptions {
   float viewport_width_px = 800.0f;
+  // Intrinsic sizes of replaced elements, or null when the page has none. An
+  // entry makes that inline element an atomic inline-level replaced box:
+  // - the box size is CSS width/height (px, already computed) when specified,
+  //   otherwise the intrinsic size; one specified side alone keeps the
+  //   intrinsic aspect ratio;
+  // - the box is unbreakable, contributes its height to the line height and is
+  //   top-aligned on its line like every other inline-level box (no baseline
+  //   alignment in this MVP);
+  // - it has no children and its content is not laid out.
+  // A replaced element with display:block is not supported yet: it lays out as
+  // an ordinary empty block (MVP limit, documented in the roadmap).
+  const ReplacedSizes* replaced_sizes = nullptr;
 };
 
 // A laid-out page: a tree of boxes with absolute geometry.

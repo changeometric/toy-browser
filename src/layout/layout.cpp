@@ -9,9 +9,15 @@
 // wrapped in an anonymous block and the block children interleave it in flow.
 //
 // Inline layout is a single pass over a flattened event stream (open/close
-// inline element, text, break, block child). Line breaking and inline-element
-// fragmentation use the caller-supplied measurement callback; layout never
-// depends on render.
+// inline element, text, break, replaced element, block child). Line breaking and
+// inline-element fragmentation use the caller-supplied measurement callback;
+// layout never depends on render.
+//
+// A replaced element (an <img> with a caller-supplied intrinsic size, see
+// LayoutOptions::replaced_sizes) is an atomic inline-level box: it is placed like
+// an unbreakable word, wraps as a whole, is top-aligned on its line and raises
+// the line height to at least its own height. It has no children and its
+// margins/padding are not applied in this MVP.
 
 #include <algorithm>
 #include <cassert>
@@ -69,6 +75,14 @@ struct OpenInline {
   BoxId last_fragment = kInvalidBox;
 };
 
+// A replaced box and its own (fixed) height on the current line. Every other
+// line box gets the shared line height when the line is finalized; a replaced
+// box keeps its replaced height and is only top-aligned.
+struct ReplacedLineItem {
+  BoxId box = kInvalidBox;
+  float height = 0;
+};
+
 // Inline formatting state of one block container.
 struct InlineState {
   BoxId container = kInvalidBox;
@@ -82,10 +96,11 @@ struct InlineState {
   bool pending_space = false;
   float pending_space_advance = 0;
   std::vector<BoxId> line_boxes;
+  std::vector<ReplacedLineItem> line_replaced;
   std::vector<OpenInline> open;
 };
 
-enum class StreamKind { kOpenInline, kCloseInline, kText, kBreak, kBlock };
+enum class StreamKind { kOpenInline, kCloseInline, kText, kBreak, kReplaced, kBlock };
 
 // One child in the flattened child stream of a block container. Block children
 // are not descended into; their own frame flattens them.
@@ -136,6 +151,12 @@ class LayoutEngine {
   BlockFrame MakeFrame(BoxId box, dom::NodeId element);
   std::vector<StreamItem> FlattenChildren(dom::NodeId element) const;
   bool RunProducesBoxes(const std::vector<StreamItem>& stream, std::size_t begin) const;
+  // Returns the intrinsic size of `node` when it is a replaced element (inline
+  // display plus a valid entry), or null when it lays out as an ordinary box.
+  const ReplacedSize* FindReplacedSize(dom::NodeId node) const;
+  // The border-box size of a replaced element: CSS width/height when specified,
+  // otherwise the intrinsic size; one specified side keeps the intrinsic ratio.
+  ReplacedSize ComputeReplacedSize(dom::NodeId node, const ReplacedSize& intrinsic) const;
 
   void StartRun(BlockFrame& frame, std::size_t first_item);
   void FinishRun(BlockFrame& frame);
@@ -146,8 +167,13 @@ class LayoutEngine {
   float FinishSession(InlineState& state);
   void FinalizeLine(InlineState& state);
   void MarkSeparator(InlineState& state, float font_size);
+  // Places one atomic inline-level item of `advance` width: wraps when it does
+  // not fit, consumes a pending separator and materializes one fragment per open
+  // inline element, outermost first. Returns the box the item is appended to.
+  BoxId PlaceInlineItem(InlineState& state, float advance);
   void PlaceWord(InlineState& state, dom::NodeId text_node, const std::string& word,
                  float font_size);
+  void PlaceReplaced(InlineState& state, dom::NodeId element, const ReplacedSize& intrinsic);
   void ProcessText(InlineState& state, dom::NodeId text_node);
   void ProcessBreak(InlineState& state, dom::NodeId br);
   void ProcessOpen(InlineState& state, dom::NodeId element);
@@ -157,6 +183,7 @@ class LayoutEngine {
   const style::StyleTree& styles_;
   const MeasureText& measure_;
   std::vector<Box>& boxes_;
+  const ReplacedSizes* replaced_sizes_ = nullptr;
 };
 
 BoxId LayoutEngine::AddBox(BoxKind kind, dom::NodeId node) {
@@ -242,8 +269,15 @@ std::vector<StreamItem> LayoutEngine::FlattenChildren(dom::NodeId element) const
           break;
         }
         if (style.display == style::Display::kBlock) {
-          // Laid out by its own frame; do not descend here.
+          // Laid out by its own frame; do not descend here. A replaced element
+          // with display:block is not supported and falls through to this path.
           stream.push_back(StreamItem{StreamKind::kBlock, entry.node});
+          break;
+        }
+        // An inline element with a caller-supplied intrinsic size is an atomic
+        // replaced box: it produces no children and its content is not laid out.
+        if (FindReplacedSize(entry.node) != nullptr) {
+          stream.push_back(StreamItem{StreamKind::kReplaced, entry.node});
           break;
         }
         stream.push_back(StreamItem{StreamKind::kOpenInline, entry.node});
@@ -272,6 +306,40 @@ std::vector<StreamItem> LayoutEngine::FlattenChildren(dom::NodeId element) const
   return stream;
 }
 
+const ReplacedSize* LayoutEngine::FindReplacedSize(dom::NodeId node) const {
+  if (replaced_sizes_ == nullptr) {
+    return nullptr;
+  }
+  const auto entry = replaced_sizes_->find(node);
+  if (entry == replaced_sizes_->end()) {
+    return nullptr;
+  }
+  // Non-positive intrinsic sides mean "not a replaced element" (NaN fails the
+  // comparison too, so a malformed size cannot reach geometry).
+  if (!(entry->second.width_px > 0.0f) || !(entry->second.height_px > 0.0f)) {
+    return nullptr;
+  }
+  return &entry->second;
+}
+
+ReplacedSize LayoutEngine::ComputeReplacedSize(dom::NodeId node,
+                                               const ReplacedSize& intrinsic) const {
+  const style::ComputedStyle& style = styles_.Get(node);
+  if (style.width && style.height) {
+    return ReplacedSize{ClampLength(*style.width), ClampLength(*style.height)};
+  }
+  if (style.width) {
+    // One specified side keeps the intrinsic aspect ratio.
+    const float width = ClampLength(*style.width);
+    return ReplacedSize{width, width * intrinsic.height_px / intrinsic.width_px};
+  }
+  if (style.height) {
+    const float height = ClampLength(*style.height);
+    return ReplacedSize{height * intrinsic.width_px / intrinsic.height_px, height};
+  }
+  return intrinsic;
+}
+
 bool LayoutEngine::RunProducesBoxes(const std::vector<StreamItem>& stream,
                                     std::size_t begin) const {
   for (std::size_t index = begin; index < stream.size(); ++index) {
@@ -280,6 +348,8 @@ bool LayoutEngine::RunProducesBoxes(const std::vector<StreamItem>& stream,
       case StreamKind::kBlock:
         return false;
       case StreamKind::kBreak:
+        return true;
+      case StreamKind::kReplaced:
         return true;
       case StreamKind::kText:
         for (const char character : document_.Get(item.node).data) {
@@ -339,6 +409,7 @@ void LayoutEngine::BeginSession(InlineState& state, BoxId container, float origi
   state.pending_space = false;
   state.pending_space_advance = 0.0f;
   state.line_boxes.clear();
+  state.line_replaced.clear();
 }
 
 float LayoutEngine::FinishSession(InlineState& state) {
@@ -366,8 +437,14 @@ void LayoutEngine::FinalizeLine(InlineState& state) {
     boxes_[id].y = line_y;
     boxes_[id].height = state.line_height;
   }
+  // A replaced box is top-aligned and keeps its own height even when the line is
+  // taller because of another item.
+  for (const ReplacedLineItem& item : state.line_replaced) {
+    boxes_[item.box].height = item.height;
+  }
   state.cursor_y += state.line_height;
   state.line_boxes.clear();
+  state.line_replaced.clear();
   state.cursor_x = state.origin_x;
   state.line_has_items = false;
   state.line_height = 0.0f;
@@ -385,9 +462,7 @@ void LayoutEngine::MarkSeparator(InlineState& state, float font_size) {
   state.pending_space_advance = metrics.advance_px;
 }
 
-void LayoutEngine::PlaceWord(InlineState& state, dom::NodeId text_node, const std::string& word,
-                             float font_size) {
-  const TextMetrics metrics = measure_(word, font_size);
+BoxId LayoutEngine::PlaceInlineItem(InlineState& state, float advance) {
   const float pending_advance = state.pending_space ? state.pending_space_advance : 0.0f;
   float left_advance = 0.0f;
   for (const OpenInline& open : state.open) {
@@ -395,8 +470,9 @@ void LayoutEngine::PlaceWord(InlineState& state, dom::NodeId text_node, const st
       left_advance += open.left_advance;
     }
   }
-  // A word never spans a line: an overlong first word overflows (rule 5).
-  if (state.line_has_items && state.cursor_x + pending_advance + left_advance + metrics.advance_px >
+  // An item never spans a line: an item that does not fit wraps as a whole, and
+  // an overlong first item overflows (rule 5).
+  if (state.line_has_items && state.cursor_x + pending_advance + left_advance + advance >
                                   state.origin_x + state.line_width) {
     FinalizeLine(state);  // The pending separator is dropped with the line.
   }
@@ -427,7 +503,13 @@ void LayoutEngine::PlaceWord(InlineState& state, dom::NodeId text_node, const st
     }
     parent = open.current_fragment;
   }
+  return parent;
+}
 
+void LayoutEngine::PlaceWord(InlineState& state, dom::NodeId text_node, const std::string& word,
+                             float font_size) {
+  const TextMetrics metrics = measure_(word, font_size);
+  const BoxId parent = PlaceInlineItem(state, metrics.advance_px);
   const float word_x = state.cursor_x;
   state.cursor_x += metrics.advance_px;
   state.line_has_items = true;
@@ -440,6 +522,23 @@ void LayoutEngine::PlaceWord(InlineState& state, dom::NodeId text_node, const st
   text_box_ref.text = word;
   AppendChild(parent, text_box);
   state.line_boxes.push_back(text_box);
+}
+
+void LayoutEngine::PlaceReplaced(InlineState& state, dom::NodeId element,
+                                 const ReplacedSize& intrinsic) {
+  const ReplacedSize size = ComputeReplacedSize(element, intrinsic);
+  const BoxId parent = PlaceInlineItem(state, size.width_px);
+  const BoxId box_id = AddBox(BoxKind::kInline, element);
+  Box& box = boxes_[box_id];
+  box.x = state.cursor_x;
+  box.width = size.width_px;
+  box.height = size.height_px;
+  AppendChild(parent, box_id);
+  state.cursor_x += size.width_px;
+  state.line_has_items = true;
+  state.line_height = std::max(state.line_height, size.height_px);
+  state.line_boxes.push_back(box_id);
+  state.line_replaced.push_back(ReplacedLineItem{box_id, size.height_px});
 }
 
 void LayoutEngine::ProcessText(InlineState& state, dom::NodeId text_node) {
@@ -523,6 +622,14 @@ void LayoutEngine::ProcessStreamItem(InlineState& state, const StreamItem& item)
     case StreamKind::kBreak:
       ProcessBreak(state, item.node);
       break;
+    case StreamKind::kReplaced: {
+      const ReplacedSize* intrinsic = FindReplacedSize(item.node);
+      assert(intrinsic != nullptr);  // Flattening only emits replaced items for entries.
+      if (intrinsic != nullptr) {
+        PlaceReplaced(state, item.node, *intrinsic);
+      }
+      break;
+    }
     case StreamKind::kBlock:
       break;  // Handled by the frame loop.
   }
@@ -560,6 +667,7 @@ void LayoutEngine::FinishRun(BlockFrame& frame) {
 }
 
 void LayoutEngine::Run(const LayoutOptions& options) {
+  replaced_sizes_ = options.replaced_sizes;
   const dom::NodeId document_root = document_.root();
   if (document_root == kNoNode) {
     return;
