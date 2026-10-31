@@ -36,6 +36,12 @@ void PrintUsage(std::FILE* stream, const char* argv0) {
       "  --dump-style URL   Fetch URL and write its computed style tree to stdout; no window.\n"
       "  --dump-boxes URL   Fetch URL and write its laid-out box tree to stdout; no window.\n"
       "  --size WxH         Window size in pixels (default 800x600; limits below).\n"
+      "  --font PATH        Use the real font file PATH for layout and painting. Allowed\n"
+      "                     with window mode, --screenshot and --dump-boxes. Without it\n"
+      "                     (and without --font-family) the built-in bitmap font is used.\n"
+      "  --font-family NAME Use the installed font that fontconfig matches for family\n"
+      "                     NAME (best match; unknown families fall back). Mutually\n"
+      "                     exclusive with --font.\n"
       "\n"
       "Optional URL:\n"
       "  url                Page URL for window mode and --screenshot; without it the\n"
@@ -147,6 +153,28 @@ int main(int argc, char** argv) {
       options.dump_boxes_url = url;
       continue;
     }
+    if (argument == "--font") {
+      if (i + 1 >= argc) {
+        return FailUsage(argv[0], "--font requires a font file path");
+      }
+      const std::string_view path = argv[++i];
+      if (path.empty()) {
+        return FailUsage(argv[0], "--font requires a non-empty font file path");
+      }
+      options.font_path = path;
+      continue;
+    }
+    if (argument == "--font-family") {
+      if (i + 1 >= argc) {
+        return FailUsage(argv[0], "--font-family requires a family name");
+      }
+      const std::string_view family = argv[++i];
+      if (family.empty()) {
+        return FailUsage(argv[0], "--font-family requires a non-empty family name");
+      }
+      options.font_family = family;
+      continue;
+    }
     if (argument == "--size") {
       if (i + 1 >= argc) {
         return FailUsage(argv[0], "--size requires a value of the form WxH");
@@ -196,6 +224,19 @@ int main(int argc, char** argv) {
     return FailUsage(argv[0],
                      "a page URL cannot be combined with a --dump-* mode; pass the URL to the "
                      "flag instead");
+  }
+  // A font selects layout metrics and painting, so exactly one selection is allowed
+  // and only the modes that lay the page out can use it. --dump-boxes lays out, so
+  // it accepts the flags; --dump-body/--dump-dom/--dump-style never do.
+  const bool has_font = !options.font_path.empty();
+  const bool has_font_family = !options.font_family.empty();
+  if (has_font && has_font_family) {
+    return FailUsage(argv[0], "--font and --font-family are mutually exclusive");
+  }
+  if ((has_font || has_font_family) && (has_dump_body || has_dump_dom || has_dump_style)) {
+    return FailUsage(argv[0],
+                     "--font and --font-family cannot be combined with --dump-body, --dump-dom "
+                     "or --dump-style");
   }
 
   return toy::shell::Run(options);

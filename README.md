@@ -2,11 +2,13 @@
 
 A toy web browser built from scratch: C++20, CMake, and no ready-made browser components.
 
-**Status: M8a — pages can show PNG images.** The window and `--headless --screenshot` render the
-page given by an optional URL, including `<img src="...png">` images (fetched and decoded through the
-approved libpng dependency); in the window, links are clickable, the wheel and keyboard scroll,
-Alt+Left/Right move through history and the title follows `<title>`. Real TTF fonts are the next
-milestone (M8b, with the approved freetype/harfbuzz/fontconfig stack). Two committed demos exist:
+**Status: M8b — real fonts and PNG images.** The window and `--headless --screenshot` render the
+page given by an optional URL, including `<img src="...png">` images (approved libpng) and, when a
+real font is selected with `--font PATH` or `--font-family NAME` (approved freetype/harfbuzz/
+fontconfig), anti-aliased true-type text; without a font flag the built-in bitmap font is used and
+all pre-M8b output is byte-identical. In the window, links are clickable, the wheel and keyboard
+scroll, Alt+Left/Right move through history and the title follows `<title>`. Committed demos:
+[`tests/fixtures/font_site/`](tests/fixtures/font_site/) for real text + images,
 [`tests/fixtures/img_site/`](tests/fixtures/img_site/) for images and
 [`tests/fixtures/nav_site/`](tests/fixtures/nav_site/) for navigation. The `--dump-*` modes remain
 the primary headless debugging path. See the [roadmap](docs/roadmap.md). 中文版：
@@ -25,6 +27,10 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser file:///path/page.html            # window: click links, wheel/keys scroll, Alt+Left/Right
 ./build/toybrowser                                   # window with the placeholder page
 ./build/toybrowser --headless --screenshot out.ppm file:///path/page.html  # page, no display
+./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/font_site/index.html" \
+    --font tests/fixtures/fonts/toy_test.ttf   # real TTF text + image demo (fixture font)
+./build/toybrowser --size 400x200 --font-family "DejaVu Sans" \
+    "file://$PWD/tests/fixtures/nav_site/index.html"   # any installed font family
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"   # images demo
 ./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # the committed nav demo site
 ./build/toybrowser --dump-body file:///etc/hostname  # fetch a URL, raw bytes to stdout
@@ -33,9 +39,10 @@ ctest --test-dir build --output-on-failure
 ./build/toybrowser --dump-boxes file:///etc/hostname # fetch, style, lay out, dump the box tree
 ```
 
-The window backend links libX11 and image decoding links libpng (both approved; see
-[dependencies](docs/dependencies.md)), so the X11 and libpng development headers are build-time
-requirements even when only headless modes are used. Headless runs need no display and are the
+The window backend links libX11, image decoding links libpng, real-font rendering links freetype and
+harfbuzz, and family lookup links fontconfig (all approved; see
+[dependencies](docs/dependencies.md)), so those development headers are build-time requirements
+even when only headless modes are used. Headless runs need no display and are the
 primary mode for testing and debugging: every rendered result can be inspected without opening a
 window.
 
@@ -59,18 +66,18 @@ machine's paths, toolchain version or installed package set.
 
 ## Dependencies
 
-Only two third-party libraries are linked today (libX11, and libpng + zlib); the browser engine
-itself has no ready-made components (no HTML parser, CSS engine, JS engine, layout or rendering
-engine).
+Five third-party packages are linked today (libX11, libpng + zlib, freetype, harfbuzz and
+fontconfig); the browser engine itself has no ready-made components (no HTML parser, CSS engine, JS
+engine, layout or rendering engine).
 
 | Component | Purpose | License | Status |
 | --- | --- | --- | --- |
 | C++20 standard library + POSIX | baseline (containers, sockets, files) | standard / OS | always |
 | libX11 | window, input, pixel presentation | MIT/X11 | linked since M1 |
 | libpng + zlib | PNG image decoding | libpng license / zlib license | linked since M8a |
-| freetype | font metrics and glyph rasterization | FreeType License | approved, not linked (M8b) |
-| harfbuzz | OpenType text shaping | MIT | approved, not linked (M8b) |
-| fontconfig | installed-font discovery and matching | MIT-style | approved, not linked (M8b) |
+| freetype | font metrics and glyph rasterization | FreeType License | linked since M8b |
+| harfbuzz | OpenType text shaping | MIT | linked since M8b |
+| fontconfig | installed-font discovery and matching | MIT-style | linked since M8b |
 
 The policy, the approval log and from-scratch alternatives live in
 [dependencies.md](docs/dependencies.md).

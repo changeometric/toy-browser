@@ -32,7 +32,14 @@ using ImageMap = std::unordered_map<dom::NodeId, std::shared_ptr<const render::I
 // and emits one background FillRect per element box whose computed background is
 // not fully transparent, then one DrawImage per inline replaced box whose node id
 // is present in `images` (after that box's background, before its children), then
-// one DrawText per text box.
+// one text draw per text box.
+//
+// Text uses `font` when it is non-null: each text box becomes a DrawTextWithFont
+// command whose baseline is `round(box.y) - scroll_y + round(font->AscentPx(size))`
+// device pixels, so layout keeps using the real font's metrics while painting
+// places real glyphs. When `font` is null the M7/M8a bitmap path is unchanged
+// (one DrawText per text box with y = round(box.y) - scroll_y). Passing a null
+// font must therefore reproduce the pre-M8b command list exactly.
 //
 // The list is pure data: paint never rasterizes and render never learns about
 // HTML or CSS. Geometry is converted from CSS pixels to device pixels with
@@ -49,6 +56,7 @@ using ImageMap = std::unordered_map<dom::NodeId, std::shared_ptr<const render::I
 // behavior (M7) and asserted by the paint tests.
 render::DisplayList BuildDisplayList(const dom::Document& document, const style::StyleTree& styles,
                                      const layout::BoxTree& boxes, const Viewport& viewport,
-                                     const ImageMap& images);
+                                     const ImageMap& images,
+                                     const std::shared_ptr<const render::Font>& font);
 
 }  // namespace toy::paint

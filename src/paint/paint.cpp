@@ -8,10 +8,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "toy/dom/node.h"
 #include "toy/layout/box.h"
+#include "toy/render/font.h"
 #include "toy/render/paint.h"
 #include "toy/style/computed_style.h"
 
@@ -49,12 +51,24 @@ void AppendBackground(const dom::Document& document, const style::StyleTree& sty
 
 // A text box keeps the inherited computed style; its color is forced opaque
 // because style colors carry no alpha channel in M4.
+//
+// A null font keeps the frozen M6/M7 bitmap command: y is the top of the glyph
+// cell. A real font places the glyphs on the box's baseline instead, so the
+// command y is the box top plus the font ascent rounded to device pixels (the
+// layout box top already comes from the font metrics the caller laid out with).
 void AppendText(const style::StyleTree& styles, const layout::Box& box, int scroll_y,
-                render::DisplayList* list) {
+                const std::shared_ptr<const render::Font>& font, render::DisplayList* list) {
   const style::ComputedStyle& style = styles.Get(box.node);
   const std::uint32_t color = style.color | 0xFF000000u;
   const float font_size_px = style.font_size_px > 0.0f ? style.font_size_px : 0.0f;
-  list->DrawText(box.text, ToDevicePixels(box.x), TranslatedY(box, scroll_y), font_size_px, color);
+  const int x = ToDevicePixels(box.x);
+  if (font) {
+    const int baseline_y =
+        TranslatedY(box, scroll_y) + static_cast<int>(std::lround(font->AscentPx(font_size_px)));
+    list->DrawTextWithFont(font, box.text, x, baseline_y, font_size_px, color);
+    return;
+  }
+  list->DrawText(box.text, x, TranslatedY(box, scroll_y), font_size_px, color);
 }
 
 // An inline replaced box paints its image after its own background and before
@@ -79,7 +93,8 @@ void AppendImage(const layout::Box& box, int scroll_y, const ImageMap& images,
 
 render::DisplayList BuildDisplayList(const dom::Document& document, const style::StyleTree& styles,
                                      const layout::BoxTree& boxes, const Viewport& viewport,
-                                     const ImageMap& images) {
+                                     const ImageMap& images,
+                                     const std::shared_ptr<const render::Font>& font) {
   assert(viewport.width > 0);
   assert(viewport.height > 0);
   assert(viewport.scroll_y >= 0);
@@ -107,7 +122,7 @@ render::DisplayList BuildDisplayList(const dom::Document& document, const style:
         AppendImage(box, viewport.scroll_y, images, &list);
         break;
       case layout::BoxKind::kText:
-        AppendText(styles, box, viewport.scroll_y, &list);
+        AppendText(styles, box, viewport.scroll_y, font, &list);
         break;
       case layout::BoxKind::kAnonymousBlock:
         break;

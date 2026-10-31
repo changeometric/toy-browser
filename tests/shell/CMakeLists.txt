@@ -174,3 +174,83 @@ add_test(NAME shell.images_screenshot
           -DFIXTURE_DIR=${shell_img_site}
           -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/images_screenshot.ppm
           -P "${CMAKE_CURRENT_SOURCE_DIR}/images_screenshot_check.cmake")
+
+# M8b real-font selection: --font loads a font file, --font-family resolves one
+# through fontconfig, and both drive layout metrics and painting. The committed
+# fixture font (tests/fixtures/fonts/toy_test.ttf, family "Toy Test Font") keeps
+# the tests independent of installed fonts; the fontconfig test points
+# FONTCONFIG_FILE at a generated test-local config whose only <dir> is the fixture
+# fonts directory, so the family resolves deterministically on any machine.
+set(shell_font_file "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/fonts/toy_test.ttf")
+set(shell_font_site "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/font_site")
+
+set(shell_fontconfig_dir "${CMAKE_CURRENT_BINARY_DIR}/fontconfig")
+set(shell_fontconfig_cache "${shell_fontconfig_dir}/cache")
+set(shell_fontconfig_file "${shell_fontconfig_dir}/fonts.conf")
+file(MAKE_DIRECTORY "${shell_fontconfig_cache}")
+file(WRITE "${shell_fontconfig_file}"
+  "<?xml version=\"1.0\"?>\n"
+  "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n"
+  "<fontconfig>\n"
+  "  <dir>${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/fonts</dir>\n"
+  "  <cachedir>${shell_fontconfig_cache}</cachedir>\n"
+  "</fontconfig>\n")
+
+add_executable(fonts_test fonts_test.cpp)
+target_link_libraries(fonts_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(fonts_test)
+add_test(NAME shell.fonts COMMAND fonts_test "${shell_font_site}")
+
+# Real-font metrics are visible in the box dump: with the monospace fixture font
+# one 32 px glyph advances 19.2 px, so "ABC" is 57.6 -> 58 px wide instead of the
+# bitmap font's 48 px. Geometry is frozen from the `--font` dump below.
+add_test(NAME shell.fonts_dump_boxes
+  COMMAND $<TARGET_FILE:toybrowser> --font "${shell_font_file}" --size 320x200 --dump-boxes
+          "file://${shell_font_site}/index.html")
+set_tests_properties(shell.fonts_dump_boxes PROPERTIES
+  PASS_REGULAR_EXPRESSION
+    "    <h1> block x=8 y=24 width=304 height=32\n      text \"ABC\" x=8 y=24 width=58 height=32\n    <p> block x=8 y=88 width=304 height=16\n      text \"AB\" x=8 y=88 width=19 height=16\n      text \"Cab\" x=37 y=88 width=29 height=16\n")
+
+# The same geometry must come out of a fontconfig family lookup: the test-local
+# config only sees the committed fixture fonts, so "Toy Test Font" is unambiguous.
+add_test(NAME shell.fonts_dump_boxes_family
+  COMMAND $<TARGET_FILE:toybrowser> --font-family "Toy Test Font" --size 320x200 --dump-boxes
+          "file://${shell_font_site}/index.html")
+set_tests_properties(shell.fonts_dump_boxes_family PROPERTIES
+  ENVIRONMENT "FONTCONFIG_FILE=${shell_fontconfig_file}"
+  PASS_REGULAR_EXPRESSION
+    "    <h1> block x=8 y=24 width=304 height=32\n      text \"ABC\" x=8 y=24 width=58 height=32\n    <p> block x=8 y=88 width=304 height=16\n      text \"AB\" x=8 y=88 width=19 height=16\n      text \"Cab\" x=37 y=88 width=29 height=16\n")
+
+# A font that cannot be loaded is a runtime error (exit 1), not a usage error and
+# never a silent bitmap fallback.
+add_test(NAME shell.fonts_missing_file
+  COMMAND $<TARGET_FILE:toybrowser> --font "${CMAKE_CURRENT_BINARY_DIR}/missing_font.ttf"
+          --size 320x200 --dump-boxes "file://${shell_font_site}/index.html")
+set_tests_properties(shell.fonts_missing_file PROPERTIES WILL_FAIL TRUE)
+
+# The font flags never apply to the image-free dump modes (usage error).
+add_test(NAME shell.fonts_with_dump_dom
+  COMMAND $<TARGET_FILE:toybrowser> --font "${shell_font_file}" --dump-dom
+          "file://${shell_font_site}/index.html")
+set_tests_properties(shell.fonts_with_dump_dom PROPERTIES WILL_FAIL TRUE)
+
+# At most one font selection may be given.
+add_test(NAME shell.fonts_flags_conflict
+  COMMAND $<TARGET_FILE:toybrowser> --font "${shell_font_file}" --font-family "Toy Test Font"
+          --size 320x200 --dump-boxes "file://${shell_font_site}/index.html")
+set_tests_properties(shell.fonts_flags_conflict PROPERTIES WILL_FAIL TRUE)
+
+# --font and --font-family each require a non-empty argument.
+add_test(NAME shell.fonts_missing_argument
+  COMMAND $<TARGET_FILE:toybrowser> --font)
+set_tests_properties(shell.fonts_missing_argument PROPERTIES WILL_FAIL TRUE)
+
+# --font with --screenshot must render and write one binary PPM (the real-font
+# pixels themselves are asserted by shell.fonts).
+add_test(NAME shell.fonts_screenshot
+  COMMAND ${CMAKE_COMMAND}
+          -DTOYBROWSER=$<TARGET_FILE:toybrowser>
+          -DFONT_FILE=${shell_font_file}
+          -DFIXTURE_DIR=${shell_font_site}
+          -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fonts_screenshot.ppm
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/fonts_screenshot_check.cmake")

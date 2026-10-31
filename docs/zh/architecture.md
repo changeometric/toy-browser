@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `base` | 小型共享工具（几何、日志、UTF-8），只在出现需要时才存在 | — | 首次需要时 |
 | `platform` | 窗口、输入事件、事件循环、呈现像素表面 | `base` | M1 |
-| `render` | 显示列表、软件光栅化器、内置位图字体（度量与字形）、PNG 图片解码（经由已批准的 libpng 依赖） | `base` | M1 |
+| `render` | 显示列表、软件光栅化器、内置位图字体（度量与字形）、PNG 图片解码（已批准的 libpng）、真实字体引擎（已批准的 freetype + harfbuzz） | `base` | M1 |
 | `net` | URL 解析、socket、HTTP/1.1 抓取 | `base` | M2 |
 | `dom` | HTML tokenizer（词法分析器）、树构建器、DOM arena（区域分配器） | `base` | M3 |
 | `css` | CSS tokenizer、规则/声明解析器、选择器 | `base` | M4 |
@@ -18,7 +18,7 @@
 | `layout` | 盒树、块级/行内布局、换行 | `dom`、`style`、来自 `shell` 的文本度量回调 | M5 |
 | `paint` | 从盒树构建显示列表（元素背景与文本） | `dom`、`style`、`layout`、`render` | M6 |
 | `js` | 小型 JavaScript 引擎与 DOM 绑定（可选，最后） | `dom`、`base` | M9 |
-| `shell` | 导航、流水线编排、窗口外壳 | 所有模块 | M1 |
+| `shell` | 导航、流水线编排、窗口外壳、字体选择（字体族查找使用已批准的 fontconfig） | 所有模块 | M1 |
 
 依赖只向下指向；没有环。`render` 完全不了解 HTML/CSS（它消费显示列表）；`paint` 认识 DOM/样式/布局数据但从不光栅化；`platform` 不了解页面内容（它 blit 像素并上报输入）。只有 `shell` 能看到所有模块并把它们接在一起。`base` 尚不存在：M1–M6 的模块只用标准库与标准 POSIX 接口，只有当共享工具确实需要时该模块才出现。
 
@@ -46,7 +46,7 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 
 样式（M4）：`css` 把样式表与声明列表解析成普通结构，完全不了解 DOM。`style` 在 DOM 上匹配这些选择器，应用 UA/作者/行内层叠——依据 specificity（优先级）、`!important` 与继承——并为每个元素生成一个 `ComputedStyle`；内置的 UA 样式表本身就是由我们的解析器解析的 CSS。`DumpStyleTree()` 是 `--dump-style` 与样式测试背后的确定性文本形式。布局只会消费样式树，永远不会消费原始 CSS。
 
-布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型）；内置等宽位图字体度量位于 `render`，由 `shell` 适配。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。M8a 把 replaced 元素加入同一套布局：`LayoutOptions::replaced_sizes` 把 DOM 节点 id 映射到 shell 提供的固有 CSS 像素尺寸；有条目的行内元素成为原子行内级盒（CSS width/height px 覆盖、只给一侧时保持固有宽高比、整体换行、顶部对齐、抬高行高），而 `layout` 仍然从不读取图片、也不依赖 `render`。
+布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型）；内置等宽位图字体度量位于 `render`，由 `shell` 适配——若会话选择了真实字体，则改为适配该字体的整形 advance 与行高（M8b），布局本身仍然完全不了解字体。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。M8a 把 replaced 元素加入同一套布局：`LayoutOptions::replaced_sizes` 把 DOM 节点 id 映射到 shell 提供的固有 CSS 像素尺寸；有条目的行内元素成为原子行内级盒（CSS width/height px 覆盖、只给一侧时保持固有宽高比、整体换行、顶部对齐、抬高行高），而 `layout` 仍然从不读取图片、也不依赖 `render`。
 
 绘制（M6）：`paint` 按前序遍历盒树，产出扁平的 `render::DisplayList`：每个计算背景非透明的元素盒变成一条 `FillRect`（背景先于子内容），每个节点 id 有解码图片的行内 replaced 盒变成一条 `DrawImage`（M8a，在背景之后、子内容之前），每个文本盒变成一条 `DrawText`，使用继承的颜色与字号。`paint` 从不光栅化，也从不包含 render 的实现头文件。`render` 执行该列表：矩形填充对不透明目标使用冻结的 SrcOver 整数公式；文本使用内置 8x16 ASCII 字形表，按最近邻单元缩放（无抗锯齿）；图片使用冻结的最近邻源映射（见下）；整数矩形裁剪栈约束每条命令（M7 会用视口 `PushClip`/`PopClip` 对包裹页面，并把每条命令按滚动偏移平移）。`shell` 把 canvas 填白、按 surface 宽度布局页面、构建列表并光栅化；窗口与 `--screenshot` 共享完全相同的这条路径。确定性正是重点：相同输入在 GCC 和 Clang 上产出逐字节相同的 PPM，截图测试依赖这一点。
 
@@ -62,7 +62,20 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 resize 时重新布局而不重新抓取；`--dump-boxes` 使用同一加载器，因此图片几何出现在 dump 中，而
 `--dump-dom`/`--dump-style` 保持无图片。
 
-导航（M7）：`shell::Browser` 拥有一个浏览器会话：当前页面（最终 URL、DOM、样式树、盒树与解码后的图片）、
+真实字体（M8b）：`render::Font` 在 pimpl 之后封装已批准的 freetype 与 harfbuzz 依赖：公开头文件不出现
+freetype/harfbuzz 类型，加载失败是普通错误，字体自己持有 face 字节与 freetype library。度量来自
+字体设计单位（`ascent = size * ascender / unitsPerEm`，行高来自 `face->height`），advance 宽度
+在请求字号下由 harfbuzz 整形（26.6 求和），`internal::FontRasterizer`（render 私有）把 freetype
+8-bit 覆盖率位图按冻结的逐字形整数放置公式画到显示列表基线上，用 SrcOver 覆盖率混合，并裁剪到
+当前 clip。有效字号被钳制到 `kMaxRealFontSizePx`（4096 px），对抗性 CSS 无法请求无界字形位图。
+会话选择真实字体时，`paint` 为每个文本盒发出一条 `DrawTextWithFont`（基线 = 取整后的盒顶部减去
+滚动再加取整后的 ascent），否则发出冻结的位图 `DrawText`；显示列表和图片一样按共享引用持有字体。
+`shell` 每次运行解析一次 `--font PATH` 或 `--font-family NAME`（后者通过 fontconfig 的 pattern
+匹配，face 0，未知族回退到最佳匹配），加载一个 `Font` 并贯穿页面加载器（`MeasureText` 适配器）、
+`Browser` 与绘制。fontconfig 从不离开 shell，字体也从不离开 render 的私有实现。默认仍是内置位图
+路径，且它不受影响。
+
+导航（M7）：`shell::Browser` 拥有一个浏览器会话：当前页面（最终 URL、DOM、样式树、盒树、解码后的图片与字体）、
 导航历史、整数垂直滚动偏移与绘制。历史是一个 URL 向量加一个索引；每次成功加载追加一条
 （后退后再加载会截断前进条目），加载失败则页面、滚动偏移与历史都不变。点击先用滚动偏移换算成
 页面坐标，再对盒树做命中测试（`layout::HitTest` 返回绘制顺序中最后一个包含该点的盒），沿 DOM
@@ -78,14 +91,14 @@ resize 时重新布局而不重新抓取；`--dump-boxes` 使用同一加载器�
 - **DOM**：一个用整数 `NodeId` 寻址的 arena（`std::vector<Node>`）；父节点、首/末子节点、前/后兄弟链接都是 id。属性存在每个节点的小 vector 里。没有父/子指针环，没有 `shared_ptr`。
 - **样式树**：按 DOM id 索引的计算值组成的并行结构。
 - **盒树**：用整数 `BoxId` 寻址的布局 arena（与 DOM 同构）；每个盒引用其 DOM 来源（元素或文本节点 id），并持有一个以 CSS 像素表示的绝对 border-box 矩形。文本盒保存放置在该行上的那个单词。匿名盒没有 DOM 来源。
-- **显示列表**：命令的扁平 `std::vector`（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）；图片命令持有对不可变 `render::Image` 的共享引用。命令使用整数设备像素。
+- **显示列表**：命令的扁平 `std::vector`（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）；图片命令持有对不可变 `render::Image` 的共享引用，real-font 文本命令持有共享 `render::Font` 并用基线 `y`（位图文本保持冻结的 cell 顶部 `y`、font 为空）。命令使用整数设备像素。
 - **单位**：样式/布局中 CSS 像素用 `float`；光栅化器中设备像素用 `int`。MVP 假设 1 CSS px = 1 设备 px（无缩放，无 DPI 缩放）。
 
 选择 arena + id，是因为这些树平凡可析构、在测试中容易 dump，而且不可能形成所有权环。只有当它确实带来痛苦时才重新考虑。
 
 ## 线程与事件循环
 
-- 一个进程、一个线程、一个事件循环。MVP 中没有工作线程。
+- 一个进程、一个线程、一个事件循环。MVP 中没有工作线程。`render::Font` 在度量/绘制之间缓存可变的 freetype face 字号，因此刻意只支持单线程；不要跨线程共享同一个 `Font`。
 - 页面加载在导航回调中同步执行；加载期间窗口无响应。对玩具项目来说可以接受，只有当真成为问题时才引入异步网络。
 - `net::Fetch` 是接口后面的阻塞调用，因此以后可以替换成非阻塞状态机而不触碰调用方。
 - 平台事件循环等待窗口事件，并把 close/resize/input/paint 请求转发给 `shell`；由 `shell` 决定重绘什么。重绘按需发生（expose、resize、scroll），不靠定时器。
@@ -97,8 +110,9 @@ resize 时重新布局而不重新抓取；`--dump-boxes` 使用同一加载器�
 - Surface：32 位 ARGB、straight alpha（非预乘 alpha）、SrcOver 混合、左上角原点。
 - 裁剪是由显示列表命令压入的整数矩形栈；初始裁剪是整个 surface，光栅化器的工作量受裁剪区域限制（因此对抗性输入如超大字号也不会让绘制无界）。
 - `shell` 在绘制前把 canvas 填白；元素的 `background-color` 绘制为该元素的盒（M6 不会把 `html`/`body` 背景传播到 canvas）。
-- 文本使用小型内置位图字体，字形为手写的 8x16 ASCII 点阵，因此不需要字体库；字形单元按计算字号做最近邻缩放，没有抗锯齿。非 ASCII 码点暂时渲染 `?` 字形；真实 TTF 文本在 M8b 由已批准的 freetype/harfbuzz/fontconfig 组合加入。
+- 文本默认使用小型内置位图字体，字形为手写的 8x16 ASCII 点阵：字形单元按计算字号做最近邻缩放，没有抗锯齿，非 ASCII 码点渲染 `?` 字形。选择真实字体（`--font`/`--font-family`）时，文本由 harfbuzz 整形、freetype 光栅化为 8-bit 覆盖率，放在字形基线上，以覆盖率为 alpha 与不透明目标做 SrcOver 混合；字形裁剪到当前 clip，有效字号上限 4096 px。位图路径仍是回退路径，其像素冻结。
 - 图片被解码为直通 alpha 的 ARGB（界限：每边最多 8192 px，总计最多 16,777,216 像素），并以最近邻缩放绘制：目标像素 (dx, dy) 用整数向下取整采样源 `((dx - x) * width / dst_width, (dy - y) * height / dst_height)`，因此缩放不引入插值或抗锯齿。图片像素与矩形填充使用相同的 SrcOver 公式混合。
+- real-font 文本是唯一使用抗锯齿的绘制路径：freetype 覆盖率用同一 SrcOver 公式混合，逐字形整数放置把 26.6 pen 位置四舍五入到设备像素（远离零），因此在给定字体、字号与 freetype/harfbuzz 版本下输出确定。测试断言着墨区域与 AA 存在性，而不是精确覆盖率字节（后者依赖库版本）。
 - 绘制顺序是盒树前序：一个盒先画自己的背景，再画子节点；还没有层叠上下文或 z-index，因此重叠的盒按文档顺序绘制。
 - 呈现：平台接收一个像素视图（像素、宽度、高度、stride 以每行像素数为单位——与 `render::Surface::stride()` 相同的单位）并把它复制出去。headless 后端改为写一个 PPM 文件，这让渲染测试不依赖任何东西。
 - **headless 优先**：每个阶段都不开窗口运行。页面加载、解析、布局、绘制和截图都通过 CLI 模式（`--dump-body`、`--dump-dom`、`--dump-style`、`--dump-boxes`、`--screenshot [url]`）驱动和检查；窗口只呈现 headless 路径已经产生的像素。自动化测试从不需要显示器。
@@ -139,6 +153,7 @@ resize 时重新布局而不重新抓取；`--dump-boxes` 使用同一加载器�
 - 测试是注册到 CTest 的普通 C++ 可执行文件；新测试共享 header-only 的 `tests/support/check.h`（接口目标 `toy_test_support`）。没有测试框架依赖。
 - 解析器/布局的 golden 文件是逐行比较的文本 dump。截图是确定性的（整数像素、无抗锯齿），因此绘制测试精确比较像素，跨编译器运行产出逐字节相同的 PPM；不需要图像容差。
 - 测试是确定性的，从不需要网络、显示器、已安装字体或特定 locale。
+- M8b real-font 测试使用提交的自造 `tests/fixtures/fonts/toy_test.ttf`（从不使用已安装字体）：`render.font_ttf` 覆盖加载/度量/整形/钳制，扩展后的 `render.paint` 覆盖 AA 覆盖率/裁剪/基线/no-op，`shell.fonts` 覆盖端到端 real-font 页面，CLI 检查覆盖 `--font`、`--font-family`（配合测试局部 `FONTCONFIG_FILE`）、错误退出码与截图输出。
 - M8a 图片测试使用像素内容有文档的手工生成 PNG fixtures（`tests/fixtures/images/`）与提交的图片演示站点（`tests/fixtures/img_site/`）：解码器被直接测试，布局用假 replaced 尺寸测试，shell 端到端通过 `shell::Browser` 以及 CLI 的 `--dump-boxes`/`--screenshot` 检查。
 
 ## 参考资料
@@ -154,7 +169,7 @@ resize 时重新布局而不重新抓取；`--dump-boxes` 使用同一加载器�
 - CSS Values and Units Level 3：<https://www.w3.org/TR/css-values-3/>
 - HTTP Semantics（RFC 9110）与 HTTP/1.1（RFC 9112）
 - PNG（第三版）：<https://www.w3.org/TR/png-3/> 与 libpng 手册（M8a 已批准依赖）：<https://www.libpng.org/pub/png/libpng.html>
-- FreeType、HarfBuzz 与 fontconfig 文档（M8b 已批准依赖）：<https://freetype.org/>、<https://harfbuzz.github.io/>、<https://fontconfig.pages.freedesktop.org/fontconfig/>
+- FreeType、HarfBuzz 与 fontconfig 文档（M8b 已链接依赖）：<https://freetype.org/>、<https://harfbuzz.github.io/>、<https://fontconfig.pages.freedesktop.org/fontconfig/>
 - Web Platform Tests：<https://github.com/web-platform-tests/wpt>
 
 ## 刻意排除的范围

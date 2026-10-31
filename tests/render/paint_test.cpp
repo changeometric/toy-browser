@@ -3,6 +3,8 @@
 
 #include "toy/render/paint.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -12,6 +14,7 @@
 #include <vector>
 
 #include "support/check.h"
+#include "toy/render/font.h"
 #include "toy/render/surface.h"
 
 namespace {
@@ -21,7 +24,9 @@ using toy::render::Command;
 using toy::render::CommandKind;
 using toy::render::DisplayList;
 using toy::render::DrawDisplayList;
+using toy::render::Font;
 using toy::render::Image;
+using toy::render::kMaxRealFontSizePx;
 using toy::render::Surface;
 
 constexpr Argb kBlack = 0xFF000000u;
@@ -94,6 +99,58 @@ std::vector<Argb> RenderText(std::string_view text, int width, int height, float
   DisplayList list;
   list.DrawText(text, 0, 0, font_size_px, kBlack);
   return CopyPixels(DrawSurface(width, height, kWhite, list));
+}
+
+// Summary of the pixels that differ from `background`.
+struct InkStats {
+  int count = 0;
+  int full = 0;     // pixels equal to the pure text color
+  int partial = 0;  // pixels blended between the text color and the background
+  int min_x = 0;
+  int max_x = -1;
+  int min_y = 0;
+  int max_y = -1;
+};
+
+InkStats MeasureInk(const Surface& surface, Argb background, Argb text) {
+  InkStats stats;
+  for (int y = 0; y < surface.height(); ++y) {
+    for (int x = 0; x < surface.width(); ++x) {
+      const Argb pixel = surface.At(x, y);
+      if (pixel == background) {
+        continue;
+      }
+      if (stats.count == 0) {
+        stats.min_x = stats.max_x = x;
+        stats.min_y = stats.max_y = y;
+      } else {
+        stats.min_x = std::min(stats.min_x, x);
+        stats.max_x = std::max(stats.max_x, x);
+        stats.min_y = std::min(stats.min_y, y);
+        stats.max_y = std::max(stats.max_y, y);
+      }
+      ++stats.count;
+      if (pixel == text) {
+        ++stats.full;
+      } else {
+        ++stats.partial;
+      }
+    }
+  }
+  return stats;
+}
+
+// Loads the committed tests/fixtures/fonts/toy_test.ttf from the directory that
+// CMake passes as argv[1].
+std::shared_ptr<const Font> LoadFixtureFont(const std::string& directory) {
+  std::string error;
+  const std::shared_ptr<const Font> font = Font::LoadFromFile(directory + "/toy_test.ttf", &error);
+  toy_test::Check(font != nullptr, "the committed fixture font loads for the real-text tests");
+  if (font == nullptr) {
+    const std::string description = "fixture font load error: " + error;
+    toy_test::Check(false, description.c_str());
+  }
+  return font;
 }
 
 void TestCommandBuilders() {
@@ -620,9 +677,190 @@ void TestDrawImageDeterminism() {
                   "drawing the same image list twice is pixel-identical");
 }
 
+void TestDrawTextWithFontCommandFields(const std::shared_ptr<const Font>& font) {
+  DisplayList list;
+  list.DrawTextWithFont(font, "A", 3, 20, 16.0f, 0xFF112233u);
+
+  toy_test::Check(list.size() == 1, "one DrawTextWithFont appends one command");
+  const Command& command = list.commands()[0];
+  toy_test::Check(command.kind == CommandKind::kDrawText,
+                  "real-font text uses the kDrawText command");
+  toy_test::Check(command.x == 3 && command.y == 20,
+                  "real-font text keeps the pen origin and the baseline");
+  toy_test::Check(command.text == "A", "real-font text keeps its string");
+  toy_test::Check(command.font_size_px == 16.0f, "real-font text keeps its font size");
+  toy_test::Check(command.color == 0xFF112233u, "real-font text keeps its color");
+  toy_test::Check(command.font == font, "real-font text keeps the shared font");
+  toy_test::Check(command.image == nullptr, "real-font text leaves the image field null");
+  toy_test::Check(command.width == 0 && command.height == 0,
+                  "real-font text leaves the size fields at their defaults");
+}
+
+void TestDrawTextWithFontNullFont() {
+  DisplayList list;
+  list.DrawTextWithFont(nullptr, "A", 3, 20, 16.0f, kBlack);
+  toy_test::Check(list.size() == 0, "a null font appends no command (true no-op)");
+  const Surface surface = DrawSurface(16, 32, kWhite, list);
+  toy_test::Check(CountPixels(surface, kWhite) == 16 * 32, "a null font paints nothing");
+}
+
+void TestDrawTextWithFontInk(const std::shared_ptr<const Font>& font) {
+  constexpr int kOriginX = 4;
+  constexpr int kBaseline = 20;
+  DisplayList list;
+  list.DrawTextWithFont(font, "A", kOriginX, kBaseline, 16.0f, kBlack);
+  const Surface surface = DrawSurface(64, 32, kWhite, list);
+
+  const InkStats ink = MeasureInk(surface, kWhite, kBlack);
+  toy_test::Check(ink.count > 0, "real-font text paints ink");
+  toy_test::Check(ink.full > 0 && ink.partial > 0,
+                  "real-font text is anti-aliased: it has full and blended coverage pixels");
+
+  // Expected cell from the fixture geometry: the 5x7 block glyphs at 16 px put
+  // the ink roughly one pixel right of the pen, above the baseline and within
+  // one advance; allow a couple of pixels of hinting/rounding slack.
+  const int advance = static_cast<int>(std::ceil(font->MeasureTextWidth("A", 16.0f)));
+  const int ascent = static_cast<int>(std::ceil(font->AscentPx(16.0f)));
+  const int cell_left = kOriginX - 1;
+  const int cell_right = kOriginX + advance + 2;
+  const int cell_top = kBaseline - ascent - 2;
+  const int cell_bottom = kBaseline + 2;
+  toy_test::Check(ink.min_x >= cell_left && ink.max_x <= cell_right && ink.min_y >= cell_top &&
+                      ink.max_y <= cell_bottom,
+                  "real-font ink lies inside the expected glyph cell around the baseline");
+
+  // Every blended pixel of black text over white must be a gray value: that is
+  // the visual proof that 8-bit coverage was composited instead of stamped.
+  bool has_gray = false;
+  for (int y = 0; y < surface.height(); ++y) {
+    for (int x = 0; x < surface.width(); ++x) {
+      const Argb pixel = surface.At(x, y);
+      if (pixel == kWhite || pixel == kBlack) {
+        continue;
+      }
+      const unsigned int red = (pixel >> 16) & 0xFFu;
+      const unsigned int green = (pixel >> 8) & 0xFFu;
+      const unsigned int blue = pixel & 0xFFu;
+      has_gray = has_gray || (red == green && green == blue && red > 0 && red < 255);
+    }
+  }
+  toy_test::Check(has_gray, "real-font coverage contains partially blended gray pixels");
+}
+
+void TestDrawTextWithFontClipping(const std::shared_ptr<const Font>& font) {
+  DisplayList clipped;
+  clipped.PushClip(4, 10, 4, 4);
+  clipped.DrawTextWithFont(font, "A", 4, 20, 16.0f, kBlack);
+  const Surface surface = DrawSurface(64, 32, kWhite, clipped);
+  toy_test::Check(PaintedOnlyInsideClip(surface, kWhite, 4, 10, 4, 4),
+                  "real-font text paints only inside the clip");
+  toy_test::Check(MeasureInk(surface, kWhite, kBlack).count > 0,
+                  "the visible part of a clipped real-font glyph is painted");
+
+  DisplayList empty_clip;
+  empty_clip.PushClip(4, 10, 0, 4);
+  empty_clip.DrawTextWithFont(font, "A", 4, 20, 16.0f, kBlack);
+  const Surface empty_surface = DrawSurface(64, 32, kWhite, empty_clip);
+  toy_test::Check(CountPixels(empty_surface, kWhite) == 64 * 32,
+                  "a zero-size clip hides real-font text");
+}
+
+void TestDrawTextWithFontNoOps(const std::shared_ptr<const Font>& font) {
+  DisplayList list;
+  list.DrawTextWithFont(font, "", 4, 20, 16.0f, kBlack);
+  list.DrawTextWithFont(font, "A", 4, 20, 0.0f, kBlack);
+  list.DrawTextWithFont(font, "A", 4, 20, -16.0f, kBlack);
+  list.DrawTextWithFont(font, "A", 4, 20, std::numeric_limits<float>::infinity(), kBlack);
+  list.DrawTextWithFont(font, "A", 4, 20, std::numeric_limits<float>::quiet_NaN(), kBlack);
+  list.DrawTextWithFont(font, " ", 4, 20, 16.0f, kBlack);
+  toy_test::Check(list.size() == 6, "empty text, invalid sizes and a space still append commands");
+  const Surface surface = DrawSurface(64, 32, kWhite, list);
+  toy_test::Check(CountPixels(surface, kWhite) == 64 * 32,
+                  "empty text, invalid sizes and whitespace paint nothing");
+}
+
+void TestDrawTextWithFontSizeClamp(const std::shared_ptr<const Font>& font) {
+  // A '.' at the 4096 px bound is a huge coverage bitmap, but the draw visits
+  // only the visible part of the small clip. Requesting 100000 px must paint
+  // exactly the same pixels as requesting the bound, and stay clipped.
+  constexpr int kClipWidth = 32;
+  constexpr int kClipHeight = 16;
+  constexpr float kHugeSize = 100000.0f;
+
+  DisplayList huge;
+  huge.PushClip(0, 0, kClipWidth, kClipHeight);
+  huge.DrawTextWithFont(font, ".", -614, 819, kHugeSize, kBlack);
+  const Surface huge_surface = DrawSurface(64, 32, kWhite, huge);
+
+  DisplayList clamped;
+  clamped.PushClip(0, 0, kClipWidth, kClipHeight);
+  clamped.DrawTextWithFont(font, ".", -614, 819, kMaxRealFontSizePx, kBlack);
+  const Surface clamped_surface = DrawSurface(64, 32, kWhite, clamped);
+
+  toy_test::Check(CopyPixels(huge_surface) == CopyPixels(clamped_surface),
+                  "a real-font size above the bound paints exactly like the bound");
+  toy_test::Check(MeasureInk(huge_surface, kWhite, kBlack).count > 0,
+                  "the clamped giant glyph still paints its visible part");
+  toy_test::Check(PaintedOnlyInsideClip(huge_surface, kWhite, 0, 0, kClipWidth, kClipHeight),
+                  "a giant real-font glyph is clipped to the display-list clip");
+}
+
+void TestDrawTextWithFontDeterminism(const std::shared_ptr<const Font>& font) {
+  DisplayList list;
+  list.FillRect(0, 0, 64, 32, 0xFF102030u);
+  list.PushClip(2, 2, 40, 20);
+  list.DrawTextWithFont(font, "ABC", 3, 24, 16.0f, 0xFFFFCC00u);
+  list.PopClip();
+
+  Surface first(64, 32);
+  Surface second(64, 32);
+  first.Fill(kWhite);
+  second.Fill(kWhite);
+  DrawDisplayList(list, first);
+  DrawDisplayList(list, second);
+  toy_test::Check(CopyPixels(first) == CopyPixels(second),
+                  "drawing the same real-font list twice is pixel-identical");
+}
+
+void TestBitmapTextPathUnchanged(const std::shared_ptr<const Font>& font) {
+  DisplayList bitmap_only;
+  bitmap_only.DrawText("H", 0, 0, 16.0f, kBlack);
+  const Surface bitmap_surface = DrawSurface(32, 16, kWhite, bitmap_only);
+
+  DisplayList mixed;
+  mixed.DrawTextWithFont(font, ".", 20, 14, 12.0f, kBlack);
+  mixed.DrawText("H", 0, 0, 16.0f, kBlack);
+  const Surface mixed_surface = DrawSurface(32, 16, kWhite, mixed);
+
+  bool bitmap_region_equal = true;
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 8; ++x) {
+      bitmap_region_equal =
+          bitmap_region_equal && bitmap_surface.At(x, y) == mixed_surface.At(x, y);
+    }
+  }
+  toy_test::Check(bitmap_region_equal,
+                  "a real-font command does not change the bitmap DrawText pixels");
+}
+
+void TestMissingGlyphUsesNotdef(const std::shared_ptr<const Font>& font) {
+  // The fixture maps only space, '.', '0', '1', '2', '?', 'A', 'B', 'C', 'a',
+  // 'b', 'c'; every other code point shapes to glyph 0 (.notdef), so two
+  // unknown letters must render identically.
+  DisplayList x_list;
+  x_list.DrawTextWithFont(font, "X", 4, 20, 16.0f, kBlack);
+  DisplayList z_list;
+  z_list.DrawTextWithFont(font, "Z", 4, 20, 16.0f, kBlack);
+  const Surface x_surface = DrawSurface(32, 32, kWhite, x_list);
+  const Surface z_surface = DrawSurface(32, 32, kWhite, z_list);
+  toy_test::Check(CopyPixels(x_surface) == CopyPixels(z_surface),
+                  "code points missing from the font both shape to glyph 0");
+  toy_test::Check(MeasureInk(x_surface, kWhite, kBlack).count > 0, "the .notdef glyph paints ink");
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   TestCommandBuilders();
   TestFillRectExactColor();
   TestFillRectBlending();
@@ -646,5 +884,21 @@ int main() {
   TestDrawImageDeterminism();
   TestDeterminism();
   TestPrintableGlyphs();
+
+  toy_test::Check(argc >= 2, "the font fixture directory is passed as argv[1]");
+  if (argc >= 2) {
+    const std::shared_ptr<const Font> font = LoadFixtureFont(argv[1]);
+    if (font != nullptr) {
+      TestDrawTextWithFontCommandFields(font);
+      TestDrawTextWithFontNullFont();
+      TestDrawTextWithFontInk(font);
+      TestDrawTextWithFontClipping(font);
+      TestDrawTextWithFontNoOps(font);
+      TestDrawTextWithFontSizeClamp(font);
+      TestDrawTextWithFontDeterminism(font);
+      TestBitmapTextPathUnchanged(font);
+      TestMissingGlyphUsesNotdef(font);
+    }
+  }
   return toy_test::Finish("render.paint");
 }

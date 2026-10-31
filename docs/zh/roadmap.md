@@ -4,8 +4,8 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M7 与 M8a 已完成；下一步是 M8b（真实字体，库已批准）。** 快照与接管指南见
-[handoff.md](handoff.md)。
+**当前状态：M0–M8 已完成（M8a 图片、M8b 真实字体）；下一步是可选的 M9（JavaScript 子集）。**
+快照与接管指南见 [handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
 
@@ -56,7 +56,7 @@
 - `paint` 模块：把盒树转换成显示列表——按前序先画元素背景，再为每个文本盒用计算出的颜色/字号画一次文本。它不做光栅化，`render` 仍然完全不了解 HTML/CSS。
 - `shell`/CLI：可选的位置参数页面 URL（`toybrowser [options] [url]`），由窗口模式和 `--screenshot` 使用；页面被抓取、解析、计算样式、按 surface 宽度布局、绘制并呈现/写成 PPM。不给 URL 时两种模式都保留 M1 占位页。
 - 已达成验收：`render.paint`、`paint.display_list`、`shell.screenshot_page` 与位置参数 URL 的 CLI 测试在 GCC 和 Clang 下、警告视为错误时通过（共 37 个测试）；200x100 surface 上的像素端到端测试验证了红色标题/黑色段落的几何；GCC/Clang 产出逐字节相同的 PPM；窗口显示同一页面。
-- M6 已知限制：所有绘制都是整数设备像素，无抗锯齿、无子像素布局（1 CSS px = 1 设备 px）；没有 border 或真实 TTF 字体（图片在 M8a 到来，真实字体是 M8b）；canvas 始终由 shell 填白，`html`/`body` 的 `background-color` 只绘制其元素盒（不会传播为 canvas 背景）；绘制顺序是前序，没有层叠上下文/z-index；文本只有 ASCII 位图字形（其他码点渲染 `?`，链接只有颜色没有下划线，因为属性集里没有 `text-decoration`）；溢出只被 surface 裁剪——滚动与导航在 M7；光栅化器的工作量受裁剪区域限制，对抗性字号也不例外。
+- M6 已知限制：所有绘制都是整数设备像素，无抗锯齿、无子像素布局（1 CSS px = 1 设备 px）；没有 border（图片在 M8a 到来，真实字体自 M8b 起是 opt-in）；canvas 始终由 shell 填白，`html`/`body` 的 `background-color` 只绘制其元素盒（不会传播为 canvas 背景）；绘制顺序是前序，没有层叠上下文/z-index；文本只有 ASCII 位图字形（其他码点渲染 `?`，链接只有颜色没有下划线，因为属性集里没有 `text-decoration`）；溢出只被 surface 裁剪——滚动与导航在 M7；光栅化器的工作量受裁剪区域限制，对抗性字号也不例外。
 
 ## M7 — 导航 ✅（已完成）
 
@@ -112,20 +112,35 @@
   对齐（没有基线对齐，同 M5），缩放为无抗锯齿的最近邻，元素不可见时也会抓取图片（没有懒加载），
   图片 URL 只支持 `http`/`file`（没有 `https`），并且 `--dump-dom`/`--dump-style` 不抓取图片。
 
-## M8b — 真实字体（下一步；库已批准）
+## M8b — 真实字体 ✅（已完成）
 
-- TTF 文本：加载字体文件，用 freetype 做度量与字形光栅化、harfbuzz 做整形；fontconfig 可以发现
-  已安装字体，让页面按字体族请求字体而不必手动提供文件。已批准的依赖（freetype、harfbuzz、
-  fontconfig）记录在 [dependencies.md](dependencies.md)；缺失的开发包需要用户安装。
-- `layout` 继续通过既有 `MeasureText` 回调消费文本度量；`paint`/`render` 获得真实字形放置与
-  抗锯齿覆盖率文本所需的基线/advance 信息，同时内置位图字体保留为回退路径，使所有未选择真实
-  字体的既有输出保持不变。具体的字体选择契约与 AA 文本契约变更在本轮开始时冻结。
-- 测试必须保持确定性，且不得依赖已安装字体：由提交/生成的字体 fixture 驱动测试，手工演示可以
-  使用任意已安装 TTF。
-- 当一个带真实 TTF 文本和至少一张图片的页面渲染出来时完成（即最初的 M8 验收），且所有既有测试
-  （46 个）、GCC/Clang 无警告构建与 M8a 图片行为仍然通过。
-
-## M9 — JavaScript 子集（可选，工作量大）
+- `render`：`Font` 通过已批准的 freetype 依赖在冻结的 pimpl 接口后加载 TTF/OpenType face（公开
+  头文件不出现 freetype/harfbuzz 类型），并暴露设计单位度量与 harfbuzz 整形后的 advance 宽度。
+  显示列表新增 `DrawTextWithFont`：real-font 文本用 freetype 8-bit 覆盖率做抗锯齿，使用冻结的
+  逐字形整数放置公式放在命令基线上，用既有 SrcOver 公式混合并受裁剪限制。real-font 的有效字号
+  被钳制到 `kMaxRealFontSizePx`（4096 px），用于度量与绘制，因此对抗性 CSS 无法让字形位图无界
+  分配。内置位图 `DrawText` 路径不受影响。
+- `paint`：选中真实字体时，文本盒变成 `DrawTextWithFont`，基线为 `round(box.y) - scroll_y +
+  round(font.ascent)`；没有字体时精确产出 M8b 之前的位图命令。
+- `shell`：`--font PATH` 加载字体文件，`--font-family NAME` 通过已批准的 fontconfig 依赖解析
+  字体族（最佳匹配；未知字体族回退），解析出的字体只加载一次，并由布局度量（经既有
+  `MeasureText` 回调）与绘制共享。两个标志互斥、与 `--dump-body`/`--dump-dom`/`--dump-style`
+  组合是用法错误，字体无法加载是运行时错误（退出码 1）。整个会话只有一个字体；不给标志时仍用
+  内置位图字体，使所有 M8b 之前的输出逐字节不变。
+- Fixtures：提交的自造最小 TTF（`tests/fixtures/fonts/toy_test.ttf`，度量/字体族有文档）与
+  real-font 演示页（`tests/fixtures/font_site/`）。测试从不依赖已安装字体；fontconfig 路径用
+  测试局部的 `FONTCONFIG_FILE`（只指向 fixture 字体目录）测试。
+- 已达成验收：带真实 TTF 文本与图片的页面可以渲染（headless 截图与真实窗口）；`render.font_ttf`、
+  扩展后的 `render.paint`、`shell.fonts` 与七个 CLI/fontconfig 检查以及所有既有测试在 GCC 与
+  Clang 下、警告视为错误时通过（共 55 个测试）；不给字体标志时所有 M8b 之前的 dump 与截图与
+  M8a 逐字节一致；位图与 real-font 路径的 GCC/Clang PPM 都逐字节相同。
+- M8b 已知限制：real-font 是 opt-in（默认仍是 ASCII 位图字体），整个会话一个 face（没有按元素的
+  CSS `font-family`/`font-weight`/`font-style` 映射、没有 fallback 链、没有 `@font-face`/字体
+  下载），除 harfbuzz 默认 buffer 整形外没有额外文本整形特性（没有 bidi 重排、竖排或复杂脚本
+  分段），fontconfig 总是返回最佳匹配，因此未知字体族会静默回退，只支持 face 0（忽略 TTC/face
+  index），缺失码点渲染字体的 `.notdef` 字形，real-font 字号超过 4096 px 时等同 4096 px，且不
+  支持整形 advance 之外的亚像素定位/kerning。位图回退仍只有 ASCII。
+## M9 — JavaScript 子集（可选，工作量大；下一步）
 
 - 面向类似 ES5 的极小子集的词法分析器、解析器、小型解释器、DOM 绑定和事件处理器。
 - 当 fixture 页面的脚本修改 DOM 且修改被绘制出来时完成。
@@ -139,6 +154,7 @@
 - **代理支持（M2.1）**——通过 HTTP 代理抓取 `http://` URL：`FetchOptions` 中的代理设置、`--proxy host:port` CLI 标志与 `http_proxy` 环境变量回退；发往代理的请求使用 absolute-form 请求目标。测试使用进程内的假代理。用户于 2026-10-31 推迟：只有当真实站点测试需要它，或它成本低且明显有用时才实现。
 - **TLS / `https://`**——用户于 2026-10-31 推迟；OpenSSL 未获批准。访问 Google 之类的站点需要 `https`，仅靠代理支持不够。
 - **更多图片格式与背景图**——JPEG/GIF/WebP、`background-image`、`srcset`、图片缓存与懒加载；这些都在 M8a 之后按需排期，不阻塞任何里程碑。
+- **CSS 字体选择与更丰富的文本**——把 CSS `font-family`/`font-weight`/`font-style` 映射到字体栈，加入 fallback 链、`@font-face`/字体下载与更丰富的整形；M8b 的 CLI 选择刻意是每会话一个 face。
 - **测试辅助代码合并**——较旧的测试可执行文件里仍然重复着每个文件各自的 `Check`/`g_failures` 测试支架。header-only 的 `tests/support/check.h`（接口目标 `toy_test_support`）已在 M5 引入，新测试都在使用；旧文件只在被改动时迁移。不引入框架依赖。
 
 ## 规则

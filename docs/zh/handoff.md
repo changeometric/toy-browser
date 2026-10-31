@@ -19,9 +19,10 @@
 | M6 | `render` 显示列表 + 软件光栅化器 + 手写 8x16 ASCII 字形，`paint` 盒树转显示列表模块，窗口/`--screenshot` 绘制与可选的位置参数页面 URL |
 | M7 | 导航：headless `shell::Browser`（最终 URL、历史、滚动、标题）、`net::ResolveUrl`、盒命中测试、滚动裁剪绘制、X11 点击/滚轮/按键 + 窗口标题、提交的演示站点、`shell.navigation` 测试 |
 | M8a | PNG 图片：`render::Image` + 封装在 `render::DecodePng` 后的 libpng 解码器、`DrawImage` 显示列表命令/光栅化器、按调用方提供的固有尺寸布局 replaced 行内 `<img>`、私有 shell 页面加载器（抓取/解析/解码/跳过失败）、图片 fixtures 与 `tests/fixtures/img_site/`、46 个测试 |
+| M8b | 真实字体：冻结 pimpl 后的 `render::Font`（freetype 度量/光栅化 + harfbuzz 整形、4096 px 有效字号上限）、按基线放置的抗锯齿 `DrawTextWithFont`、`--font PATH` / `--font-family NAME`（fontconfig）选择、自造字体 fixture 与 `tests/fixtures/font_site/`、55 个测试；位图路径保持逐字节不变 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-尚未实现：真实 TTF 字体（M8b）、JavaScript（M9）、`https`/TLS、代理、外部样式表、border、抗锯齿文本、水平滚动/滚动条、hover/active 链接样式与表单控件。PNG 图片自 M8a 起可用（M8a 已知限制见 [roadmap.md](roadmap.md)）。窗口与 `--screenshot` 在给出 URL 时绘制真实页面，否则显示 M1 占位页；给出页面 URL 时窗口也可浏览（链接、滚轮/键盘滚动、Alt+Left/Right 历史、`<title>`）。`--dump-*` 模式仍是主要调试路径。
+尚未实现：JavaScript（M9）、`https`/TLS、代理、外部样式表、border、水平滚动/滚动条、hover/active 链接样式与表单控件，以及 CSS 驱动的字体选择（`font-family`/`font-weight`/`font-style`、fallback 链、`@font-face`）。PNG 图片自 M8a 起可用、真实 TTF 文本自 M8b 起可用，字体都是 opt-in（M8a/M8b 已知限制见 [roadmap.md](roadmap.md)）。窗口与 `--screenshot` 在给出 URL 时绘制真实页面，否则显示 M1 占位页；给出页面 URL 时窗口也可浏览（链接、滚轮/键盘滚动、Alt+Left/Right 历史、`<title>`）。`--dump-*` 模式仍是主要调试路径。
 
 ## 验证当前状态（无需上下文）
 
@@ -42,17 +43,28 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-预期：46/46 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11 与 libpng 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。
+预期：55/55 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz 与 fontconfig 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
     "file://$PWD/tests/fixtures/img_site/index.html" && file /tmp/toybrowser-img.ppm
 "$BUILD"/toybrowser --size 320x200 --dump-boxes \
     "file://$PWD/tests/fixtures/img_site/index.html" | grep '<img>'
+
+# 真实字体：提交的自造 fixture 是确定性的；已安装字体只用于手工演示（如
+# --font-family "DejaVu Sans"）。
+"$BUILD"/toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x600 \
+    --screenshot /tmp/toybrowser-font.ppm "file://$PWD/tests/fixtures/font_site/index.html" \
+    && file /tmp/toybrowser-font.ppm
+"$BUILD"/toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x200 --dump-boxes \
+    "file://$PWD/tests/fixtures/font_site/index.html"
+"$BUILD"/toybrowser --font-family "DejaVu Sans" --size 400x200 \
+    --screenshot /tmp/toybrowser-dejavu.ppm "file://$PWD/tests/fixtures/nav_site/index.html"
 ```
 
-预期：截图绘制提交的 PNG fixtures（旗子、alpha、灰度、调色板），盒 dump 包含带固有/CSS 尺寸的
-`<img> inline` 盒；`missing.png` 不保留盒。
+预期：图片截图绘制提交的 PNG fixtures（旗子、alpha、灰度、调色板），盒 dump 包含带固有/CSS 尺寸的
+`<img> inline` 盒；`missing.png` 不保留盒。fixture 字体的盒 dump 显示真实字体度量（例如 32 px 下
+`<h1>` 文本 "ABC" 宽 58，而不是位图字体的 48）；不给字体标志的页面保持位图输出。
 
 ```sh
 "$BUILD"/toybrowser --size 400x200 --screenshot /tmp/toybrowser-nav.ppm \
@@ -63,29 +75,24 @@ ctest --test-dir "$BUILD" --output-on-failure
 
 ```sh
 "$BUILD"/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"
-"$BUILD"/toybrowser --size 400x200 "file://$PWD/tests/fixtures/nav_site/index.html"
-# 图片页：确认 PNG 图片被绘制；导航页：点击 "About page"，用滚轮/方向键/PageUp/PageDown/Home/End
-# 滚动，Alt+Left/Right 前进后退；窗口标题跟随 <title>。
+"$BUILD"/toybrowser --font-family "DejaVu Sans" --size 400x200 \
+    "file://$PWD/tests/fixtures/nav_site/index.html"
+# 图片页：确认 PNG 图片被绘制；真实字体页：确认抗锯齿文本；导航页：点击 "About page"，用滚轮/
+# 方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right 前进后退；窗口标题跟随 <title>。
 ```
 
-## 下一轮：M8b —— 真实字体（库已批准）
+## 下一轮：M9 —— JavaScript 子集（可选，工作量大；需要用户确定优先级）
 
-- 目标：真实 TTF 文本：freetype 负责度量与字形光栅化，harfbuzz 负责整形，fontconfig 负责已安装
-  字体的发现/匹配。用户于 2026-10-31 批准了这三个库，并澄清“从零”适用于浏览器功能，而不是
-  底层编解码/字体机制（记录在 [dependencies.md](dependencies.md) 与 [decisions.md](decisions.md)）。
-  缺失的开发包需要用户安装；agent 从不安装任何东西。
-- 初步范围：`render` 增加字体后端（加载、度量、整形后的 advance、抗锯齿字形覆盖率），在 TTF
-  路径上替换或扩展内置 8x16 位图字体；`layout` 继续通过既有 `MeasureText` 回调消费文本度量
-  （基线信息可能加入契约）；`paint` 放置真实字形并发出覆盖率文本；字体选择/回退（默认或配置的
-  字体）在本轮开始时冻结。未选择 TTF 字体的页面应保持位图字体输出不变。
-- 测试必须保持确定性，且不得依赖已安装字体：由提交/生成的字体 fixture 驱动测试；已安装的真实
-  字体只用于手工演示。
-- 当一个带真实 TTF 文本和至少一张图片的页面渲染出来时完成（即最初的 M8 验收），且所有既有测试
-  （46 个）、GCC/Clang 无警告构建与 M8a 图片行为仍然通过。
-- 仍不在范围内：JavaScript（M9）、表单、`https`/TLS、代理、外部 CSS。
+- 目标：类似 ES5 的极小子集：词法分析器、解析器、小型解释器、DOM 绑定与事件处理器，足以让 fixture
+  页面的脚本修改 DOM 并让修改被绘制出来。
+- 这是可选的大里程碑：先与用户确认它确实是下一步（backlog 是替代选项）。它需要新的模块/包设计
+  （`docs/architecture.md` 列出 `js` 模块），但不需要新依赖。
+- 验收草案：fixture 页面运行脚本、修改 DOM，且修改后的内容可 headless 渲染（`--screenshot` 或
+  dump），同时既有 55 个测试与 GCC/Clang 无警告构建通过。
+- 目前仍不在范围内：表单、`https`/TLS、代理、外部 CSS。
 
-M8b 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：代理支持、TLS、更多图片格式/背景图，以及
-测试辅助代码迁移。
+替代/之后的 backlog（细节见 [roadmap.md](roadmap.md)）：代理支持、TLS、CSS 字体选择/fallback
+链、更多图片格式/背景图，以及测试辅助代码迁移。
 
 ## 仓库地图
 
@@ -93,9 +100,12 @@ M8b 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：代理支持、T
 - `src/main.cpp` —— 只做 CLI 解析；`shell` 编排 fetch → parse → style → images → layout → paint →
   dump/present，`toy/shell/browser.h` 拥有一个浏览器会话（历史、滚动、点击、标题）。
 - `src/shell/page.h` —— shell 私有的页面加载器（最终 URL、DOM、样式、盒树、解码后的图片）；
-  `src/render/include/toy/render/image.h` —— `Image` 与基于 libpng 的 `DecodePng`；显示列表与光栅化器在
-  `toy/render/paint.h`，`src/paint/` 从盒树构建列表且不光栅化。`src/render/include/toy/render/font.h` ——
-  位图字体度量；`layout` 通过 `shell` 提供的回调消费它们，自身不依赖 `render`。
+  `src/render/include/toy/render/image.h` —— `Image` 与基于 libpng 的 `DecodePng`；
+  `src/render/include/toy/render/font.h` —— 位图字体度量加真实 `Font` API（加载、度量、整形 advance；
+  公开头文件不含 freetype/harfbuzz 类型），实现位于 `src/render/font_ttf.cpp`；显示列表与光栅化器在
+  `toy/render/paint.h`，`src/paint/` 从盒树构建列表且不光栅化。`src/shell/application.cpp` 负责字体
+  选择（`--font`/`--font-family`，唯一使用 fontconfig 的地方）。`layout` 通过 `shell` 提供的回调
+  消费文本度量，自身不依赖 `render`。
 - `tests/<module>/` —— 每个主题一个可执行文件，注册到 CTest；新测试使用 header-only 的
   `tests/support/check.h`。提交的 fixtures：`tests/fixtures/nav_site/`（三页导航演示）、
   `tests/fixtures/img_site/`（图片流水线演示）、`tests/fixtures/images/`（像素内容有文档的手工 PNG）。
@@ -106,7 +116,7 @@ M8b 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：代理支持、T
 
 ## 冻结契约（不要随意改动）
 
-- CLI 模式、标志与退出码：`0` 成功，`1` 运行时错误，`2` 用法错误。可选的位置参数页面 URL（`toybrowser [options] [url]`）只用于窗口模式和 `--screenshot`；最多一个 URL，不能与 `--dump-*` 模式组合，不给 URL 时保留 M1 占位页。
+- CLI 模式、标志与退出码：`0` 成功，`1` 运行时错误，`2` 用法错误。可选的位置参数页面 URL（`toybrowser [options] [url]`）只用于窗口模式和 `--screenshot`；最多一个 URL，不能与 `--dump-*` 模式组合，不给 URL 时保留 M1 占位页。M8b 新增 `--font PATH` 与 `--font-family NAME`：各自需要非空参数，二者互斥，且与 `--dump-body`/`--dump-dom`/`--dump-style` 组合是用法错误（退出码 2）；允许与窗口模式、`--screenshot`、`--dump-boxes` 组合。选中的字体无法加载/解析是运行时错误（退出码 1）；两个标志都不给时使用内置位图字体（M8b 之前的行为）。
 - Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层。
 - 布局语义通过布局测试与 M5/M8a 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，仅按 ASCII 空白换行。M8a replaced 元素：`LayoutOptions::replaced_sizes`（DOM 节点 id → 固有 CSS px）把行内元素变成原子行内级盒；CSS `width`/`height` px 覆盖固有尺寸，只指定一侧时保持固有宽高比，盒整体换行、抬高行高并顶部对齐；其 dump 行仍是 `<tag> inline x= y= width= height=`，没有子节点，`display:block` 的 replaced 元素不支持，replaced 盒的 margin/padding 被忽略。没有条目的页面保持原有几何逐字节不变。
 - 绘制语义通过 M6/M7 测试冻结：显示列表命令使用整数设备像素（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）；填充对不透明目标使用 SrcOver 公式 `(src * a + dst * (255 - a) + 127) / 255`；初始裁剪是整个 surface，光栅化工作量受裁剪限制；`shell` 把 canvas 填白；绘制顺序是盒树前序（先背景、再图片、再子节点/文本）；文本使用内置 8x16 ASCII 字形，最近邻缩放、无抗锯齿、非 ASCII 用 `?`、文本像素不透明。
@@ -116,7 +126,19 @@ M8b 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：代理支持、T
   命令持有 `shared_ptr<const render::Image>`；目标像素 (dx, dy) 用整数向下取整采样源
   `((dx - x) * image.width / width, (dy - y) * image.height / height)`（最近邻，无插值/抗锯齿），
   用同一 SrcOver 公式混合（alpha 0 无操作，alpha 255 写 `0xFF000000 | rgb`，结果不透明）；空图片映射
-  精确复现 M8a 之前的命令列表。
+  精确复现 M8a 之前的命令列表。M8b real-font 文本：会话选择字体时，每个文本盒变成
+  `DrawTextWithFont` 命令（x = pen 原点，y = 设备像素基线，基线 =
+  `round(box.y) - scroll_y + round(font->AscentPx(size))`），字体按共享引用保留，字形由 harfbuzz
+  整形、freetype 光栅化为 8-bit 覆盖率，按冻结的逐字形整数公式放置（26.6 pen 四舍五入到设备像素、
+  远离零，再加 freetype bitmap_left/top），用同一 SrcOver 公式以覆盖率为 alpha 混合（结果不透明），
+  裁剪到当前 clip，有效字号钳制到 `kMaxRealFontSizePx`（4096 px）。没有选择字体时精确输出冻结的
+  位图命令列表（`DrawText`、cell 顶部 y、不透明无抗锯齿像素）。
+- Real-font 契约（M8b）：`render::Font` 加载后不可变（pimpl，公开头文件不出现 freetype/harfbuzz
+  类型），加载失败是普通错误，只支持 face 0，度量是设计单位按 `size / unitsPerEm` 缩放，advance
+  宽度是 harfbuzz 整形后的 26.6 求和。shell 每次运行解析一个字体（`--font` 文件或 fontconfig 对
+  `--font-family` 的最佳匹配，未知字体族回退），并共享给布局度量与绘制；整个会话一个 face（暂不
+  支持按元素的 CSS 字体选择）。fontconfig 是 shell 独有的依赖；freetype/harfbuzz 是 `render`
+  私有实现。
 - 图片解码契约（`render::DecodePng`）：只支持 PNG，经由接口后的已批准 libpng 依赖，输出直通 alpha 的
   ARGB `render::Image`；接受尺寸为每边最多 8192 px 且总计最多 16,777,216 像素（包含式上界），在分配前
   拒绝；失败返回 false 并给出可读错误、`*out` 不变；不抛异常；公开头文件中不出现 libpng 类型。
@@ -130,7 +152,9 @@ M8b 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：代理支持、T
   成功加载把滚动偏移重置为 0，只改变 fragment 的引用是 no-op，标题是第一个 `<title>` 文本
   （折叠空白，没有时回退到序列化最终 URL），只有 `http`/`file` 链接会导航。M8a 保持公开方法完全
   不变，但用前向声明、out-of-line 析构函数与 `std::unique_ptr` 隐藏页面（DOM/样式/盒树/图片），
-  因此头文件不再暴露页面数据，`Browser` 不可拷贝。
+  因此头文件不再暴露页面数据，`Browser` 不可拷贝。M8b 只增加可选的 `font` 构造函数参数
+  （`Browser(w, h, std::shared_ptr<const render::Font> = nullptr)`）；null 表示位图路径，加载的
+  字体会用于该会话的每次加载/重新布局/绘制。
 - 平台输入契约（`toy/platform/window.h`）：`kMouseDown` 是窗口设备像素中的主键点击，`kMouseWheel`
   携带 `wheel_delta`（正值表示朝文档末尾滚动），`kKeyDown` 携带归一化的 `Key` 与 alt/ctrl/shift；
   `SetTitle` 尽力而为，不会让窗口失败。
@@ -194,3 +218,27 @@ M8b 之后的 backlog（细节见 [roadmap.md](roadmap.md)）：代理支持、T
   图片不会让 dump 失败。
 - 图片加载没有缓存也没有懒加载：每个 `<img>` 出现都会被抓取，即使它被 `display:none` 隐藏或远在
   视口之外。这是有文档的 M8a MVP 限制，不是 bug；加入缓存/懒加载需要契约变更。
+- M8b 增加了硬性的逐字节兼容门禁：不给 `--font`/`--font-family` 时，所有 M8b 之前的 dump 与截图
+  必须与 M8a 基线 `cmp` 一致；real-font 路径完全 opt-in。任何触碰绘制/字体的改动后都要用上一提交的
+  `git worktree` 基线重跑。
+- real-font 测试必须使用提交的自造 fixture `tests/fixtures/fonts/toy_test.ttf`，从不使用已安装字体；
+  fontconfig CLI 测试把 `FONTCONFIG_FILE` 指向生成配置，其唯一 `<dir>` 是 fixture 字体目录。已安装
+  字体（如 DejaVu Sans）只用于手工演示。
+- 不要在测试里断言精确的 freetype 覆盖率字节：抗锯齿像素依赖库版本。`render.paint` 断言着墨区域、
+  AA 存在性、裁剪边界、no-op 与确定性；`shell.fonts` 断言页面区域与冻结的布局几何。GCC 与 Clang
+  在同一机器/库版本下仍必须产出逐字节相同的 PPM。
+- real-font 有效字号在度量、整形与光栅化中都被钳制到 `kMaxRealFontSizePx`（4096 px）。超过该值的
+  字号行为与 4096 完全相同，因此恶意 CSS `font-size` 无法让 freetype 分配无界字形位图；位图路径
+  保留自己的守卫。
+- `Font` 在度量/绘制调用之间会修改共享的 freetype face 字号：绝不要跨线程共享同一个 `Font`
+  （MVP 单线程）。`DrawTextWithFont` 传入 null font 时不追加命令；位图路径是 `DrawText` + 空 font、
+  cell 顶部 y。
+- shell 的字体 fixture 几何（`shell.fonts*` 的 dump 正则）硬编码自
+  `toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x200 --dump-boxes`；改 fixture、
+  其度量或字体流水线时要在同一改动里更新这些常量，和 M7/M8a fixture 几何一样。
+- `--font-family` 使用 fontconfig 的正常语义：未知字体族返回最佳匹配而不报错，使用匹配文件的
+  face 0，忽略 TTC/face index。M8b MVP 每会话只支持一个字体；按元素的 CSS
+  `font-family`/weight/style 是后续工作。
+- `src/render/CMakeLists.txt` 现在 `find_package` freetype（模块）与 harfbuzz（CONFIG，目标
+  `harfbuzz::harfbuzz`）；`src/shell/CMakeLists.txt` 查找 fontconfig（目标
+  `Fontconfig::Fontconfig`）。全部保持 PRIVATE，不硬编码版本/路径。

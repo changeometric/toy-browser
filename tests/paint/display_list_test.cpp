@@ -2,6 +2,7 @@
 // display list of background fills, image draws and text draws, wrapped in a
 // viewport clip and translated by the vertical scroll offset.
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -35,6 +36,7 @@ using toy::render::Command;
 using toy::render::CommandKind;
 using toy::render::DisplayList;
 using toy::render::DrawDisplayList;
+using toy::render::Font;
 using toy::render::Image;
 using toy::render::Surface;
 
@@ -46,25 +48,35 @@ TextMetrics MeasureWithBitmapFont(std::string_view text_utf8, float font_size_px
                      toy::render::LineHeightPx(font_size_px)};
 }
 
-// Full pipeline for a fixture page with caller-supplied replaced sizes and
-// images. The layout viewport is the viewport width, exactly like shell does it.
+// Full pipeline for a fixture page with caller-supplied replaced sizes, images
+// and an optional real font. The layout viewport is the viewport width, exactly
+// like shell does it; layout always uses the bitmap measurer, so the box geometry
+// (and therefore the expected paint geometry) does not depend on the font.
 DisplayList BuildPageForDocument(const Document& document, const ReplacedSizes* replaced_sizes,
-                                 const ImageMap& images, int viewport_width, int viewport_height,
-                                 int scroll_y) {
+                                 const ImageMap& images, const std::shared_ptr<const Font>& font,
+                                 int viewport_width, int viewport_height, int scroll_y) {
   const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
   LayoutOptions options;
   options.viewport_width_px = static_cast<float>(viewport_width);
   options.replaced_sizes = replaced_sizes;
   const BoxTree boxes = LayoutDocument(document, styles, options, MeasureWithBitmapFont);
   const Viewport viewport{viewport_width, viewport_height, scroll_y};
-  return BuildDisplayList(document, styles, boxes, viewport, images);
+  return BuildDisplayList(document, styles, boxes, viewport, images, font);
 }
 
-// The M7 path: no replaced elements and an empty image map.
+// The M7 path: no replaced elements, an empty image map and no real font.
 DisplayList BuildPage(const std::string& html, int viewport_width = 800, int viewport_height = 600,
                       int scroll_y = 0) {
   const ImageMap images;
-  return BuildPageForDocument(toy::dom::ParseDocument(html), nullptr, images, viewport_width,
+  return BuildPageForDocument(toy::dom::ParseDocument(html), nullptr, images, nullptr,
+                              viewport_width, viewport_height, scroll_y);
+}
+
+// The same pipeline with a real font selected (the M8b path).
+DisplayList BuildFontPage(const std::string& html, const std::shared_ptr<const Font>& font,
+                          int viewport_width = 800, int viewport_height = 600, int scroll_y = 0) {
+  const ImageMap images;
+  return BuildPageForDocument(toy::dom::ParseDocument(html), nullptr, images, font, viewport_width,
                               viewport_height, scroll_y);
 }
 
@@ -91,10 +103,12 @@ std::shared_ptr<const Image> MakeImage(int width, int height, std::uint32_t argb
 }
 
 // The pipeline for a page whose first <img> is a replaced box with `intrinsic`
-// size and whose node id maps to `image`.
-DisplayList BuildImagePage(const std::string& html, const ReplacedSize& intrinsic,
-                           const std::shared_ptr<const Image>& image, int viewport_width = 800,
-                           int viewport_height = 600, int scroll_y = 0) {
+// size and whose node id maps to `image`. `font` selects real-font text or, when
+// null, the frozen bitmap path.
+DisplayList BuildFontImagePage(const std::string& html, const ReplacedSize& intrinsic,
+                               const std::shared_ptr<const Image>& image,
+                               const std::shared_ptr<const Font>& font, int viewport_width = 800,
+                               int viewport_height = 600, int scroll_y = 0) {
   const Document document = toy::dom::ParseDocument(html);
   const NodeId image_node = FindImageNode(document);
   ReplacedSizes sizes;
@@ -105,7 +119,16 @@ DisplayList BuildImagePage(const std::string& html, const ReplacedSize& intrinsi
   if (image_node != toy::dom::kInvalidNode) {
     images.emplace(image_node, image);
   }
-  return BuildPageForDocument(document, &sizes, images, viewport_width, viewport_height, scroll_y);
+  return BuildPageForDocument(document, &sizes, images, font, viewport_width, viewport_height,
+                              scroll_y);
+}
+
+// The same pipeline painted with the built-in bitmap font.
+DisplayList BuildImagePage(const std::string& html, const ReplacedSize& intrinsic,
+                           const std::shared_ptr<const Image>& image, int viewport_width = 800,
+                           int viewport_height = 600, int scroll_y = 0) {
+  return BuildFontImagePage(html, intrinsic, image, nullptr, viewport_width, viewport_height,
+                            scroll_y);
 }
 
 // A page laid out with replaced sizes but painted with an empty image map: the
@@ -120,7 +143,8 @@ DisplayList BuildReplacedPageWithoutImages(const std::string& html, const Replac
     sizes.emplace(image_node, intrinsic);
   }
   const ImageMap images;
-  return BuildPageForDocument(document, &sizes, images, viewport_width, viewport_height, scroll_y);
+  return BuildPageForDocument(document, &sizes, images, nullptr, viewport_width, viewport_height,
+                              scroll_y);
 }
 
 void ExpectSize(const DisplayList& list, std::size_t expected, const char* description) {
@@ -215,6 +239,32 @@ void ExpectDrawText(const DisplayList& list, std::size_t index, std::string_view
   toy_test::Check(matches, description);
 }
 
+// One real-font text command: kDrawText with the selected font, a baseline y,
+// the box x, the preserved text/size/color and no image.
+void ExpectDrawTextWithFont(const DisplayList& list, std::size_t index,
+                            const std::shared_ptr<const Font>& font, std::string_view text, int x,
+                            int baseline_y, float font_size_px, std::uint32_t color,
+                            const char* description) {
+  if (index >= list.size()) {
+    std::fprintf(stderr, "paint display list test: missing command %zu: %s\n", index, description);
+    toy_test::Check(false, description);
+    return;
+  }
+  const Command& command = list.commands()[index];
+  const bool matches = command.kind == CommandKind::kDrawText && command.font == font &&
+                       command.text == text && command.x == x && command.y == baseline_y &&
+                       command.font_size_px == font_size_px && command.color == color;
+  if (!matches) {
+    std::fprintf(stderr,
+                 "paint display list test: command %zu is not the expected font DrawText "
+                 "\"%s\" x=%d baseline-y=%d font-size=%.1f color=0x%08X: %s\n",
+                 index, command.text.c_str(), command.x, command.y,
+                 static_cast<double>(command.font_size_px),
+                 static_cast<unsigned int>(command.color), description);
+  }
+  toy_test::Check(matches, description);
+}
+
 void ExpectDrawImage(const DisplayList& list, std::size_t index, int x, int y, int width,
                      int height, const std::shared_ptr<const Image>& expected_image,
                      const char* description) {
@@ -239,14 +289,46 @@ void ExpectDrawImage(const DisplayList& list, std::size_t index, int x, int y, i
 bool SameCommand(const Command& lhs, const Command& rhs) {
   return lhs.kind == rhs.kind && lhs.x == rhs.x && lhs.y == rhs.y && lhs.width == rhs.width &&
          lhs.height == rhs.height && lhs.color == rhs.color && lhs.text == rhs.text &&
-         lhs.font_size_px == rhs.font_size_px && lhs.image == rhs.image;
+         lhs.font_size_px == rhs.font_size_px && lhs.image == rhs.image && lhs.font == rhs.font;
 }
 
 // Equality of everything except the y screen position, for scroll comparisons.
 bool SameCommandExceptY(const Command& lhs, const Command& rhs) {
   return lhs.kind == rhs.kind && lhs.x == rhs.x && lhs.width == rhs.width &&
          lhs.height == rhs.height && lhs.color == rhs.color && lhs.text == rhs.text &&
-         lhs.font_size_px == rhs.font_size_px && lhs.image == rhs.image;
+         lhs.font_size_px == rhs.font_size_px && lhs.image == rhs.image && lhs.font == rhs.font;
+}
+
+// True when every command uses the built-in bitmap text path (no real font).
+bool NoCommandHasFont(const DisplayList& list) {
+  for (const Command& command : list.commands()) {
+    if (command.font) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Renders a list over white, exactly like the shell's page painting pipeline.
+Surface RenderList(const DisplayList& list, int width, int height) {
+  Surface surface(width, height);
+  surface.Fill(0xFFFFFFFFu);
+  DrawDisplayList(list, surface);
+  return surface;
+}
+
+bool SamePixels(const Surface& lhs, const Surface& rhs) {
+  if (lhs.width() != rhs.width() || lhs.height() != rhs.height()) {
+    return false;
+  }
+  for (int y = 0; y < lhs.height(); ++y) {
+    for (int x = 0; x < lhs.width(); ++x) {
+      if (lhs.At(x, y) != rhs.At(x, y)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 // A default-constructed BoxTree has no root; paint must not touch the other
@@ -256,7 +338,8 @@ void TestEmptyBoxTree() {
   const toy::style::StyleTree styles = toy::style::ComputeStyles(document);
   const BoxTree boxes;
   const ImageMap images;
-  const DisplayList list = BuildDisplayList(document, styles, boxes, Viewport{800, 600, 0}, images);
+  const DisplayList list =
+      BuildDisplayList(document, styles, boxes, Viewport{800, 600, 0}, images, nullptr);
   ExpectSize(list, 0, "an empty box tree yields an empty display list");
 }
 
@@ -535,7 +618,7 @@ void TestMissingNodeIdPaintsNoImage() {
       break;
     }
   }
-  const DisplayList list = BuildPageForDocument(document, &sizes, images, 800, 600, 0);
+  const DisplayList list = BuildPageForDocument(document, &sizes, images, nullptr, 800, 600, 0);
   ExpectSize(list, 2, "an image keyed by the wrong node id paints no DrawImage");
   ExpectViewportClip(list, 800, 600, "the page with an unmatched image key keeps the clip pair");
 }
@@ -550,9 +633,162 @@ void TestBlockReplacedPaintsNoImage() {
   ExpectViewportClip(list, 800, 600, "the block-image page keeps the viewport clip pair");
 }
 
+// The null-font path must reproduce the pre-M8b command list exactly: every
+// command matches the hand-built M8a list (the 5-argument build semantics), no
+// command carries a font, and rendering the list yields the same bitmap pixels.
+void TestNullFontMatchesPreM8bList() {
+  const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFFFF0000u);
+  const std::string html =
+      "<div style=\"background-color: #102030; width: 100px; height: 40px\"></div>"
+      "<p><img></p><p style=\"color: #00ff00\">Hi</p>";
+  const DisplayList list = BuildFontImagePage(html, ReplacedSize{16.0f, 8.0f}, image, nullptr);
+  ExpectSize(list, 5, "the mixed page yields clip, background, image, text and pop");
+
+  // The exact M8a command sequence for this page, built by hand.
+  DisplayList reference;
+  reference.PushClip(0, 0, 800, 600);
+  reference.FillRect(8, 8, 100, 40, 0xFF102030u);
+  reference.DrawImage(image, 8, 64, 16, 8);
+  reference.DrawText("Hi", 8, 104, 16.0f, 0xFF00FF00u);
+  reference.PopClip();
+
+  bool identical = list.size() == reference.size();
+  for (std::size_t index = 0; identical && index < list.size(); ++index) {
+    identical = SameCommand(list.commands()[index], reference.commands()[index]);
+  }
+  if (!identical) {
+    std::fprintf(stderr,
+                 "paint display list test: the null-font list differs from the pre-M8b list\n");
+  }
+  toy_test::Check(identical, "a null font reproduces the pre-M8b command list command by command");
+  toy_test::Check(NoCommandHasFont(list), "no command of the null-font list carries a font");
+
+  // Rendering must be unchanged too: the bitmap text pixels and the image are
+  // identical to the pre-M8b list rendered the same way.
+  const Surface actual = RenderList(list, 800, 600);
+  const Surface expected = RenderList(reference, 800, 600);
+  toy_test::Check(SamePixels(actual, expected), "a null font keeps the rendered bitmap pixels");
+  toy_test::Check(actual.At(9, 107) == 0xFF00FF00u && actual.At(8, 107) == 0xFFFFFFFFu,
+                  "the null-font list still paints the opaque bitmap glyph at the box top");
+}
+
+// With a real font each text box becomes a baseline-positioned text command:
+// baseline = round(box.y) - scroll_y + round(ascent at the computed size).
+void TestRealFontBaseline(const std::shared_ptr<const Font>& font) {
+  toy_test::Check(std::lround(font->AscentPx(16.0f)) == 13,
+                  "the fixture font ascent at 16 px rounds to 13 device pixels");
+
+  const DisplayList bitmap = BuildPage("<p>Hi</p>");
+  ExpectSize(bitmap, 3, "the bitmap page has one text command between its clip pair");
+  ExpectDrawText(bitmap, 1, "Hi", 8, 24, 16.0f, 0xFF000000u,
+                 "the null-font page keeps the M8a bitmap command at the box top");
+
+  const DisplayList real = BuildFontPage("<p>Hi</p>", font);
+  ExpectSize(real, 3, "the real-font page has one text command between its clip pair");
+  ExpectViewportClip(real, 800, 600, "the real-font page keeps the viewport clip pair");
+  ExpectDrawTextWithFont(real, 1, font, "Hi", 8, 37, 16.0f, 0xFF000000u,
+                         "the 16 px baseline is 24 + round(12.8) = 37");
+  toy_test::Check(real.commands()[1].x == bitmap.commands()[1].x &&
+                      real.commands()[1].text == bitmap.commands()[1].text &&
+                      real.commands()[1].font_size_px == bitmap.commands()[1].font_size_px,
+                  "selecting a real font keeps the text box x, text and size");
+  toy_test::Check(real.commands()[1].y - bitmap.commands()[1].y == 13,
+                  "selecting a real font moves the text command down by the rounded ascent");
+  toy_test::Check(real.commands()[1].font == font && bitmap.commands()[1].font == nullptr,
+                  "only the real-font path records a font on the text command");
+}
+
+// The ascent is rounded to nearest device pixel at every computed size; the
+// fixture font's 0.8 em ascent gives both a rounded-up and a rounded-down case.
+void TestRealFontBaselineRounding(const std::shared_ptr<const Font>& font) {
+  toy_test::Check(std::lround(font->AscentPx(32.0f)) == 26,
+                  "the fixture font ascent at 32 px rounds to 26 device pixels");
+  toy_test::Check(std::lround(font->AscentPx(8.0f)) == 6,
+                  "the fixture font ascent at 8 px rounds to 6 device pixels");
+
+  const DisplayList large =
+      BuildFontPage("<p style=\"color: #ff0000; font-size: 32px\">H</p>", font);
+  ExpectSize(large, 3, "a 32 px real-font page has one text command");
+  ExpectDrawTextWithFont(large, 1, font, "H", 8, 50, 32.0f, 0xFFFF0000u,
+                         "the 32 px baseline is 24 + round(25.6) = 50");
+
+  const DisplayList small = BuildFontPage("<p style=\"font-size: 8px\">H</p>", font);
+  ExpectSize(small, 3, "an 8 px real-font page has one text command");
+  ExpectDrawTextWithFont(small, 1, font, "H", 8, 30, 8.0f, 0xFF000000u,
+                         "the 8 px baseline is 24 + round(6.4) = 30");
+}
+
+// Scrolling translates the baseline by -scroll_y; x, ordering and the viewport
+// clip pair stay exactly as in the bitmap path.
+void TestRealFontScrollAndClip(const std::shared_ptr<const Font>& font) {
+  const std::string html = "<p>Hi</p>";
+  const DisplayList top = BuildFontPage(html, font, 320, 200, 0);
+  const DisplayList scrolled = BuildFontPage(html, font, 320, 200, 40);
+  ExpectSize(top, 3, "the unscrolled real-font page is painted in pre-order");
+  ExpectSize(scrolled, 3, "the scrolled real-font page has the same commands");
+  ExpectViewportClip(top, 320, 200, "the real-font page is clipped to the viewport");
+  ExpectDrawTextWithFont(top, 1, font, "Hi", 8, 37, 16.0f, 0xFF000000u,
+                         "the real-font baseline starts at its page position");
+  ExpectDrawTextWithFont(scrolled, 1, font, "Hi", 8, -3, 16.0f, 0xFF000000u,
+                         "scrolling translates the real-font baseline by -scroll_y and keeps x");
+  toy_test::Check(SameCommand(top.commands().front(), scrolled.commands().front()) &&
+                      SameCommand(top.commands().back(), scrolled.commands().back()),
+                  "scrolling leaves the real-font viewport clip pair unchanged");
+}
+
+// Paint order is unchanged with a real font: background, then image, then text.
+void TestRealFontOrderingWithImage(const std::shared_ptr<const Font>& font) {
+  const std::shared_ptr<const Image> image = MakeImage(16, 8, 0xFFFF0000u);
+  const std::string html =
+      "<div style=\"background-color: #102030; width: 100px; height: 40px\"></div>"
+      "<p><img></p><p>Hi</p>";
+  const DisplayList list = BuildFontImagePage(html, ReplacedSize{16.0f, 8.0f}, image, font);
+  ExpectSize(list, 5, "the mixed real-font page keeps clip, background, image, text and pop");
+  ExpectPushClip(list, 0, 0, 0, 800, 600, "the mixed real-font page keeps the viewport clip");
+  ExpectFillRect(list, 1, 8, 8, 100, 40, 0xFF102030u, "the background is painted first");
+  ExpectDrawImage(list, 2, 8, 64, 16, 8, image, "the image follows the background");
+  ExpectDrawTextWithFont(list, 3, font, "Hi", 8, 117, 16.0f, 0xFF000000u,
+                         "real-font text follows the image at 104 + round(12.8) = 117");
+  ExpectPopClip(list, 4, "the mixed real-font page keeps the viewport pop");
+}
+
+// Building the same real-font page twice yields identical command lists.
+void TestRealFontDeterministic(const std::shared_ptr<const Font>& font) {
+  const std::string html =
+      "<div style=\"background-color: #102030\"><p style=\"color: #00ff00\">Hello</p></div>";
+  const DisplayList first = BuildFontPage(html, font);
+  const DisplayList second = BuildFontPage(html, font);
+  ExpectSize(first, 4, "the real-font fixture yields one background and one text command");
+  bool identical = first.size() == second.size();
+  for (std::size_t index = 0; identical && index < first.size(); ++index) {
+    identical = SameCommand(first.commands()[index], second.commands()[index]);
+  }
+  if (!identical) {
+    std::fprintf(stderr, "paint display list test: two real-font builds of one page differ\n");
+  }
+  toy_test::Check(identical, "building the same real-font page twice yields identical commands");
+
+  // Font selection only changes the text commands; everything else is frozen.
+  const DisplayList bitmap = BuildPage(html);
+  bool same_except_text = bitmap.size() == first.size();
+  for (std::size_t index = 0; same_except_text && index < first.size(); ++index) {
+    const Command& before = bitmap.commands()[index];
+    const Command& after = first.commands()[index];
+    same_except_text = before.kind == after.kind && before.x == after.x;
+    if (after.kind == CommandKind::kDrawText) {
+      same_except_text = same_except_text && after.font == font && before.font == nullptr &&
+                         after.y == before.y + 13;
+    } else {
+      same_except_text = same_except_text && SameCommand(before, after);
+    }
+  }
+  toy_test::Check(same_except_text,
+                  "selecting a real font changes only the text command's font and baseline");
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   TestEmptyBoxTree();
   TestNoPaintableBoxes();
   TestBlockBackground();
@@ -574,5 +810,26 @@ int main() {
   TestEmptyImageMapKeepsM7List();
   TestMissingNodeIdPaintsNoImage();
   TestBlockReplacedPaintsNoImage();
+  TestNullFontMatchesPreM8bList();
+
+  // The real-font tests load the committed self-authored fixture font. CMake
+  // passes its directory as argv[1], so no installed font is ever required.
+  if (argc < 2) {
+    std::fprintf(stderr, "paint display list test: missing font fixture directory argument\n");
+    return 1;
+  }
+  const std::string font_path = std::string(argv[1]) + "/toy_test.ttf";
+  std::string font_error;
+  const std::shared_ptr<const Font> font = Font::LoadFromFile(font_path, &font_error);
+  if (!font) {
+    std::fprintf(stderr, "paint display list test: cannot load %s: %s\n", font_path.c_str(),
+                 font_error.c_str());
+    return 1;
+  }
+  TestRealFontBaseline(font);
+  TestRealFontBaselineRounding(font);
+  TestRealFontScrollAndClip(font);
+  TestRealFontOrderingWithImage(font);
+  TestRealFontDeterministic(font);
   return toy_test::Finish("paint display list");
 }

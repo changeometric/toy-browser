@@ -18,14 +18,17 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M6 | `render` display list + software rasterizer + hand-authored 8x16 ASCII glyphs, `paint` box-tree-to-display-list module, window/`--screenshot` painting with an optional positional page URL |
 | M7 | Navigation: headless `shell::Browser` (final URL, history, scroll, title), `net::ResolveUrl`, box hit-testing, scroll-clipped painting, X11 click/wheel/keys + window titles, committed demo site, `shell.navigation` test |
 | M8a | PNG images: `render::Image` + libpng decoder behind `render::DecodePng`, `DrawImage` display-list command/rasterizer, replaced inline `<img>` layout from caller-supplied intrinsic sizes, private shell page loader (fetch/resolve/decode/skip failures), image fixtures and `tests/fixtures/img_site/`, 46 tests |
+| M8b | Real fonts: `render::Font` (freetype metrics/rasterization + harfbuzz shaping, 4096 px effective size cap) behind a frozen pimpl, anti-aliased `DrawTextWithFont` with baseline placement, `--font PATH` / `--font-family NAME` (fontconfig) selection, self-authored font fixture and `tests/fixtures/font_site/`, 55 tests; the bitmap path stayed byte-identical |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-Not implemented yet: real TTF fonts (M8b), JavaScript (M9), `https`/TLS, proxies, external
-stylesheets, borders, anti-aliased text, horizontal scrolling/scrollbars, hover/active link styling
-and form controls. PNG images work since M8a (see the M8a known limits in [roadmap.md](roadmap.md)). The window and
-`--screenshot` paint a real page when a URL is given and the M1 placeholder page otherwise; with a
-page URL the window is also browsable (links, wheel/keyboard scrolling, Alt+Left/Right history,
-`<title>`). The `--dump-*` modes remain the primary debugging path.
+Not implemented yet: JavaScript (M9), `https`/TLS, proxies, external stylesheets, borders,
+horizontal scrolling/scrollbars, hover/active link styling and form controls, and CSS-driven font
+selection (`font-family`/`font-weight`/`font-style`, fallback chains, `@font-face`). PNG images work
+since M8a and real TTF text since M8b, both opt-in for fonts (see the M8a/M8b known limits in
+[roadmap.md](roadmap.md)). The window and `--screenshot` paint a real page when a URL is given and
+the M1 placeholder page otherwise; with a page URL the window is also browsable (links,
+wheel/keyboard scrolling, Alt+Left/Right history, `<title>`). The `--dump-*` modes remain the
+primary debugging path.
 
 ## Verify the current state (no context needed)
 
@@ -46,22 +49,33 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 46/46 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 55/55 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
-or newer is required; building needs the X11 development headers and the libpng development
-headers (both approved dependencies); only windowed mode needs a running display.
+or newer is required; building needs the X11, libpng, freetype, harfbuzz and fontconfig development
+headers (all approved dependencies); only windowed mode needs a running display.
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
     "file://$PWD/tests/fixtures/img_site/index.html" && file /tmp/toybrowser-img.ppm
 "$BUILD"/toybrowser --size 320x200 --dump-boxes \
     "file://$PWD/tests/fixtures/img_site/index.html" | grep '<img>'
+
+# Real fonts: the committed self-authored fixture is deterministic and installed fonts are only
+# for manual demos (e.g. --font-family "DejaVu Sans").
+"$BUILD"/toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x600 \
+    --screenshot /tmp/toybrowser-font.ppm "file://$PWD/tests/fixtures/font_site/index.html" \
+    && file /tmp/toybrowser-font.ppm
+"$BUILD"/toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x200 --dump-boxes \
+    "file://$PWD/tests/fixtures/font_site/index.html"
+"$BUILD"/toybrowser --font-family "DejaVu Sans" --size 400x200 \
+    --screenshot /tmp/toybrowser-dejavu.ppm "file://$PWD/tests/fixtures/nav_site/index.html"
 ```
 
-Expected: the screenshot renders the committed PNG fixtures (flags, alpha, gray, palette) and the
-box dump contains `<img> inline` boxes with their intrinsic/CSS sizes; `missing.png` reserves no
-box.
+Expected: the image screenshot renders the committed PNG fixtures (flags, alpha, gray, palette) and
+the box dump contains `<img> inline` boxes with their intrinsic/CSS sizes; `missing.png` reserves
+no box. The fixture-font box dump shows real-font metrics (e.g. `<h1>` text "ABC" width 58 at 32 px
+instead of the bitmap font's 48); without a font flag every page keeps the bitmap output.
 
 ```sh
 "$BUILD"/toybrowser --size 400x200 --screenshot /tmp/toybrowser-nav.ppm \
@@ -72,33 +86,26 @@ Window demo (needs a display):
 
 ```sh
 "$BUILD"/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"
-"$BUILD"/toybrowser --size 400x200 "file://$PWD/tests/fixtures/nav_site/index.html"
-# img page: check the PNG images are painted; nav page: click "About page", scroll with the
-# wheel/arrows/PageUp/PageDown/Home/End, Alt+Left/Right for history; the title follows <title>.
+"$BUILD"/toybrowser --font-family "DejaVu Sans" --size 400x200 \
+    "file://$PWD/tests/fixtures/nav_site/index.html"
+# img page: check the PNG images are painted; real-font page: check anti-aliased text; nav page:
+# click "About page", scroll with the wheel/arrows/PageUp/PageDown/Home/End, Alt+Left/Right for
+# history; the title follows <title>.
 ```
 
-## Next round: M8b — real fonts (libraries approved)
+## Next round: M9 — JavaScript subset (optional, large; needs the user's priority)
 
-- Goal: real TTF text: freetype for metrics and glyph rasterization, harfbuzz for shaping and
-  fontconfig for installed-font discovery/matching. The user approved all three libraries on
-  2026-10-31 and clarified that "from scratch" applies to browser functionality, not low-level
-  codecs/font machinery (recorded in [dependencies.md](dependencies.md) and
-  [decisions.md](decisions.md)). Development packages must be installed by the user where missing;
-  agents never install anything.
-- Preliminary scope: `render` gains a font backend (loading, metrics, shaped advances, anti-aliased
-  glyph coverage) replacing or extending the built-in 8x16 bitmap font on the TTF path; `layout`
-  keeps consuming text metrics through the existing `MeasureText` callback (baseline information
-  may be added to the contract); `paint` places real glyphs and paint emits coverage text; font
-  selection/fallback (a default or configured font) is frozen at the start of the round. Bitmap-font
-  output for pages that do not opt into a TTF font should stay unchanged.
-- Tests must stay deterministic and must not depend on installed fonts: a committed/generated font
-  fixture drives the tests; real installed fonts are for manual demos only.
-- Done when a page with real TTF text and at least one image renders (the original M8 acceptance),
-  with all existing tests (46), GCC/Clang warning-free builds and M8a image behavior green.
-- Still out of scope: JavaScript (M9), forms, `https`/TLS, proxies, external CSS.
+- Goal: a tiny ES5-like subset: lexer, parser, small interpreter, DOM bindings and event handlers,
+  enough for a fixture page's script to mutate the DOM and have the change painted.
+- This is a large, optional milestone: confirm with the user that it is the desired next step (the
+  backlog below is the alternative). It needs new modules/packages design work
+  (`docs/architecture.md` lists a `js` module), but no new dependency.
+- Acceptance sketch: a fixture page runs a script, mutates the DOM and the mutated content renders
+  headlessly (`--screenshot`/a dump), with the existing 55 tests and GCC/Clang warning-free builds.
+- Still out of scope for now: forms, `https`/TLS, proxies, external CSS.
 
-Backlog after M8b (details in [roadmap.md](roadmap.md)): proxy support, TLS, more image formats/
-background images, and test-helper migration.
+Backlog instead of/after M9 (details in [roadmap.md](roadmap.md)): proxy support, TLS, CSS font
+selection/fallback chains, more image formats/background images, and test-helper migration.
 
 ## Map of the repository
 
@@ -108,14 +115,19 @@ background images, and test-helper migration.
   paint → dump/present, and `toy/shell/browser.h` owns one browser session (history, scroll, clicks,
   title).
 - `src/shell/page.h` — shell-private page loader (final URL, DOM, styles, box tree, decoded images);
-  `src/render/include/toy/render/image.h` — `Image` and the libpng-backed `DecodePng`; the display
-  list + rasterizer live in `toy/render/paint.h`, and `src/paint/` builds the list from the box tree
-  without rasterizing. `src/render/include/toy/render/font.h` — bitmap-font metrics; `layout`
-  consumes them through a `shell`-supplied callback and has no `render` dependency.
+  `src/render/include/toy/render/image.h` — `Image` and the libpng-backed `DecodePng`;
+  `src/render/include/toy/render/font.h` — bitmap-font metrics plus the real `Font` API (load,
+  metrics, shaped advances; no freetype/harfbuzz types in the header), implemented by
+  `src/render/font_ttf.cpp`; the display list + rasterizer live in `toy/render/paint.h`, and
+  `src/paint/` builds the list from the box tree without rasterizing. `src/shell/application.cpp`
+  owns font selection (`--font`/`--font-family`, the only fontconfig user). `layout` consumes text
+  metrics through a `shell`-supplied callback and has no `render` dependency.
 - `tests/<module>/` — one executable per subject, registered with CTest; new tests use the
   header-only `tests/support/check.h`. Committed fixtures: `tests/fixtures/nav_site/` (three-page
-  navigation demo), `tests/fixtures/img_site/` (image pipeline demo), `tests/fixtures/images/`
-  (hand-generated PNGs with documented pixel content).
+  navigation demo), `tests/fixtures/img_site/` (image pipeline demo), `tests/fixtures/font_site/`
+  (real-font + image demo), `tests/fixtures/images/` (hand-generated PNGs with documented pixel
+  content), `tests/fixtures/fonts/` (self-authored minimal TTF with documented metrics/family; the
+  tests never use installed fonts).
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
   questions (this file is the snapshot).
 - Shared task board — provided by the agent runtime (task create/claim/update with revision); if
@@ -129,7 +141,11 @@ background images, and test-helper migration.
 - CLI modes, flags and exit codes: `0` success, `1` runtime error, `2` usage error. The optional
   positional page URL (`toybrowser [options] [url]`) is used only by window mode and
   `--screenshot`; at most one URL, it must not be combined with a `--dump-*` mode, and no URL keeps
-  the M1 placeholder page.
+  the M1 placeholder page. M8b adds `--font PATH` and `--font-family NAME`: each needs a non-empty
+  argument, they are mutually exclusive, and both are usage errors (exit 2) with
+  `--dump-body`/`--dump-dom`/`--dump-style`; they are allowed with window mode, `--screenshot` and
+  `--dump-boxes`. A selected font that cannot be loaded/resolved is a runtime error (exit 1);
+  without either flag the built-in bitmap font is used (the pre-M8b behavior).
 - Dump formats (DOM, style, boxes): deterministic, line-oriented, asserted by tests; any change
   needs tests and docs in the same round. The box dump is pre-order lines of
   `<tag> block|inline`, `anonymous block` or `text "..."` followed by `x= y= width= height=`, all
@@ -158,7 +174,23 @@ background images, and test-helper migration.
   `((dx - x) * image.width / width, (dy - y) * image.height / height)` with integer floor division
   (nearest-neighbour, no interpolation/AA), composited with the same SrcOver formula (alpha 0 no-op,
   alpha 255 writes `0xFF000000 | rgb`, result opaque); an empty image map reproduces the pre-M8a
-  command list exactly.
+  command list exactly. M8b real-font text: when the session selected a font, each text box becomes
+  a `DrawTextWithFont` command (x = pen origin, y = baseline in device pixels, baseline =
+  `round(box.y) - scroll_y + round(font->AscentPx(size))`), the font is kept by shared reference,
+  glyphs are shaped by harfbuzz and rasterized by freetype as 8-bit coverage, placed with the frozen
+  per-glyph integer formula (26.6 pen rounded to device pixels, ties away from zero, plus freetype
+  bitmap_left/top), composited with the same SrcOver formula using coverage as alpha (result
+  opaque), clipped to the current clip rectangle, and the effective size is clamped to
+  `kMaxRealFontSizePx` (4096 px). With no font selected the frozen bitmap command list is emitted
+  unchanged (`DrawText`, top-of-cell y, opaque unaliased pixels).
+
+- Real-font contract (M8b): `render::Font` is immutable after loading (pimpl, no freetype/harfbuzz
+  type in a public header), loading failures are ordinary errors, face 0 only, metrics are design
+  units scaled by `size / unitsPerEm`, advance widths are harfbuzz-shaped 26.6 sums. The shell
+  resolves one font per run (`--font` file or fontconfig's best match for `--font-family`, with
+  fallback for unknown families) and shares it with layout metrics and painting; one face applies
+  to the whole session (no per-element CSS font selection yet). Fontconfig is a shell-only
+  dependency; freetype/harfbuzz are private to `render`.
 - Image decoding contract (`render::DecodePng`): PNG only, via the approved libpng dependency behind
   the interface, output straight-alpha ARGB `render::Image`; accepted sizes are each side at most
   8192 px and at most 16,777,216 pixels in total (inclusive maxima), rejected before allocation;
@@ -276,3 +308,29 @@ background images, and test-helper migration.
 - Image loading has no cache and no lazy loading: every `<img>` occurrence is fetched, even one
   hidden by `display:none` or far below the viewport. That is a documented M8a MVP limit, not a
   bug; only add caching/lazy loading with a contract change.
+- M8b adds a hard byte-compatibility gate: without `--font`/`--font-family`, every pre-M8b dump and
+  screenshot must stay `cmp`-identical to the M8a baseline; the real-font path is entirely opt-in.
+  Rerun a `git worktree` baseline of the previous commit after any painting/font change.
+- Real-font tests must use the committed self-authored fixture `tests/fixtures/fonts/toy_test.ttf`
+  and never installed fonts; the fontconfig CLI test points `FONTCONFIG_FILE` at a generated config
+  whose only `<dir>` is the fixture fonts. Installed fonts (e.g. DejaVu Sans) are for manual demos.
+- Do not assert exact freetype coverage bytes in tests: anti-aliased pixels are library-version
+  dependent. `render.paint` asserts ink regions, AA presence, clip bounds, no-ops and determinism;
+  `shell.fonts` asserts page regions and the frozen layout geometry. GCC and Clang must still
+  produce byte-identical PPMs on the same machine/library versions.
+- The real-font effective size is clamped to `kMaxRealFontSizePx` (4096 px) in metrics, shaping and
+  rasterization. Sizes above behave exactly like 4096, so a hostile CSS `font-size` cannot make
+  freetype allocate an unbounded glyph bitmap; the bitmap path keeps its own guard.
+- `Font` mutates its shared freetype face size internally between measure/draw calls: never share
+  one `Font` across threads (the MVP is single-threaded). `DrawTextWithFont` with a null font
+  appends no command; the bitmap path is `DrawText` with a null font and top-of-cell y.
+- The shell's font fixture geometry (`shell.fonts*` dump regexes) is hardcoded from
+  `toybrowser --font tests/fixtures/fonts/toy_test.ttf --size 320x200 --dump-boxes`; changing the
+  fixture, its metrics or the font pipeline means updating those constants in the same change, as
+  with the M7/M8a fixture geometry.
+- `--font-family` uses fontconfig's normal semantics: an unknown family returns its best match and
+  does not error, face 0 of the matched file is used, and TTC/face index is ignored. The M8b MVP
+  supports one font per session; per-element CSS `font-family`/weight/style is future work.
+- `src/render/CMakeLists.txt` now `find_package`s freetype (config/module) and harfbuzz (CONFIG,
+  target `harfbuzz::harfbuzz`); `src/shell/CMakeLists.txt` finds fontconfig (target
+  `Fontconfig::Fontconfig`). All stay PRIVATE, no versions/paths are hardcoded.

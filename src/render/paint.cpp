@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "font_internal.h"
+#include "font_ttf_internal.h"
 #include "toy/render/font.h"
 
 namespace toy::render {
@@ -33,6 +34,25 @@ void DisplayList::DrawText(std::string_view text_utf8, int x, int y, float font_
   command.text = std::string(text_utf8);
   command.font_size_px = font_size_px;
   commands_.push_back(command);
+}
+
+void DisplayList::DrawTextWithFont(std::shared_ptr<const Font> font, std::string_view text_utf8,
+                                   int x, int y, float font_size_px, Argb color) {
+  // A null font cannot paint real text, and the command format cannot express a
+  // real-font command without a font (a null `font` means the bitmap path), so
+  // the frozen no-op behavior for a null font is to append no command at all.
+  if (font == nullptr) {
+    return;
+  }
+  Command command;
+  command.kind = CommandKind::kDrawText;
+  command.x = x;
+  command.y = y;
+  command.color = color;
+  command.text = std::string(text_utf8);
+  command.font_size_px = font_size_px;
+  command.font = std::move(font);
+  commands_.push_back(std::move(command));
 }
 
 void DisplayList::DrawImage(std::shared_ptr<const Image> image, int x, int y, int width,
@@ -298,7 +318,15 @@ void DrawDisplayList(const DisplayList& list, Surface& surface) {
         PaintFillRect(command, surface, clip);
         break;
       case CommandKind::kDrawText:
-        PaintText(command, surface, clip);
+        if (command.font != nullptr) {
+          // `y` is the baseline for real-font text; the bitmap path keeps its
+          // frozen top-of-cell semantics (null font).
+          internal::FontRasterizer::DrawText(*command.font, command.text, command.x, command.y,
+                                             command.font_size_px, command.color, surface, clip.x,
+                                             clip.y, clip.width, clip.height);
+        } else {
+          PaintText(command, surface, clip);
+        }
         break;
       case CommandKind::kDrawImage:
         PaintImage(command, surface, clip);

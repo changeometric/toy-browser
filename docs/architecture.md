@@ -9,7 +9,7 @@ speculative — abstractions are added when a real slice needs them.
 | --- | --- | --- | --- |
 | `base` | Small shared utilities (geometry, logging, UTF-8), only when a need appears | — | when first needed |
 | `platform` | Window, input events, event loop, presenting pixel surfaces | `base` | M1 |
-| `render` | Display list, software rasterizer, built-in bitmap font (metrics and glyphs), PNG image decoding (via the approved libpng dependency) | `base` | M1 |
+| `render` | Display list, software rasterizer, built-in bitmap font (metrics and glyphs), PNG image decoding (approved libpng), real-font engine (approved freetype + harfbuzz) | `base` | M1 |
 | `net` | URL parsing, sockets, HTTP/1.1 fetch | `base` | M2 |
 | `dom` | HTML tokenizer, tree builder, DOM arena | `base` | M3 |
 | `css` | CSS tokenizer, rule/declaration parser, selectors | `base` | M4 |
@@ -17,7 +17,7 @@ speculative — abstractions are added when a real slice needs them.
 | `layout` | Box tree, block/inline layout, line breaking | `dom`, `style`, a text-measurement callback from `shell` | M5 |
 | `paint` | Display list construction from the box tree (element backgrounds and text) | `dom`, `style`, `layout`, `render` | M6 |
 | `js` | Small JavaScript engine and DOM bindings (optional, last) | `dom`, `base` | M9 |
-| `shell` | Navigation, pipeline orchestration, window chrome | all | M1 |
+| `shell` | Navigation, pipeline orchestration, window chrome, font selection (approved fontconfig for family lookup) | all | M1 |
 
 Dependencies point downward only; no cycles. `render` knows nothing about HTML/CSS (it consumes
 display lists); `paint` knows the DOM/style/layout data but never rasterizes; `platform` knows
@@ -72,7 +72,8 @@ the raw CSS.
 Layout (M5): `layout` turns the style tree into a `BoxTree` with absolute CSS-pixel geometry.
 Line breaking needs text metrics, so `LayoutDocument()` takes a `MeasureText` callback (standard
 types only) supplied by `shell`; the built-in monospace bitmap-font metrics live in `render`, and
-`shell` adapts them. This keeps the dependency direction intact: no `layout` → `render` edge and no
+`shell` adapts them — or, for a real-font session, adapts the selected font's shaped advances and
+line height (M8b) without layout knowing about fonts. This keeps the dependency direction intact: no `layout` → `render` edge and no
 font code duplicated in `layout`. `DumpBoxTree()` is the deterministic text form behind
 `--dump-boxes` and the layout tests. Layout consumes the style tree only: it never reads raw CSS and
 never paints. The geometry is a pure function of its inputs; a summary of the MVP simplifications
@@ -112,6 +113,23 @@ SrcOver formula and clip stack as fills. `shell::Browser` stores the images with
 them, and re-lays-out on resize without refetching; `--dump-boxes` uses the same loader so image
 geometry is part of the dump, while `--dump-dom`/`--dump-style` stay image-free.
 
+Real fonts (M8b): `render::Font` wraps the approved freetype and harfbuzz dependencies behind a
+pimpl: the public header names no freetype/harfbuzz type, loading failures are ordinary errors,
+and the font owns its face bytes and freetype library. Metrics come from the font's design units
+(`ascent = size * ascender / unitsPerEm`, line height from `face->height`), advance widths are
+harfbuzz-shaped at the requested size (26.6 sums), and `internal::FontRasterizer` (private to
+render) shaves 8-bit freetype coverage bitmaps onto the display list's baseline with a frozen
+per-glyph integer placement formula and SrcOver coverage compositing, clipped to the current clip
+rectangle. The effective font size is clamped to `kMaxRealFontSizePx` (4096 px) so adversarial CSS
+cannot request unbounded glyph bitmaps. `paint` emits one `DrawTextWithFont` command per text box
+when the session selected a font (baseline = rounded box top minus scroll plus rounded ascent) and
+the frozen bitmap `DrawText` command otherwise; the display list keeps a shared reference to the
+font, like images. `shell` resolves `--font PATH` or `--font-family NAME` once per run (the latter
+through fontconfig's pattern matching, face 0, best match with fallback for unknown families),
+loads one `Font` and threads it through the page loader (`MeasureText` adapter), `Browser` and
+painting. Fontconfig itself never leaks outside the shell and the font never outside render's
+private implementation. The built-in bitmap path stays the default and is untouched.
+
 Navigation (M7): `shell::Browser` owns one browser session: the current page (final URL, DOM, style
 tree, box tree and decoded images), the navigation history, the integer vertical scroll offset and
 painting. The history is a vector of URLs plus an index; every successful load appends an entry
@@ -140,8 +158,9 @@ the page data behind a forward declaration and an out-of-line destructor.
   references its DOM origin (element or text-node id) and holds an absolute border-box rectangle in
   CSS pixels. Text boxes hold the word placed on their line. Anonymous boxes have no DOM origin.
 - **Display list**: flat `std::vector` of commands (`FillRect`, `DrawText`, `DrawImage`,
-  `PushClip`/`PopClip`); an image command holds a shared reference to an immutable `render::Image`.
-  Commands are integer device pixels.
+  `PushClip`/`PopClip`); an image command holds a shared reference to an immutable `render::Image`,
+  and a real-font text command holds a shared `render::Font` plus a baseline `y` (bitmap text keeps
+  the frozen top-of-cell `y` with a null font). Commands are integer device pixels.
 - **Units**: CSS pixels as `float` in style/layout; device pixels as `int` in the rasterizer.
   MVP assumes 1 CSS px = 1 device px (no zoom, no DPI scaling).
 
@@ -150,7 +169,9 @@ can't form ownership cycles. Revisit only if it actually hurts.
 
 ## Threading and event loop
 
-- One process, one thread, one event loop. No worker threads in the MVP.
+- One process, one thread, one event loop. No worker threads in the MVP. A `render::Font` caches a
+  mutable freetype face size between measures/draws, so it is intentionally single-threaded; do not
+  share one `Font` across threads.
 - A page load runs synchronously inside a navigation callback; the window is unresponsive while
   loading. That is acceptable for the toy, and async networking only arrives if it becomes a real
   problem.
@@ -170,15 +191,23 @@ can't form ownership cycles. Revisit only if it actually hurts.
   huge font size cannot make painting unbounded).
 - The shell fills the canvas white before painting; element `background-color` is painted as that
   element's box (M6 does not propagate `html`/`body` backgrounds to the canvas).
-- Text uses a small built-in bitmap font with hand-authored 8x16 ASCII glyphs, so no font library
-  is needed; glyph cells are scaled to the computed font size with nearest-neighbour sampling and
-  there is no anti-aliasing. Non-ASCII code points render the `?` glyph for now; real TTF text
-  arrives in M8b with the approved freetype/harfbuzz/fontconfig stack.
+- Text defaults to a small built-in bitmap font with hand-authored 8x16 ASCII glyphs: glyph cells
+  are scaled to the computed font size with nearest-neighbour sampling and there is no
+  anti-aliasing, and non-ASCII code points render the `?` glyph. With a real font selected
+  (`--font`/`--font-family`), text is shaped by harfbuzz and rasterized by freetype into 8-bit
+  coverage, placed on the glyph baseline and composited over the opaque destination with coverage
+  as alpha; glyphs are clipped to the current clip rectangle and the effective size is capped at
+  4096 px. The bitmap path remains the fallback and its pixels are frozen.
 - Images are decoded to straight-alpha ARGB (bounds: each side at most 8192 px and at most
   16,777,216 pixels in total) and painted with nearest-neighbour scaling: destination pixel (dx, dy)
   samples source `((dx - x) * width / dst_width, (dy - y) * height / dst_height)` with integer floor
   division, so scaling adds no interpolation or anti-aliasing. Image pixels are composited with the
   same SrcOver formula as rectangle fills.
+- Real-font text is the only anti-aliased drawing path: freetype coverage values are composited
+  with the same SrcOver formula, and the per-glyph integer placement rounds 26.6 pen positions to
+  device pixels (ties away from zero) so the output is deterministic for a given font, size and
+  freetype/harfbuzz version. Tests assert ink regions and AA presence rather than exact coverage
+  bytes, which are library-version dependent.
 - Paint order is the box-tree pre-order: a box paints its background, then its children; there are
   no stacking contexts or z-index yet, so overlapping boxes paint in document order.
 - Presentation: the platform receives a pixel view (pixels, width, height, stride measured in
@@ -236,6 +265,11 @@ can't form ownership cycles. Revisit only if it actually hurts.
   (integer pixels, no anti-aliasing), so paint tests compare exact pixels and cross-compiler runs
   produce byte-identical PPMs; no image tolerance is needed.
 - Tests are deterministic and never need a network, display, installed font or particular locale.
+- M8b real-font tests use the committed self-authored `tests/fixtures/fonts/toy_test.ttf` (never an
+  installed font): `render.font_ttf` covers loading/metrics/shaping/clamping, the extended
+  `render.paint` covers AA coverage/clip/baseline/no-ops, `shell.fonts` covers the end-to-end
+  real-font page, and CLI checks cover `--font`, `--font-family` (with a test-local
+  `FONTCONFIG_FILE`), error exit codes and screenshot output.
 - M8a image tests use hand-generated PNG fixtures with documented pixel content
   (`tests/fixtures/images/`) and a committed image demo site (`tests/fixtures/img_site/`): the
   decoder is exercised directly, layout with fake replaced sizes, and the shell end to end through
@@ -256,7 +290,7 @@ only — their code is never copied:
 - HTTP Semantics (RFC 9110) and HTTP/1.1 (RFC 9112)
 - PNG (Third Edition): <https://www.w3.org/TR/png-3/> and the libpng manual (approved M8a
   dependency): <https://www.libpng.org/pub/png/libpng.html>
-- FreeType, HarfBuzz and fontconfig documentation (approved M8b dependencies):
+- FreeType, HarfBuzz and fontconfig documentation (linked M8b dependencies):
   <https://freetype.org/>, <https://harfbuzz.github.io/>,
   <https://fontconfig.pages.freedesktop.org/fontconfig/>
 - Web Platform Tests: <https://github.com/web-platform-tests/wpt>

@@ -6,15 +6,20 @@
 
 ## 当前清单
 
-**目前链接了两个第三方库：**
+**目前链接了五个第三方包：**
 
 - **libX11（MIT/X11）**，用于 X11 窗口后端（M1）。
 - **libpng + zlib（libpng 许可证 / zlib 许可证）**，由 `render` 用于解码 PNG 图片（M8a）。
   通过 CMake 的 `find_package(PNG REQUIRED)` 发现；zlib 由 libpng 一并引入。
+- **freetype（FreeType 许可证）**，由 `render` 用于真实字体的度量与字形光栅化（M8b）。通过
+  `find_package(Freetype REQUIRED)` 发现。
+- **harfbuzz（MIT）**，由 `render` 用于 OpenType 文本整形（M8b）。通过
+  `find_package(harfbuzz CONFIG REQUIRED)` 发现。
+- **fontconfig（MIT 风格）**，由 `shell` 在 `--font-family` 渲染时用于已安装字体的发现与匹配
+  （M8b）。通过 `find_package(Fontconfig REQUIRED)` 发现。
 
-其他一切都是 C++20 标准库和标准 POSIX 接口。freetype、harfbuzz 和 fontconfig 已获批用于真实字体
-相关工作（M8b），但尚未链接。没有使用 HTML 解析器、CSS 引擎、JS 引擎、布局引擎或浏览器引擎——
-那些都在本仓库中编写。
+其他一切都是 C++20 标准库和标准 POSIX 接口。没有使用 HTML 解析器、CSS 引擎、JS 引擎、布局引擎或
+浏览器引擎——那些都在本仓库中编写。
 
 ## 当前已批准
 
@@ -23,16 +28,18 @@
 - **libX11**——Linux 上的窗口、输入与像素呈现，自 M1 起使用。许可证：MIT/X11。通过 CMake 的
   `find_package(X11)` 链接；不做 vendoring。引入于提交 `0572b8b`（M1）。
 - **libpng + zlib**——图片解码，自 M8a 起使用。许可证：libpng 许可证与 zlib 许可证。通过
-  `src/render/CMakeLists.txt` 中的 `find_package(PNG REQUIRED)` 链接。
-- **freetype**——真实 TTF 文本的字体度量与字形光栅化，计划用于 M8b。尚未链接。
+  `src/render/CMakeLists.txt` 中的 `find_package(PNG REQUIRED)` 链接；引入于 M8a 轮。
+- **freetype**——真实 TTF 文本的字体度量与字形光栅化，自 M8b 起使用。许可证：FreeType 许可证。
+  通过 `src/render/CMakeLists.txt` 中的 `find_package(Freetype REQUIRED)` 链接。
 - **libxcb**——允许作为替代窗口库；当前未使用。
 
-用户于 2026-10-31（M8a 开始前）批准：
+用户于 2026-10-31（M8a 开始前）批准，并在 M8b 链接：
 
-- **harfbuzz**——OpenType 文本整形（按字体选择并定位字形），用于 M8b 的真实字体文本。许可证：
-  MIT。尚未链接。
-- **fontconfig**——已安装字体的发现与匹配，用于 M8b（这样浏览器可以按字体族请求字体，而不必
-  手动提供字体文件）。许可证：fontconfig 的 MIT 风格许可证。尚未链接。
+- **harfbuzz**——真实字体文本的 OpenType 整形（按字体选择并定位字形）。许可证：MIT。通过
+  `src/render/CMakeLists.txt` 中的 `find_package(harfbuzz CONFIG REQUIRED)` 链接。
+- **fontconfig**——已安装字体的发现与匹配，由 shell 用于把 `--font-family NAME` 解析为字体文件。
+  许可证：fontconfig 的 MIT 风格许可证。通过 `src/shell/CMakeLists.txt` 中的
+  `find_package(Fontconfig REQUIRED)` 链接。
 
 其他什么都没链接。C++20 标准库和标准 OS/POSIX 接口仍是默认。所有已批准的候选库都使用与项目
 MIT 许可证兼容的宽松许可证。
@@ -55,14 +62,14 @@ JavaScript——而不包括底层编解码与字体机制。因此图片解码�
 | libX11 | 窗口、输入、呈现像素 | 自己实现 X11 线协议 | 中等；协议怪癖、XShm 回退 | **已批准，自 M1 起在用**（先用普通 `XPutImage`；需要时再上 XShm） |
 | libxcb | 同上，API 更现代 | 同上 | 中等 | **已批准，未使用**（libX11 的替代） |
 | libpng + zlib | PNG 解码 | 自写 inflate + PNG filters/decoder | 约 600–900 行 | **已批准，自 M8a 起链接**（由 `render::DecodePng` 使用） |
-| freetype | TTF 字形光栅化与度量 | 自写子集 TTF 加载器（cmap/glyf/hmtx，无 hinting） | 中等 | **已批准，尚未链接——M8b** |
-| harfbuzz | OpenType 整形（连字、字形选择、定位） | 只做基础拉丁整形 | 高 | **2026-10-31 已批准，尚未链接——M8b** |
-| fontconfig | 已安装字体的发现与匹配 | 硬编码字体路径 / 不做发现 | 中等 | **2026-10-31 已批准，尚未链接——M8b** |
+| freetype | TTF 字形光栅化与度量 | 自写子集 TTF 加载器（cmap/glyf/hmtx，无 hinting） | 中等 | **已批准，自 M8b 起链接**（由 `render::Font` 使用） |
+| harfbuzz | OpenType 整形（连字、字形选择、定位） | 只做基础拉丁整形 | 高 | **已批准，自 M8b 起链接**（由 `render::Font` 使用） |
+| fontconfig | 已安装字体的发现与匹配 | 硬编码字体路径 / 不做发现 | 中等 | **已批准，自 M8b 起链接**（shell 的 `--font-family` 使用） |
 | OpenSSL | TLS，即 `https://` | 从零实现不现实 | 高 | **已推迟，未批准**——在决定前只支持 HTTP/file |
 | stb_truetype / stb_image | 单头文件即插即用实现 | 自写实现 | 低 | **未批准**——与本项目的精神冲突 |
 | icu | Unicode 数据与完整国际化 | 先做小型 ASCII/拉丁子集 | 高 | **不计划** |
 
-今天只链接了 libX11、libpng 与 zlib。任何其他行都需要先完成下面的流程。
+今天只链接了上面列出的五个包。任何其他行都需要先完成下面的流程。
 
 ## 审批流程
 
@@ -78,5 +85,8 @@ JavaScript——而不包括底层编解码与字体机制。因此图片解码�
 - 代码或 CMake 中不使用绝对路径，不硬编码库版本或包位置。
 - 库只能通过 CMake find 模块或 pkg-config 发现，且必须在审批之后。
 - 可选功能必须能优雅降级：没有可选依赖时测试也能通过。headless 运行不需要显示器，但当前二进制
-  仍然链接 libX11（窗口后端总是会被构建）与 libpng（图片解码是 `render` 的一部分，不是可选功能）。
-- 不要假设某台机器上有什么字体、窗口管理器、GPU 或包。
+  仍然链接 libX11（窗口后端总是会被构建）、libpng（图片解码）、freetype 与 harfbuzz（真实字体
+  渲染，属于 `render`）以及 fontconfig（shell 的 `--font-family` 路径）。这些是必需的构建依赖；
+  构建需要它们的开发头文件。
+- 不要假设某台机器上有什么字体、窗口管理器、GPU 或包。测试使用提交的自造字体 fixture
+  （`tests/fixtures/fonts/`），从不使用已安装字体。

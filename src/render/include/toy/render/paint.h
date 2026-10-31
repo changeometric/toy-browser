@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "toy/render/font.h"
 #include "toy/render/image.h"
 #include "toy/render/surface.h"
 
@@ -14,8 +15,8 @@ namespace toy::render {
 // One entry of the flat display list. Coordinates are device pixels with a
 // top-left origin (1 CSS px = 1 device px in the MVP). Colors are 0xAARRGGBB
 // with straight alpha. `text` and `font_size_px` are meaningful for kDrawText
-// only, `width`/`height` for kFillRect, kDrawImage and kPushClip, and `image`
-// for kDrawImage only.
+// only, `width`/`height` for kFillRect, kDrawImage and kPushClip, `image` for
+// kDrawImage only, and `font` for kDrawText only (see DrawTextWithFont).
 enum class CommandKind { kFillRect, kDrawText, kPushClip, kPopClip, kDrawImage };
 
 struct Command {
@@ -30,6 +31,9 @@ struct Command {
   // Shared, non-owning for the caller: the display list keeps the image alive,
   // so a command may outlive the page data it was built from.
   std::shared_ptr<const Image> image;
+  // Null for the built-in bitmap font (y is the top of the glyph cell), or the
+  // real font to shape and rasterize `text` with (y is the baseline).
+  std::shared_ptr<const Font> font;
 };
 
 // A flat list of painting commands. The builders only append; validation is
@@ -37,7 +41,18 @@ struct Command {
 class DisplayList {
  public:
   void FillRect(int x, int y, int width, int height, Argb color);
+  // Built-in 8x16 bitmap text: `y` is the top of the glyph cell and the text is
+  // painted with opaque, unaliased pixels (the frozen M6/M7 behavior).
   void DrawText(std::string_view text_utf8, int x, int y, float font_size_px, Argb color);
+  // Real-font text: `x` is the pen origin and `y` is the baseline in device
+  // pixels. `font` is shaped with harfbuzz and rasterized by freetype with 8-bit
+  // anti-aliased coverage, composited with the frozen SrcOver formula; the
+  // command keeps a shared reference to the font. A null font appends no
+  // command; use DrawText for the bitmap path. Empty text or a
+  // non-positive/non-finite size appends a command that is a no-op when drawn.
+  // Text is clipped to the current clip rectangle; glyphs never paint outside it.
+  void DrawTextWithFont(std::shared_ptr<const Font> font, std::string_view text_utf8, int x, int y,
+                        float font_size_px, Argb color);
   // Draws `image` scaled into the device-pixel rectangle (x, y, width, height).
   // Scaling is nearest-neighbour: destination pixel (dx, dy) samples source
   // pixel ((dx - x) * image->width / width, (dy - y) * image->height / height)

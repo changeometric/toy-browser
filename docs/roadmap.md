@@ -3,8 +3,8 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M7 and M8a are done; M8b (real fonts, libraries approved) is next.** For a
-snapshot and takeover guide, read [handoff.md](handoff.md).
+**Current status: M0–M8 are done (M8a images, M8b real fonts); M9 (JavaScript subset) is the
+next optional milestone.** For a snapshot and takeover guide, read [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
 
@@ -108,8 +108,8 @@ snapshot and takeover guide, read [handoff.md](handoff.md).
   pixel end-to-end test proves the red heading/black paragraph geometry on a 200x100 surface, and
   GCC/Clang render byte-identical PPMs; the window shows the same page.
 - Known M6 limits: all painting is integer device pixels with no anti-aliasing or subpixel layout
-  (1 CSS px = 1 device px); no borders or real TTF fonts (images arrived in M8a, real fonts are
-  M8b); the canvas is always filled white by the shell, and `html`/`body` `background-color` paints
+  (1 CSS px = 1 device px); no borders (images arrived in M8a, real fonts are opt-in since M8b);
+  the canvas is always filled white by the shell, and `html`/`body` `background-color` paints
   only its element box (no canvas background propagation); paint order is pre-order with no stacking
   contexts/z-index; text is ASCII bitmap glyphs only (other code points render `?`, and links are
   colored but not underlined because `text-decoration` is not in the property set); overflow is
@@ -181,23 +181,45 @@ snapshot and takeover guide, read [handoff.md](handoff.md).
   loading), only `http`/`file` image URLs work (no `https`), and `--dump-dom`/`--dump-style` do not
   fetch images.
 
-## M8b — Real fonts (next; libraries approved)
+## M8b — Real fonts ✅ (done)
 
-- TTF text: load a font file, use freetype for metrics and glyph rasterization and harfbuzz for
-  shaping; fontconfig may discover installed fonts so a page can ask for a family instead of a
-  hand-supplied file. The approved dependencies (freetype, harfbuzz, fontconfig) are recorded in
-  [dependencies.md](dependencies.md); development packages must be installed by the user where
-  missing.
-- `layout` keeps consuming text metrics through the existing `MeasureText` callback; `paint`/`render` gain the baseline/advance information needed for real glyph placement and anti-aliased
-  coverage text, while the built-in bitmap font stays the fallback path so all pre-M8b output that
-  does not opt into a real font is unchanged. The exact font-selection contract and the AA-text
-  contract change are frozen at the start of the round.
-- Tests must stay deterministic and must not depend on installed fonts: a committed/generated font
-  fixture drives the tests, while manual demos may use any installed TTF.
-- Done when a page with real TTF text and at least one image renders (the original M8 acceptance),
-  with all existing tests, GCC/Clang warning-free builds and the M8a image behavior still green.
+- `render`: `Font` loads a TTF/OpenType face through the approved freetype dependency behind a
+  frozen pimpl interface (no freetype/harfbuzz type in a public header) and exposes design-unit
+  metrics plus harfbuzz-shaped advance widths. The display list gains `DrawTextWithFont`: real-font
+  text is anti-aliased with 8-bit freetype coverage, placed on the command's baseline with a frozen
+  per-glyph integer placement formula, composited with the existing SrcOver formula and bounded by
+  the clip. The effective real-font size is clamped to `kMaxRealFontSizePx` (4096 px) for metrics
+  and painting, so adversarial CSS cannot allocate unbounded glyph bitmaps. The built-in bitmap
+  `DrawText` path is untouched.
+- `paint`: a text box becomes `DrawTextWithFont` with baseline `round(box.y) - scroll_y +
+  round(font.ascent)` when the session selected a real font; with no font it emits exactly the
+  pre-M8b bitmap command.
+- `shell`: `--font PATH` loads a font file, `--font-family NAME` resolves a family through the
+  approved fontconfig dependency (best match; unknown families fall back), and the resolved font is
+  loaded once and shared by layout metrics (through the existing `MeasureText` callback) and
+  painting. The flags are mutually exclusive, rejected with `--dump-body`/`--dump-dom`/
+  `--dump-style`, and a font that cannot be loaded is a runtime error (exit 1). One font applies to
+  the whole session; without a flag the built-in bitmap font is still used, keeping all pre-M8b
+  output byte-identical.
+- Fixtures: a committed self-authored minimal TTF (`tests/fixtures/fonts/toy_test.ttf`, documented
+  metrics/family) and a real-font demo page (`tests/fixtures/font_site/`). Tests never depend on
+  installed fonts; the fontconfig path is tested with a test-local `FONTCONFIG_FILE` pointing only
+  at the fixture fonts.
+- Acceptance reached: a page with real TTF text and an image renders (headless screenshot and real
+  window); `render.font_ttf`, the extended `render.paint`, `shell.fonts` and seven CLI/fontconfig
+  checks plus every pre-existing test pass under GCC and Clang with warnings as errors (55 tests
+  total); without a font flag every pre-M8b dump and screenshot is byte-identical to M8a; GCC and
+  Clang produce byte-identical PPMs on both the bitmap and real-font paths.
+- Known M8b limits: real fonts are opt-in (the default remains the ASCII bitmap font), one font
+  face for the whole session (no per-element CSS `font-family`/`font-weight`/`font-style` mapping,
+  no fallback chains, no `@font-face`/font downloads), no text shaping features beyond harfbuzz's
+  default buffer shaping (no bidi reordering, vertical text or complex-script segmentation work),
+  fontconfig always returns its best match so unknown families silently fall back, face 0 only
+  (TTC/face index ignored), missing code points render the font's `.notdef` glyph, real-font sizes
+  above 4096 px behave like 4096 px, and anti-aliased subpixel positioning/kerning beyond the
+  shaped advances is not implemented. The bitmap fallback stays ASCII-only.
 
-## M9 — JavaScript subset (optional, large)
+## M9 — JavaScript subset (next optional, large)
 
 - Lexer, parser, small interpreter, DOM bindings and event handlers for a tiny ES5-like subset.
 - Done when a fixture page's script mutates the DOM and the change gets painted.
@@ -218,6 +240,9 @@ starts only after the previous slice is clean and the user agrees on priority.
   sites such as Google needs `https`, and proxy support alone is not enough for them.
 - **More image formats and background images** — JPEG/GIF/WebP, `background-image`,
   `srcset`, an image cache and lazy loading; scheduled after M8a on demand, blocking no milestone.
+- **CSS font selection and richer text** — map CSS `font-family`/`font-weight`/`font-style` to the
+  font stack, add fallback chains, `@font-face`/font downloads and richer shaping; the M8b CLI
+  selection is deliberately one face per session.
 - **Test helper consolidation** — the per-file `Check`/`g_failures` test harness is still
   duplicated in the older test executables. The header-only `tests/support/check.h` (interface
   target `toy_test_support`) was introduced in M5 and is used by the new tests; migrate the older

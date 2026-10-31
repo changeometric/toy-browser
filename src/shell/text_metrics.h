@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string_view>
 
 #include "toy/layout/box.h"
@@ -7,10 +8,16 @@
 
 namespace toy::shell {
 
-// Adapts the built-in bitmap font to layout's measurement callback. layout never
-// depends on render; shell is the only module that sees both and wires them up.
-// Shared by the --dump-boxes path and Browser so both lay out text identically.
-inline layout::TextMetrics MeasureText(std::string_view text_utf8, float font_size_px) {
+// Adapts the built-in bitmap font (font == null, the pre-M8b behavior) or a
+// loaded real font to layout's measurement callback. layout never depends on
+// render; shell is the only module that sees both and wires them up. Shared by
+// the --dump-boxes path and Browser so both lay out text identically.
+inline layout::TextMetrics MeasureText(const std::shared_ptr<const render::Font>& font,
+                                       std::string_view text_utf8, float font_size_px) {
+  if (font) {
+    return layout::TextMetrics{font->MeasureTextWidth(text_utf8, font_size_px),
+                               font->LineHeightPx(font_size_px)};
+  }
   return layout::TextMetrics{render::MeasureTextWidth(text_utf8, font_size_px),
                              render::LineHeightPx(font_size_px)};
 }

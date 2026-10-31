@@ -9,6 +9,10 @@
 #include "toy/net/url.h"
 #include "toy/render/surface.h"
 
+namespace toy::render {
+class Font;
+}  // namespace toy::render
+
 namespace toy::shell {
 
 // The loaded page data owned by a Browser: final URL, DOM, styles, box tree and
@@ -33,8 +37,11 @@ struct Page;
 class Browser {
  public:
   // Creates an empty session with the given viewport size. Both must be positive
-  // (asserted in debug builds).
-  Browser(int viewport_width, int viewport_height);
+  // (asserted in debug builds). `font` selects the real font used for shaping,
+  // layout metrics and painting; null keeps the built-in bitmap font (the
+  // pre-M8b behavior). The session keeps a shared reference to the font.
+  Browser(int viewport_width, int viewport_height,
+          std::shared_ptr<const render::Font> font = nullptr);
   // Out of line: the page data type is complete only inside the shell module.
   ~Browser();
 
@@ -112,6 +119,9 @@ class Browser {
   int viewport_height_ = 0;
   int scroll_y_ = 0;
   net::Url current_url_;
+  // Real font for layout metrics and painting, or null for the built-in bitmap
+  // font. Shared with every page load, relayout and display list of the session.
+  std::shared_ptr<const render::Font> font_;
   // Current page, or null when nothing has loaded successfully yet.
   std::unique_ptr<Page> page_;
   std::vector<net::Url> history_;

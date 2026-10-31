@@ -333,3 +333,30 @@ the round when possible. Clean up stale build directories and stray files.
 - M8a: CTest cannot cheaply express "the command succeeds and writes a file of the right size" in
   C++, so a small `cmake -P` helper was used for the CLI/screenshot path only, leaving pixel
   assertions to the C++ test; keep such helpers narrow.
+- M8b: the frozen pimpl header (`Font` with a private `Impl`) needed a private rendering bridge; the
+  owner caught that a namespace-scope rasterizer could not reach the font state and proposed a
+  minimal `friend struct internal::FontRasterizer` + forward declaration. Approving a small,
+  signature-preserving header delta was cheaper than reshaping the design; when freezing a pimpl
+  header, plan the internal bridge in the same contract.
+- M8b: a second contract ambiguity (`DrawTextWithFont(font=null)` could mean "bitmap path" or "no
+  command") was caught before implementation. Freeze whether a builder drops or appends a command
+  for degenerate inputs; the builder-vs-rasterizer behavior (no-op here) belongs in the header text.
+- M8b: the owner's risk report (no TTF raster size cap, so hostile CSS could make freetype allocate
+  huge glyph bitmaps) was turned into a small follow-up task before the round closed; a clamped
+  effective `kMaxRealFontSizePx` for metrics and painting fixed it and was tested with exact
+  equalities. Adversarial-renderer review remains a standard habit (M6 lesson repeated).
+- M8b: a self-authored minimal TTF generated with a stdlib-only throwaway script (committed font +
+  README documenting design metrics/family, generator not committed) kept tests deterministic and
+  free of installed fonts, exactly like the M8a hand-generated PNG fixtures. For fontconfig, a
+  test-local `FONTCONFIG_FILE` whose only `<dir>` is the fixture folder made the family-lookup path
+  deterministic too.
+- M8b: anti-aliased pixels are library-version dependent, so real-font tests assert ink regions, AA
+  presence (blended values between text color and background), clip bounds, no-ops and determinism
+  instead of hardcoded coverage bytes; GCC/Clang byte-identical PPM `cmp` remains the cross-compiler
+  gate. This is the same "eyeball shapes, no frozen fingerprints" preference as the bitmap font.
+- M8b: keeping real fonts opt-in (default stays the bitmap font) made the M8a byte-compatibility
+  gate trivial and kept all goldens meaningful; the tiny header bridge plus the opt-in CLI meant no
+  existing test needed a pixel update, only the paint call sites gained a null font argument.
+- M8b: the shell owner derived the real-font dump geometry independently with a scratch layout
+  harness before the render implementation landed (as in M5/M6), so integration only had to confirm
+  it; contract numbers in the task description again paid off.

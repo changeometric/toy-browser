@@ -142,8 +142,8 @@ dom::NodeId FindLinkElement(const dom::Document& document, dom::NodeId node) {
 
 }  // namespace
 
-Browser::Browser(int viewport_width, int viewport_height)
-    : viewport_width_(viewport_width), viewport_height_(viewport_height) {
+Browser::Browser(int viewport_width, int viewport_height, std::shared_ptr<const render::Font> font)
+    : viewport_width_(viewport_width), viewport_height_(viewport_height), font_(std::move(font)) {
   assert(viewport_width > 0 && viewport_height > 0);
 }
 
@@ -154,7 +154,7 @@ bool Browser::Load(const net::Url& url, std::string* error) {
   // it returns, so a failure leaves the current page, scroll offset and history
   // unchanged.
   auto page = std::make_unique<Page>();
-  if (!LoadPage(url, viewport_width_, page.get(), error)) {
+  if (!LoadPage(url, viewport_width_, font_, page.get(), error)) {
     return false;
   }
   current_url_ = page->final_url;
@@ -357,8 +357,8 @@ void Browser::Paint(render::Surface& surface) const {
     return;
   }
   const paint::Viewport viewport{surface.width(), surface.height(), scroll_y_};
-  const render::DisplayList list = paint::BuildDisplayList(page_->document, page_->styles,
-                                                           page_->boxes, viewport, page_->images);
+  const render::DisplayList list = paint::BuildDisplayList(
+      page_->document, page_->styles, page_->boxes, viewport, page_->images, font_);
   render::DrawDisplayList(list, surface);
 }
 
@@ -367,8 +367,8 @@ void Browser::Relayout() {
     return;
   }
   // Re-layout only: the DOM, styles and decoded images are reused, so a resize
-  // never refetches the page or its images.
-  RelayoutPage(page_.get(), viewport_width_);
+  // never refetches the page or its images. The session's font is applied again.
+  RelayoutPage(page_.get(), viewport_width_, font_);
 }
 
 void Browser::ClampScroll() {

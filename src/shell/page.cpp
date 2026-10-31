@@ -85,16 +85,20 @@ void LoadImages(const dom::Document& document, const net::Url& page_url, Page* p
 
 }  // namespace
 
-void RelayoutPage(Page* page, int viewport_width) {
+void RelayoutPage(Page* page, int viewport_width, const std::shared_ptr<const render::Font>& font) {
   // Field-wise setup on purpose: LayoutOptions may grow fields, and a named
   // assignment keeps every default visible here.
   layout::LayoutOptions options;
   options.viewport_width_px = static_cast<float>(viewport_width);
   options.replaced_sizes = page->replaced_sizes.empty() ? nullptr : &page->replaced_sizes;
-  page->boxes = layout::LayoutDocument(page->document, page->styles, options, MeasureText);
+  const layout::MeasureText measure = [&font](std::string_view text_utf8, float font_size_px) {
+    return MeasureText(font, text_utf8, font_size_px);
+  };
+  page->boxes = layout::LayoutDocument(page->document, page->styles, options, measure);
 }
 
-bool LoadPage(const net::Url& url, int viewport_width, Page* page, std::string* error) {
+bool LoadPage(const net::Url& url, int viewport_width,
+              const std::shared_ptr<const render::Font>& font, Page* page, std::string* error) {
   net::Response response;
   std::string fetch_error;
   if (!net::Fetch(url, net::FetchOptions{}, &response, &fetch_error)) {
@@ -113,7 +117,7 @@ bool LoadPage(const net::Url& url, int viewport_width, Page* page, std::string* 
   // Image sources resolve against the page's final URL (after redirects), like
   // the other page-relative references the shell resolves.
   LoadImages(loaded.document, loaded.final_url, &loaded);
-  RelayoutPage(&loaded, viewport_width);
+  RelayoutPage(&loaded, viewport_width, font);
 
   *page = std::move(loaded);
   if (error != nullptr) {

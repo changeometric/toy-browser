@@ -33,6 +33,15 @@ struct Options {
   // page out at the window width and write the box tree to stdout. Parsing and
   // layout never fail; only URL and fetch errors are reported.
   std::string dump_boxes_url;
+  // Optional real-font selection for the layout/painting modes (window mode,
+  // --screenshot and --dump-boxes). `font_path` loads that font file directly;
+  // `font_family` asks fontconfig for the best installed match. At most one may be
+  // non-empty; the CLI rejects both together with each other and with
+  // --dump-body/--dump-dom/--dump-style, and empty strings mean the built-in
+  // bitmap font (the pre-M8b behavior). A font that cannot be loaded is a runtime
+  // error (exit 1).
+  std::string font_path;
+  std::string font_family;
 };
 
 // Runs the browser.
