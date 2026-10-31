@@ -1,121 +1,202 @@
 # toybrowser
 
-A toy web browser built from scratch: C++20, CMake, and no ready-made browser components.
+A browser engine written from scratch in C++20: URL fetching, HTML and CSS parsing, style
+resolution, layout, painting, real font rendering and PNG images, presented headlessly or in a small
+X11 window. The browser parts are implemented in this repository rather than delegated to an
+existing engine; low-level libraries are used only for TLS, image decoding, font machinery and the
+window system.
 
-**Status: M11 — performance.** The browser fetches `http://`, `https://` and `file://` URLs
-(`https://` uses the approved OpenSSL library with certificate and hostname verification always on,
-no insecure mode) and renders pages headlessly or in an X11 window. M11 made large pages responsive
-without changing a pixel: the default build is optimised, real fonts are shaped/rasterized through
-bounded caches, painting is culled to the viewport, and the window loop no longer relayouts on every
-expose/resize event (measured on a stress page: frame 10.6 s -> 3.5 ms, layout 2.1 s -> 31 ms).
-Rendering stays software-only and single-threaded; there is no GPU backend on purpose. Without
-any font flag it picks fonts the way a normal browser does: the computed CSS
-`font-family`/`font-weight`/`font-style` are matched through the approved fontconfig library (the
-initial family is `serif`), and text whose preferred face lacks characters falls back to an
-installed face that has them. Layout splits text into runs and gives CJK text individual break
-units, so Chinese pages are readable without spaces and wrap normally. `--font PATH` and
-`--font-family NAME` remain explicit overrides; when no usable system font exists the browser
-degrades to the built-in bitmap font. Real text is anti-aliased (freetype + harfbuzz), `<img
-src="...png">` images are decoded with libpng, links are clickable in the window, the wheel and
-keyboard scroll, Alt+Left/Right move through history and the title follows `<title>`. **Next
-planned milestone: M12 — HTTP proxy** (deprioritized by the user; design sketch in the
-[roadmap](docs/roadmap.md)). Committed demos:
-[`tests/fixtures/cjk_site/`](tests/fixtures/cjk_site/) for automatic fonts + readable Chinese,
-[`tests/fixtures/font_site/`](tests/fixtures/font_site/) for explicit real text + images,
-[`tests/fixtures/img_site/`](tests/fixtures/img_site/) for images,
-[`tests/fixtures/nav_site/`](tests/fixtures/nav_site/) for navigation and
-[`tests/fixtures/https_site/`](tests/fixtures/https_site/) for the HTTPS pipeline. The `--dump-*`
-modes remain the primary headless debugging path. See the [roadmap](docs/roadmap.md). 中文版：
-[README.zh.md](README.zh.md).
+The project is a learning exercise, not a production browser: it deliberately implements a small,
+well-understood subset of the web and grows one minimal vertical slice at a time.
 
-**New team or agent?** Start with [docs/handoff.md](docs/handoff.md) (current state and takeover
-guide), then the [documentation index](docs/README.md).
+![toybrowser rendering the committed navigation fixture](docs/assets/screenshot.png)
 
-## Build and run
+## What works
+
+- `http://`, `https://` and `file://` URLs, redirects, chunked responses and a body size cap.
+  HTTPS uses OpenSSL with certificate and hostname verification always on — there is no insecure
+  mode.
+- A hand-written HTML parser and CSS parser. The style engine covers the selectors, cascade and
+  computed values that the supported pages need; layout is block/inline flow with line breaking,
+  replaced `<img>` elements and integer-pixel device rectangles.
+- Real text: freetype rasterization and harfbuzz shaping, automatic font selection through
+  fontconfig (computed `font-family`/`font-weight`/`font-style`, character-coverage fallback,
+  CJK break units) and a built-in bitmap font as the last-resort deterministic fallback.
+- PNG images decoded with libpng and drawn with nearest-neighbour scaling.
+- A navigable X11 window (clickable links, wheel/keyboard scrolling, Alt+Left/Right history, window
+  title) and fully headless `--dump-*`/`--screenshot` modes for debugging and tests.
+- A small, deterministic test suite (66 CTest cases) and CI that builds it warning-free with GCC
+  and Clang.
+
+Chinese text is rendered with automatic font fallback and wraps without spaces:
+
+![A Chinese fixture page rendered with automatic font fallback](docs/assets/chinese.png)
+
+The screenshots above are headless captures of the committed fixture pages; their exact appearance
+depends on the fonts installed on the machine.
+
+## Quick start
+
+Requirements: Linux, CMake 3.20 or newer, and a C++20 compiler. Build dependencies (Debian/Ubuntu
+package names): `cmake g++ clang libx11-dev libpng-dev libfreetype-dev libharfbuzz-dev
+libfontconfig1-dev libssl-dev`. Other distributions provide equivalent packages.
 
 ```sh
-# Fast browser-only build (tests are opt-in).
+# Configure and build a developer tree with tests and warnings-as-errors.
+cmake --preset dev
+cmake --build --preset dev
+ctest --test-dir build-dev --output-on-failure
+
+# Plain build (tests are opt-in, so this only builds the browser itself).
 cmake -S . -B build
 cmake --build build
 
-# Full verification: also build and run the tests.
-cmake -S . -B build -DTOYBROWSER_BUILD_TESTS=ON -DTOYBROWSER_WERROR=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
-
-./build/toybrowser file:///path/page.html            # window: click links, wheel/keys scroll, Alt+Left/Right
-./build/toybrowser                                   # window with the placeholder page
-./build/toybrowser --headless --screenshot out.ppm file:///path/page.html  # page, no display
-./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/font_site/index.html" \
-    --font tests/fixtures/fonts/toy_test.ttf   # real TTF text + image demo (fixture font)
-./build/toybrowser --size 400x200 --font-family "sans-serif" \
-    "file://$PWD/tests/fixtures/nav_site/index.html"   # force an installed font family
-./build/toybrowser --size 400x240 "file://$PWD/tests/fixtures/cjk_site/index.html"  # automatic fonts + Chinese wrapping
-./build/toybrowser --size 800x900 --screenshot /tmp/zh.ppm https://www.gov.cn/  # real Chinese page (system fonts)
-./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"   # images demo
-./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # the committed nav demo site
-./build/toybrowser --dump-body https://example.com/   # fetch an https URL (TLS, always verified)
-./build/toybrowser --dump-dom  https://example.com/   # fetch + parse a real https page
-./build/toybrowser --size 1024x768 --screenshot out.ppm https://example.com/  # paint an https page
-./build/toybrowser --dump-body file:///etc/hostname  # fetch a URL, raw bytes to stdout
-./build/toybrowser --dump-dom  file:///etc/hostname  # fetch and dump the parsed DOM tree
-./build/toybrowser --dump-style file:///etc/hostname # fetch, style, dump computed styles
-./build/toybrowser --dump-boxes file:///etc/hostname # fetch, style, lay out, dump the box tree
+# Optional: install the executable and the README/LICENSE documentation.
+cmake --install build --prefix "$HOME/.local"
 ```
 
-The window backend links libX11, image decoding links libpng, text rendering/shaping links freetype
-and harfbuzz, automatic font selection links fontconfig and `https://` links OpenSSL (all approved;
-see [dependencies](docs/dependencies.md)), so those development headers are build-time
-requirements even when only headless modes are used. Headless runs need no display and are the
-primary mode for testing and debugging: every rendered result can be inspected without opening a
-window.
+No CMake presets? The equivalent explicit configuration is:
 
-CMake 3.20 or newer and any C++20 compiler work; nothing in the tree depends on a specific
-machine's paths, toolchain version or installed package set.
+```sh
+cmake -S . -B build-dev -DTOYBROWSER_BUILD_TESTS=ON -DTOYBROWSER_WERROR=ON
+cmake --build build-dev
+ctest --test-dir build-dev --output-on-failure
+```
+
+The default build type is `RelWithDebInfo` when `CMAKE_BUILD_TYPE` is not set; pass
+`-DCMAKE_BUILD_TYPE=Debug` for unoptimised debugging.
+
+## Try it
+
+The repository contains small offline demo pages so nothing here needs the public network:
+
+```sh
+# Window: click links, scroll with the wheel/keys, Alt+Left/Right for history.
+./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"
+
+# Headless screenshot of the same page (no display required).
+./build/toybrowser --size 800x600 --screenshot out.ppm \
+    "file://$PWD/tests/fixtures/nav_site/index.html"
+
+# Real text + image demo with the committed fixture font (deterministic).
+./build/toybrowser --size 480x600 --screenshot font.ppm \
+    --font tests/fixtures/fonts/toy_test.ttf \
+    "file://$PWD/tests/fixtures/font_site/index.html"
+
+# Automatic font selection and readable Chinese wrapping.
+./build/toybrowser --size 800x600 --screenshot cjk.ppm \
+    "file://$PWD/tests/fixtures/cjk_site/index.html"
+
+# PNG image pipeline.
+./build/toybrowser --size 480x400 --screenshot img.ppm \
+    "file://$PWD/tests/fixtures/img_site/index.html"
+```
+
+| Fixture | What it demonstrates |
+| --- | --- |
+| [`tests/fixtures/nav_site/`](tests/fixtures/nav_site/) | Navigation, scrolling, titles and history |
+| [`tests/fixtures/font_site/`](tests/fixtures/font_site/) | Real TTF text (regular/bold/italic fixtures) and images |
+| [`tests/fixtures/cjk_site/`](tests/fixtures/cjk_site/) | Automatic font fallback, CJK line breaking and wrapping |
+| [`tests/fixtures/img_site/`](tests/fixtures/img_site/) | PNG decoding and inline replaced elements |
+| [`tests/fixtures/https_site/`](tests/fixtures/https_site/) | HTTPS end-to-end through the loopback TLS test server |
+
+Headless inspection is the primary debugging path. Every stage has a dump mode:
+
+```sh
+./build/toybrowser --dump-body  "file://$PWD/tests/fixtures/nav_site/index.html"
+./build/toybrowser --dump-dom   "file://$PWD/tests/fixtures/nav_site/index.html"
+./build/toybrowser --dump-style "file://$PWD/tests/fixtures/nav_site/index.html"
+./build/toybrowser --dump-boxes "file://$PWD/tests/fixtures/nav_site/index.html"
+```
+
+Public-network fetches are optional manual checks, not part of the test suite:
+
+```sh
+./build/toybrowser --dump-body https://example.com/
+./build/toybrowser --size 1024x768 --screenshot page.ppm https://example.com/
+```
+
+## Project layout
+
+```
+src/
+  main.cpp          command-line parsing and the dump/screenshot entry points
+  platform/         X11 window, input events, pixel presentation
+  net/              URLs, HTTP/1.1 and the HTTPS transport
+  dom/  css/  style/  HTML parsing, CSS parsing, cascade and computed styles
+  layout/           box tree, line breaking, text metrics callback
+  paint/            display-list construction and viewport culling
+  render/           software rasterizer, surfaces, PNG decoding, fonts
+  shell/            browser session, page loading, font selection, window loop
+tests/              CTest suites plus committed deterministic fixtures/generators
+docs/               architecture, roadmap, decisions, conventions, handoff notes
+```
+
+Module boundaries and the dependency direction are described in
+[docs/architecture.md](docs/architecture.md). Every module has a public header under
+`src/<module>/include/toy/<module>/` and a small private implementation; the renderer knows
+nothing about HTML/CSS and the platform layer knows nothing about page content.
+
+## Status and limitations
+
+Milestones M0–M11 are complete: the browser renders real pages, supports real fonts and images,
+speaks HTTPS and has a navigable window. The next planned milestone is HTTP proxy support (M12),
+which is deferred; the JavaScript subset is deferred as well.
+
+Known limits, by design of the current milestone set:
+
+- HTML/CSS support is a small subset: no JavaScript, forms, tables, floats, flexbox/grid, external
+  stylesheets, borders, horizontal scrolling or scrollbars.
+- Text support is best-effort for scripts beyond Latin and Chinese; no bidi/RTL ordering and no
+  full Unicode line breaking.
+- No proxy support, HTTP keep-alive, compression, parallel resource loading or image cache yet.
+- Rendering is software-only and single-threaded; there is no GPU backend, and presentation sends
+  the whole frame to the X server.
+- Not security-hardened: treat fetched pages as untrusted input, do not enter secrets into it.
+
+The full, current list lives in [docs/roadmap.md](docs/roadmap.md) and
+[docs/handoff.md](docs/handoff.md).
 
 ## Documentation
 
 | Document | Content |
 | --- | --- |
-| [handoff.md](docs/handoff.md) | Current state, verification steps, next milestone, takeover guide |
-| [README.md](docs/README.md) | Documentation index and reading order |
-| [architecture.md](docs/architecture.md) | Module map, data flow, data model, rendering and threading |
-| [decisions.md](docs/decisions.md) | Locked technical decisions and their rationale |
-| [roadmap.md](docs/roadmap.md) | Milestones, each a minimal vertical slice |
-| [dependencies.md](docs/dependencies.md) | Third-party policy, approval log and pending requests |
-| [team-workflow.md](docs/team-workflow.md) | Round-based team process: roles, phases, quality gates, lessons |
-| [conventions.md](docs/conventions.md) | C++, CMake and testing conventions |
-| [open-questions.md](docs/open-questions.md) | Decisions waiting for the user |
-| [AGENTS.md](AGENTS.md) | Rules for AI agents working on the repository |
+| [docs/README.md](docs/README.md) | Documentation index and reading order |
+| [docs/architecture.md](docs/architecture.md) | Module map, data flow, data model, rendering and threading |
+| [docs/roadmap.md](docs/roadmap.md) | Milestones, acceptance criteria, known limits and backlog |
+| [docs/decisions.md](docs/decisions.md) | Locked technical decisions and their rationale |
+| [docs/dependencies.md](docs/dependencies.md) | Third-party dependency policy and approval log |
+| [docs/conventions.md](docs/conventions.md) | C++, CMake and testing conventions |
+| [docs/handoff.md](docs/handoff.md) | Current development state, verification steps and takeover guide |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to build, test, and contribute |
+| [SECURITY.md](SECURITY.md) | Security model, test-only keys and reporting |
+
+Chinese translations live under [docs/zh/](docs/zh/); English is the source of truth.
 
 ## Dependencies
 
-Six third-party packages are linked today (libX11, libpng + zlib, freetype, harfbuzz, fontconfig
-and OpenSSL). The browser engine itself has no ready-made components (no HTML parser, CSS engine,
-JS engine, layout or rendering engine).
+Six third-party packages are linked today; the browser engine itself has no ready-made components.
 
-| Component | Purpose | License | Status |
-| --- | --- | --- | --- |
-| C++20 standard library + POSIX | baseline (containers, sockets, files) | standard / OS | always |
-| libX11 | window, input, pixel presentation | MIT/X11 | linked since M1 |
-| libpng + zlib | PNG image decoding | libpng license / zlib license | linked since M8a |
-| freetype | font metrics and glyph rasterization | FreeType License | linked since M8b |
-| harfbuzz | OpenType text shaping | MIT | linked since M8b |
-| fontconfig | automatic font discovery/matching, language hints and character fallback | MIT-style | linked since M8b (the automatic selection since M10) |
-| OpenSSL | TLS for `https://` | Apache-2.0 | linked since M9 |
+| Component | Purpose | License |
+| --- | --- | --- |
+| C++20 standard library + POSIX | baseline (containers, sockets, files) | standard / OS |
+| libX11 | window, input, pixel presentation | MIT/X11 |
+| libpng + zlib | PNG image decoding | libpng license / zlib license |
+| freetype | font metrics and glyph rasterization | FreeType License |
+| harfbuzz | OpenType text shaping | MIT |
+| fontconfig | automatic font discovery/matching and character fallback | MIT-style |
+| OpenSSL | TLS for `https://` | Apache-2.0 |
 
-The policy, the approval log and from-scratch alternatives live in
-[dependencies.md](docs/dependencies.md).
+All of them are permissive and compatible with this project's MIT license. The policy, approval
+log and from-scratch alternatives are in [docs/dependencies.md](docs/dependencies.md).
+
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and keep the changes small
+and verifiable: build with tests, run `ctest`, and update the relevant docs and fixtures in the same
+change. The repository is developed with AI agents, so [AGENTS.md](AGENTS.md) and
+[docs/team-workflow.md](docs/team-workflow.md) document the working rules and process as well.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). All approved dependencies use permissive licenses compatible with it.
-
-## Ground rules
-
-- C++20 and CMake, Linux desktop as the target.
-- No ready-made HTML parser, CSS engine, JS engine, layout engine or browser engine: those parts
-  are ours to write.
-- Low-level libraries need the user's explicit approval before use; approved codecs and font
-  machinery are allowed because "from scratch" applies to browser functionality.
-- Every milestone ships the smallest working, verifiable slice — no speculative design.
+MIT — see [LICENSE](LICENSE).

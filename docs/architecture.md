@@ -311,10 +311,17 @@ can't form ownership cycles. Revisit only if it actually hurts.
 
 ```
 .
+├── .github/workflows/ci.yml        # GCC + Clang build/test CI mirroring the local gates
 ├── AGENTS.md
 ├── CMakeLists.txt
-├── README.md
+├── CMakePresets.json               # convenience presets: default build, dev (tests + WERROR)
+├── CONTRIBUTING.md
+├── LICENSE
+├── README.md / README.zh.md
+├── SECURITY.md
 ├── docs/
+│   ├── assets/                     # screenshots used by README.md/README.zh.md
+│   └── <design and process docs>
 ├── src/
 │   ├── main.cpp
 │   └── <module>/                    # appears with the module's first real file

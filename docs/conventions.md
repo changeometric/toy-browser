@@ -99,6 +99,9 @@ ctest --test-dir build --output-on-failure
 ```
 
 - Out-of-source builds only. Add `-DTOYBROWSER_WERROR=ON` to treat warnings as errors.
+- `CMakePresets.json` provides `default` (browser only) and `dev` (tests + warnings-as-errors); CI
+  runs the same configure/build/test sequence with GCC and Clang. Presets are convenience only —
+  the explicit `cmake` commands above are the source of truth and must keep working.
 - The default build type is `RelWithDebInfo`; do not remove that default (an unoptimised default
   made pages several times slower) and do not remove `-ffp-contract=off` (it keeps floating-point
   layout geometry byte-identical across build types and GCC/Clang).
@@ -108,6 +111,10 @@ ctest --test-dir build --output-on-failure
 - Build directories are never committed.
 - `CMAKE_EXPORT_COMPILE_COMMANDS` is on, so `compile_commands.json` appears in the configured
   build directory for clangd and IDEs; build directories stay untracked.
+- `cmake --install` installs the executable and README/LICENSE into the standard `bin/` and
+  `share/doc/<project>/` directories; keep the install rules working and covered by the CI smoke
+  step. Screenshots under `docs/assets/` are documentation only (generated from the committed
+  fixture pages), not test assertions.
 
 ## Logging and diagnostics
 

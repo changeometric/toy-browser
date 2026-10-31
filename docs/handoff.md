@@ -70,7 +70,9 @@ or newer is required; building needs the X11, libpng, freetype, harfbuzz, fontco
 development headers (all approved dependencies); only windowed mode needs a running display. When
 `CMAKE_BUILD_TYPE` is not given the build defaults to `RelWithDebInfo` (M11); pass
 `-DCMAKE_BUILD_TYPE=Debug` for unoptimised debugging. `-ffp-contract=off` is applied on purpose so
-layout geometry stays byte-identical across build types and compilers.
+layout geometry stays byte-identical across build types and compilers. `CMakePresets.json` packages
+the same commands as `default`/`dev` presets, and `.github/workflows/ci.yml` runs the configure,
+build, test and install-smoke sequence with both GCC and Clang.
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -121,8 +123,9 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 # Manual system-font check: no font flags at all. Text uses installed fonts (serif default,
 # weight/style, per-character fallback) and is machine-dependent. Chinese sites render with a
 # Han fallback face and wrap because CJK text has break units.
-"$BUILD"/toybrowser --size 800x900 --screenshot /tmp/toybrowser-zh.ppm https://www.gov.cn/
-"$BUILD"/toybrowser --size 800x600 --dump-boxes https://example.com/ | grep 'text "'
+"$BUILD"/toybrowser --size 800x900 --screenshot /tmp/toybrowser-zh.ppm \
+    "$PWD/tests/fixtures/cjk_site/index.html"
+"$BUILD"/toybrowser --size 800x600 --dump-boxes "$PWD/tests/fixtures/nav_site/index.html" | grep 'text "'
 ```
 
 Expected: all font tests pass deterministically (fixture config: default serif, bold/italic faces,
@@ -207,6 +210,8 @@ user priorities.
   deterministic; see the fixture READMEs).
   `tests/support/tls_server.h` is the header-only in-process TLS loopback server shared by
   `net.tls`/`net.http`/`shell.https`; no test ever contacts the public network.
+- Root public files — `README.md`/`README.zh.md` (user-facing entry points), `CONTRIBUTING.md`,
+  `SECURITY.md`, `CMakePresets.json`, `.github/workflows/ci.yml` and `docs/assets/` screenshots.
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
   questions (this file is the snapshot).
 - Shared task board — provided by the agent runtime (task create/claim/update with revision); if

@@ -74,6 +74,11 @@ if(TARGET toy_shell)
   target_link_libraries(toybrowser PRIVATE toy_shell)
 endif()
 
+include(GNUInstallDirs)
+install(TARGETS toybrowser RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES README.md README.zh.md LICENSE
+        DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
 if(TOYBROWSER_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)

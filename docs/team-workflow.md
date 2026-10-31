@@ -386,7 +386,7 @@ the round when possible. Clean up stale build directories and stray files.
   stderr, exit status and PPM bytes across 12 http/file cases between a `git worktree` of the
   previous commit and the new build, and between GCC and Clang; everything was identical, which let
   the round prove the net refactor changed nothing for existing pages.
-- M9: manual public-site checks against a documentation site and the public `badssl` domains
+- M9: manual public-site checks against documentation pages and public TLS test pages
   validated the security behavior end to end (expired/self-signed/wrong-host pages fail with
   readable errors and exit 1; normal pages fetch, dump and screenshot). Such checks stay manual and
   their network details never enter the repository.

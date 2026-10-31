@@ -342,7 +342,7 @@ the JavaScript subset is deferred.** For a snapshot and takeover guide, read
 - Acceptance reached: all 66 pre-M11 tests and the byte-compat/cross-compiler gates stay green;
   fixture-font and bitmap frames are byte-identical to the pre-M11 baseline at 33 scrolled reference
   frames; the window opens with a single layout. Measured on the 81k-text-box stress page (800x600,
-  automatic system fonts, this machine): frame paint **10.6 s -> 3.5 ms**, scroll **11.0 s ->
+  automatic system fonts, the development machine): frame paint **10.6 s -> 3.5 ms**, scroll **11.0 s ->
   3.1 ms**, resize frame **11.0 s -> 3.0 ms**, layout **2.1 s -> 31 ms**, page load **2.2 s ->
   69 ms**; on a 10k-word page paint **1.38 s -> 0.89 ms**, layout **267 ms -> 3.3 ms**, load
   **290 ms -> 30 ms**; the Chinese stress page paint **3.2 s -> 2.3 ms**, load 1.3 s -> 142 ms

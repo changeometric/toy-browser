@@ -68,10 +68,16 @@ ctest --test-dir build --output-on-failure
 ```
 
 - 只做 out-of-source 构建。加 `-DTOYBROWSER_WERROR=ON` 把警告视为错误。
+- `CMakePresets.json` 提供 `default`（只构浏览器）与 `dev`（测试 + warnings-as-errors）；CI 用 GCC
+  与 Clang 运行同样的 configure/build/test 序列。presets 只是便捷方式——上面的显式 `cmake` 命令是
+  唯一事实来源，必须保持可用。
 - 默认构建类型是 `RelWithDebInfo`；不要移除这个默认值（未优化的默认构建会让页面慢数倍），也不要
   移除 `-ffp-contract=off`（它让浮点布局几何在不同构建类型与 GCC/Clang 间逐字节一致）。
 - 构建目录从不提交。
 - `CMAKE_EXPORT_COMPILE_COMMANDS` 已开启，因此 `compile_commands.json` 会出现在配置的构建目录中，可用于 clangd 和 IDE；构建目录保持未跟踪。
+- `cmake --install` 会把可执行文件与 README/LICENSE 安装到标准 `bin/` 与 `share/doc/<project>/`；
+  保持安装规则可用，并由 CI 的安装冒烟步骤覆盖。`docs/assets/` 下的截图只是文档（由提交的 fixture
+  页面生成），不是测试断言。
 
 ## 日志与诊断
 

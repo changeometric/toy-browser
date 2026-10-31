@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default build (browser only, RelWithDebInfo)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "TOYBROWSER_BUILD_TESTS": "OFF",
+        "TOYBROWSER_WERROR": "OFF"
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "Developer build (tests, warnings as errors)",
+      "inherits": "default",
+      "binaryDir": "${sourceDir}/build-dev",
+      "cacheVariables": {
+        "TOYBROWSER_BUILD_TESTS": "ON",
+        "TOYBROWSER_WERROR": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default"
+    },
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    }
+  ]
+}

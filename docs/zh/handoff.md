@@ -58,7 +58,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-预期：66/66 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。
+预期：66/66 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。`CMakePresets.json` 把同样的命令封装为 `default`/`dev` presets，`.github/workflows/ci.yml` 用 GCC 与 Clang 运行 configure、build、test 与安装冒烟步骤。
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -108,8 +108,9 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 
 # 手工系统字体检查：完全不传字体标志。文本使用已安装字体（默认 serif、weight/style、逐字符回退），
 # 依赖机器。中文站点用汉字回退 face 渲染，并且因为 CJK 断行单元而正常换行。
-"$BUILD"/toybrowser --size 800x900 --screenshot /tmp/toybrowser-zh.ppm https://www.gov.cn/
-"$BUILD"/toybrowser --size 800x600 --dump-boxes https://example.com/ | grep 'text "'
+"$BUILD"/toybrowser --size 800x900 --screenshot /tmp/toybrowser-zh.ppm \
+    "$PWD/tests/fixtures/cjk_site/index.html"
+"$BUILD"/toybrowser --size 800x600 --dump-boxes "$PWD/tests/fixtures/nav_site/index.html" | grep 'text "'
 ```
 
 预期：所有字体测试确定性地通过（fixture 配置：默认 serif、粗体/斜体 face、混合拉丁+汉字 run、提交的
@@ -175,6 +176,8 @@ bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
   `tests/fixtures/images/generate.py`（只用标准库、输出确定；见各 fixture README）。
   `tests/support/tls_server.h` 是 `net.tls`/`net.http`/`shell.https` 共用的 header-only 进程内 TLS
   loopback 服务器；没有任何测试访问公网。
+- 根目录公开文件 —— `README.md`/`README.zh.md`（面向使用者的入口）、`CONTRIBUTING.md`、
+  `SECURITY.md`、`CMakePresets.json`、`.github/workflows/ci.yml` 与 `docs/assets/` 截图。
 - `docs/` —— 架构、路线图、约定、团队流程、决策、依赖、待决问题（本文件是快照）。
 - 共享任务板 —— 由 agent 运行时提供（任务 create/claim/update，带 revision）；如果运行时没有，则用 `docs/tasks/<milestone>.md`，字段相同。见 [team-workflow.md](team-workflow.md)。
 - `README.md` / `README.zh.md` 与 `docs/zh/` —— 面向用户的入口（英语为权威）。

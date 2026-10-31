@@ -158,15 +158,22 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
 
 ```
 .
+├── .github/workflows/ci.yml        # 与本地门禁一致的 GCC + Clang 构建/测试 CI
 ├── AGENTS.md
 ├── CMakeLists.txt
-├── README.md
+├── CMakePresets.json               # 便捷 presets：default（普通构建）、dev（测试 + WERROR）
+├── CONTRIBUTING.md
+├── LICENSE
+├── README.md / README.zh.md
+├── SECURITY.md
 ├── docs/
+│   ├── assets/                     # README.md/README.zh.md 使用的截图
+│   └── <设计与流程文档>
 ├── src/
 │   ├── main.cpp
-│   └── <module>/                    # appears with the module's first real file
-│       ├── include/toy/<module>/*.h # public API: #include "toy/<module>/<file>.h"
-│       └── *.cpp                    # implementation and private headers
+│   └── <module>/                    # 与模块首个真实文件一起创建
+│       ├── include/toy/<module>/*.h # 公开 API: #include "toy/<module>/<file>.h"
+│       └── *.cpp                    # 实现与私有头文件
 └── tests/
     ├── CMakeLists.txt
     ├── toolchain_smoke.cpp
