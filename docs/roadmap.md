@@ -3,9 +3,9 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M14a are done (M14a = CSS values & typography). M14b (box decorations &
-constraints) is the next planned milestone; M15 (flexbox/position/float subset) follows. The HTTP
-proxy (M16) and the JavaScript subset are deferred.** For a snapshot and takeover guide, read
+**Current status: M0–M14 are done (M14 = CSS compatibility batch 1: M14a values & typography, M14b
+box decorations & constraints). M15 (flexbox/position/float subset) is the next planned milestone.
+The HTTP proxy (M16) and the JavaScript subset are deferred.** For a snapshot and takeover guide, read
 [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
@@ -516,30 +516,73 @@ proxy (M16) and the JavaScript subset are deferred.** For a snapshot and takeove
   parsed. Real sites remain visually dominated by borders (385 declarations in the surveyed
   stylesheets, plus 121 `border-radius`) and by position/float (M15).
 
-## M14b — Box decorations & constraints (planned; next milestone)
+## M14b — Box decorations & constraints ✅ (done)
 
-- Goal: close the remaining high-frequency box-decoration gap: `border`/`border-*` width, style
-  and color (longhands and shorthands, painting all four sides and including border widths in the
-  box geometry and hit-test rectangles), `box-sizing`, `overflow: hidden` clipping, and the
-  remaining `text-decoration` line values (`line-through`, `overline`). `border-radius` stays out
-  unless separately scoped (rounded-corner rasterization is a paint/geometry project of its own).
-- Expected shape: extend the parser/computed style with the border longhands and the border /
-  box-sizing shorthands; layout subtracts border widths from the content box and grows the border
-  box; paint draws border rectangles as display-list fills (integer device pixels, frozen SrcOver)
-  and clips `overflow: hidden` boxes. Style/paint dumps gain fields only if they stay deterministic
-  and byte-compat normalization is updated in the same round. Pages not using the new properties
-  keep byte-identical output.
-- Out of scope: flexbox/grid/position/float (M15), `border-radius` unless re-scoped, background
-  images/gradients, CSS variables, at-rules/webfonts.
-- Tests: extend `tests/fixtures/css_compat_site/` with borders on all sides (mixed styles/colors),
-  box-sizing and overflow clipping plus line-through/overline; dump/screenshot/pixel tests; no
-  regressions; manual real-site check on pages whose visual gaps are dominated by borders.
-- Acceptance: all tests GCC/Clang WERROR green; pre-M14b dumps/pixels byte-identical for pages not
-  using the new properties; fixture coverage for every property; real-site check shows borders and
-  clipping; docs updated.
-- After M14b: M15 flexbox/position/float subset; the proxy (M16) and JavaScript stay deferred.
+- Goal met: the remaining high-frequency box decorations now apply. `border`/`border-*` width,
+  style and color (longhands and shorthands) participate in the box model and are painted on all
+  four sides; `box-sizing: content-box`/`border-box` changes how specified widths/heights and
+  min/max constraints are interpreted; `overflow: hidden` clips a box's painted descendants to its
+  padding box; and `text-decoration` now paints `line-through` and `overline` in addition to
+  `underline`.
+- `style`: new computed `BorderSide` (px width, `BorderStyle`, optional color where nullopt is
+  `currentColor`), `BoxSizing` and `Overflow` types plus `UsedBorderWidth`/`UsedBorderColor`
+  helpers. Parsed properties: `border-*-width` (px, thin/medium/thick = 1/3/5px), `border-*-style`
+  (all ten keywords; none/hidden have used width 0), `border-*-color` (the M14a color set incl.
+  alpha/transparent/currentColor), 1–4 value `border-width/style/color` shorthands, the
+  `border-top/right/bottom/left` and `border` shorthands with CSS reset-to-initial semantics,
+  `box-sizing`, `overflow` shorthand + `overflow-x/y`, and the three-flag `text-decoration` reset
+  semantics. Borders/box-sizing/overflow are non-inherited; decoration flags inherit. The style
+  dump keeps every pre-M14b field, extends `text-decoration=` to the space-joined tokens and
+  appends ` border-*-width= border-*-style= border-color= box-sizing= overflow=`.
+- `layout`: used border widths enter the box model (border box = content + padding + borders,
+  content box inset by border + padding). `content-box` keeps width/height as content sizes (M14a
+  behaviour); `border-box` makes them the border-box sizes (content = clamp(size - padding -
+  borders, >=0)). Px min/max-width/height follow the box-sizing, auto widths fill the containing
+  width minus margins/paddings/borders, and auto-margin centering distributes the remaining space
+  against the final border box. Inline elements add their horizontal borders to the left/right
+  advances and fragment widths (vertical inline borders and replaced-element padding/margins/
+  borders stay ignored as documented M5/M8a limits). Overflow and decorations never change layout.
+- `paint`: element paint order is background → borders → image → children/text. Borders are up to
+  four device-pixel `FillRect`s from the border-box rectangle in top/right/bottom/left order with
+  the resolved color (currentColor → text color, alpha kept); every parsed style paints as a solid
+  line in this MVP and each rect is culled exactly against the viewport like a background. An
+  `overflow:hidden` box pushes one padded-box clip after its own background/borders/image and pops
+  it after the whole subtree (nested clips nest; the pair is emitted even for an empty subtree;
+  clipping is painting-only, so the scrollable content height still includes overflowing boxes).
+  Text decorations are emitted after each painted text box's text commands in underline →
+  line-through → overline order (`underline`: baseline+1; `line-through`: baseline -
+  max(1, round(font_size/3)); `overline`: box top), each a 1px `FillRect` in the opaque text color
+  under the same text culling and never for hidden text.
+- Tests/fixtures: `tests/fixtures/css_compat_site/` gained `borders.html` (1–4 sides, mixed
+  widths/styles/colors/currentColor/rgba, border shorthands, content-box vs border-box, nested
+  bordered boxes), `overflow.html` (clipped oversized child + text, visible twin, bordered clip,
+  following box) and `decorations.html` (all three decorations individually/combined/inherited/
+  reset); the README documents every expected computed value, box rectangle, decoration row and
+  pixel while `legacy.html` stays M14a-identical. New `style.borders`, `style.box_model`,
+  `layout.box_model`, extended paint display-list tests and extended `shell.css_compat` (plus CLI
+  `shell.dump_style_css_compat_borders` and `shell.css_compat_screenshot_borders`); 85 tests total.
+- Acceptance reached: all 80 pre-M14b tests plus the 5 new tests pass under GCC and Clang with
+  warnings as errors (85 tests); pre-M14b pages keep byte-identical box dumps, screenshots and exit
+  status (31-case gate vs the M14a binary, style dumps normalized only for appended fields); a
+  comparison against the pre-M14 (M13) binary shows differences only in the M14a fixture pages and
+  nothing else; GCC/Clang outputs are identical; manual real-site checks show the batch working:
+  python.org now paints the nav items' colored borders (148 elements with used borders) and the
+  site's universal `*{box-sizing:border-box}` reflows its 836 elements; w3.org's "Skip to content"
+  gets its black border box and 10 overflow-hidden elements clip; gnu.org's skip link paints its
+  border; the pre-M14b style fields on all three sites stayed identical to the baseline. No new
+  dependency.
+- Known limits after M14b: every border style paints as a solid line (dashed/dotted/double/groove/
+  ridge/inset/outset are parsed but not rendered with their pattern); percentage border widths are
+  ignored; `overflow` clips painting only (no scrollbars, no horizontal scrolling, content height
+  still includes overflowing boxes) and `overflow-x/y: hidden` clip both axes (MVP simplification);
+  vertical inline borders and replaced-element borders/padding/margins are ignored; text-decoration
+  style/color components are ignored (decorations use the text color as solid 1px rows);
+  `border-radius`, `box-shadow`, position/float/flex/grid and other display values remain out
+  (M15 and later). The remaining real-site gaps measured in the same CSS survey are
+  position/float (219 declarations), border-radius (121), box-shadow (129), display
+  inline-block/flex/grid/table (132) and transforms/animations (105).
 
-## M15 — Flexbox / position / float subset (planned; scope re-confirmed before starting)
+## M15 — Flexbox / position / float subset (planned; next milestone)
 
 - Goal: support the layout mechanisms modern static pages use most: a practical subset of flexbox
   (row/column direction, `justify-content`, `align-items`, `gap`, `flex-grow`/`shrink`/`basis`,

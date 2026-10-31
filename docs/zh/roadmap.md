@@ -4,8 +4,8 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M14a 已完成（M14a = CSS 值与排版）。M14b（盒装饰与约束）是下一个计划里程碑；
-M15（flexbox/position/float 子集）随后进行。HTTP 代理（M16）与 JavaScript 子集已延后。**
+**当前状态：M0–M14 已完成（M14 = CSS 兼容批次 1：M14a 值与排版、M14b 盒装饰与约束）。
+M15（flexbox/position/float 子集）是下一个计划里程碑。HTTP 代理（M16）与 JavaScript 子集已延后。**
 快照与接管指南见 [handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
@@ -373,26 +373,60 @@ M15（flexbox/position/float 子集）随后进行。HTTP 代理（M16）与 Jav
   主要来自 border（调查的样式表中 385 条声明，另有 121 条 `border-radius`）与 position/float
   （M15）。
 
-## M14b — 盒装饰与约束（计划中；下一个里程碑）
+## M14b — 盒装饰与约束 ✅（已完成）
 
-- 目标：补齐剩余的高频盒装饰差距：`border`/`border-*` 的宽度、样式与颜色（长写与简写、绘制四边、
-  把边框宽度计入盒几何与命中测试矩形）、`box-sizing`、`overflow: hidden` 裁剪，以及剩余
-  `text-decoration` 线值（`line-through`、`overline`）。除非单独划范围，`border-radius` 留待以后
-  （圆角光栅化本身是一个 paint/几何项目）。
-- 预期形态：扩展 parser/计算样式加入 border 长写与 border / box-sizing 简写；layout 从内容盒减去
-  边框宽度并扩大 border box；paint 用显示列表填充绘制边框矩形（整数设备像素、冻结 SrcOver），并
-  裁剪 `overflow: hidden` 盒。只有保持确定性时才在 style/paint dump 增加字段，并在同一轮更新字节
-  兼容规范化。不使用新属性的页面保持逐字节输出。
-- 不做：flexbox/grid/position/float（M15）、`border-radius`（除非重新划范围）、背景图片/渐变、
-  CSS 变量、at-rule/webfont。
-- 测试：扩展 `tests/fixtures/css_compat_site/`，覆盖四边 border（混合样式/颜色）、box-sizing、
-  overflow 裁剪与 line-through/overline；dump/截图/像素测试；无回归；在视觉差距主要来自 border 的
-  页面上做手工真实站点检查。
-- 验收：所有测试在 GCC/Clang WERROR 下全绿；不使用新属性的页面在 M14b 之前 dump/像素逐字节不变；
-  每个属性都有 fixture 覆盖；真实站点检查显示 border 与裁剪生效；文档更新。
-- M14b 之后：M15 flexbox/position/float 子集；代理（M16）与 JavaScript 保持延后。
+- 目标已达成：剩余高频盒装饰现在生效。`border`/`border-*` 的宽度、样式与颜色（长写与简写）参与盒
+  模型并在四边绘制；`box-sizing: content-box`/`border-box` 改变指定宽高与 min/max 约束的解释方式；
+  `overflow: hidden` 把盒的绘制后代裁剪到 padding box；`text-decoration` 现在除 `underline` 外还绘制
+  `line-through` 与 `overline`。
+- `style`：新的计算类型 `BorderSide`（px 宽度、`BorderStyle`、可选颜色，nullopt 表示
+  `currentColor`）、`BoxSizing`、`Overflow` 与 `UsedBorderWidth`/`UsedBorderColor` 辅助函数。解析的
+  属性：`border-*-width`（px、thin/medium/thick = 1/3/5px）、`border-*-style`（全部十种关键字；
+  none/hidden 的 used width 为 0）、`border-*-color`（M14a 颜色集，含 alpha/transparent/
+  currentColor）、1–4 值的 `border-width/style/color` 简写、`border-top/right/bottom/left` 与
+  `border` 简写（CSS 重置到初始值语义）、`box-sizing`、`overflow` 简写 + `overflow-x/y`，以及
+  三标志的 `text-decoration` 重置语义。border/box-sizing/overflow 不继承；装饰标志继承。样式 dump
+  保留所有 M14b 之前字段，`text-decoration=` 扩为空格连接 token，并在行尾追加
+  ` border-*-width= border-*-style= border-color= box-sizing= overflow=`。
+- `layout`：used border 宽度进入盒模型（border box = content + padding + borders，content box 由
+  border + padding 内缩）。`content-box`（默认）保持宽高为内容尺寸（M14a 行为）；`border-box` 使宽高为
+  border-box 尺寸（content = clamp(size - padding - borders, >=0)）。px min/max-width/height 按
+  box-sizing 解释，auto 宽度填充 包含宽度 - margin - padding - border，auto margin 按最终 border box
+  分配剩余空间。行内元素的水平 border 加入左右 advance 与 fragment 宽度（fragment 首尾各含一侧；
+  行内垂直 border 与 replaced 元素的 border/padding/margin 仍按文档化限制忽略）。overflow 与装饰不改变
+  布局。
+- `paint`：元素绘制顺序为 background → borders → image → children/text。border 从 border-box 矩形按
+  top/right/bottom/left 顺序发出最多四条设备像素 `FillRect`，颜色用解析后的 `UsedBorderColor`
+  （currentColor → 文本色，保留 alpha）；本 MVP 中所有可见样式都按实心绘制，每条矩形按背景同样的规则
+  做视口裁剪。`overflow:hidden` 的盒在自身背景/边框/图片之后压入其 padding-box clip，并在整棵子树之后
+  弹出（空子树也成对、嵌套正确；裁剪只影响绘制，滚动内容高度仍包含溢出盒）。文本装饰在文字命令后按
+  underline → line-through → overline 顺序发出 1px `FillRect`（underline：baseline+1；
+  line-through：baseline - max(1, round(font_size/3))；overline：盒顶部），使用不透明文本色与相同
+  文本裁剪，隐藏文本不绘制。
+- 测试/fixtures：`tests/fixtures/css_compat_site/` 新增 `borders.html`（1–4 边、不同宽度/样式/
+  颜色/currentColor/rgba、border 简写、content-box vs border-box、嵌套 border 盒）、
+  `overflow.html`（被裁剪的超大子元素 + 文本、visible 对照、带 border 的裁剪、后续盒）与
+  `decorations.html`（三种装饰各自/组合/继承/重置）；README 记录每个期望计算值、盒矩形、装饰行与
+  像素，`legacy.html` 保持与 M14a 逐字节相同。新增 `style.borders`、`style.box_model`、
+  `layout.box_model`，扩展 paint 显示列表测试与 `shell.css_compat`（另加 CLI
+  `shell.dump_style_css_compat_borders` 与 `shell.css_compat_screenshot_borders`）；共 85 个测试。
+- 已达成验收：所有 80 个 M14b 之前测试加 5 个新测试在 GCC 与 Clang 下、警告视为错误时通过（共 85 个
+  测试）；M14b 之前的页面保持逐字节相同的盒 dump、截图与退出码（对 M14a 二进制的 31 用例门禁，
+  style dump 只对追加字段规范化）；与 M14（M13）更早二进制的对比只在 M14a fixture 页面上有差异；
+  GCC/Clang 输出相同；手工真实站点检查显示本批次生效：python.org 现在绘制导航项的彩色 border
+  （148 个元素有 used border），其通用 `*{box-sizing:border-box}` 使 836 个元素重排；w3.org 的
+  “Skip to content” 得到黑色 border 盒且 10 个 overflow-hidden 元素裁剪；gnu.org 的 skip 链接绘制
+  其 border；三站 M14b 之前的 style 字段与基线完全一致。没有新依赖。
+- M14b 之后的已知限制：所有 border 样式都按实心线绘制（dashed/dotted/double/groove/ridge/inset/
+  outset 参与盒模型但不渲染图案）；百分比 border 宽度被忽略；`overflow` 只裁剪绘制（没有滚动条、没有
+  水平滚动，内容高度仍包含溢出盒），且 `overflow-x/y: hidden` 会同时裁剪两轴（MVP 简化）；行内垂直
+  border 与 replaced 元素的 border/padding/margin 仍被忽略；text-decoration 的样式/颜色组件被忽略
+  （装饰使用文本色的 1px 行）；`border-radius`、`box-shadow`、position/float/flex/grid 与其他
+  display 值仍在后续轮次。同一 CSS 调查中剩余的真实站点差距：position/float 219 条声明、
+  border-radius 121、box-shadow 129、display inline-block/flex/grid/table 132、transform/animation
+  105。
 
-## M15 — Flexbox / position / float 子集（计划中；开始前重新确认范围）
+## M15 — Flexbox / position / float 子集（计划中；下一个里程碑）
 
 - 目标：支持现代静态页面最常用的布局机制：flexbox 的实用子集（row/column 方向、`justify-content`、
   `align-items`、`gap`、`flex-grow`/`shrink`/`basis`、换行）和/或基础 `position`/`float`。具体拆分由

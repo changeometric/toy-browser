@@ -51,14 +51,66 @@ enum class TextAlign { kLeft, kRight, kCenter, kJustify };
 
 enum class Visibility { kVisible, kHidden };
 
+// The computed border style. The MVP paints every visible style as a solid line
+// (dashed/dotted/double/groove/ridge/inset/outset are parsed and participate in
+// the box model but render solid until a later round).
+enum class BorderStyle {
+  kNone,
+  kHidden,
+  kSolid,
+  kDashed,
+  kDotted,
+  kDouble,
+  kGroove,
+  kRidge,
+  kInset,
+  kOutset
+};
+
+// One computed border side: a px width, a style and an optional color. A nullopt
+// color means the CSS `currentColor` keyword: dump/paint resolve it to the
+// element's computed text color (opaque). Border widths are px only; percentage
+// border widths are ignored by the parser. The border participates in the box
+// model only through UsedBorderWidth (0 for none/hidden).
+struct BorderSide {
+  Length width;
+  BorderStyle style = BorderStyle::kNone;
+  std::optional<std::uint32_t> color;
+};
+
+// The computed box-sizing value: content-box (width/height set the content box,
+// the default) or border-box (width/height set the border box).
+enum class BoxSizing { kContentBox, kBorderBox };
+
+// The computed overflow values. M14b distinguishes only visible vs hidden for
+// clipping; `overflow-x`/`overflow-y` are stored separately, but a box clips when
+// either axis is hidden (MVP simplification, documented in the roadmap).
+enum class Overflow { kVisible, kHidden };
+
+// The border width that participates in layout and painting: 0 when the side's
+// style is none/hidden, otherwise the computed px width.
+inline float UsedBorderWidth(const BorderSide& side) {
+  if (side.style == BorderStyle::kNone || side.style == BorderStyle::kHidden) {
+    return 0.0f;
+  }
+  return side.width.value;
+}
+
+// The border color used by dump/paint: the explicit color, or the element's text
+// color made opaque for `currentColor`.
+inline std::uint32_t UsedBorderColor(const BorderSide& side, std::uint32_t text_color) {
+  return side.color ? *side.color : (text_color | 0xFF000000u);
+}
+
 // The computed style of one element. Lengths are absolute CSS pixels or
 // percentages resolved by layout; `width`/`height` are std::nullopt when auto,
 // and the min/max constraints are std::nullopt when unconstrained (initial
 // `none`). Inherited properties (`line_height`, `text_align`, `visibility`,
-// `text_decoration_underline`) start from the parent style; everything else
-// starts at its initial value. `text_decoration_underline` inherits in this MVP
-// (CSS decorations propagate to descendants) and is the only decoration M14
-// paints.
+// `text_decoration_underline`, `text_decoration_line_through`,
+// `text_decoration_overline`) start from the parent style; everything else
+// starts at its initial value. Text decorations inherit in this MVP (CSS
+// decorations propagate to descendants); M14b paints underline, line-through and
+// overline.
 struct ComputedStyle {
   Display display = Display::kInline;
   // 0xRRGGBB; text is always opaque (rgba()/hsla() alpha is dropped for text).
@@ -94,6 +146,19 @@ struct ComputedStyle {
   TextAlign text_align = TextAlign::kLeft;
   Visibility visibility = Visibility::kVisible;
   bool text_decoration_underline = false;
+  bool text_decoration_line_through = false;
+  bool text_decoration_overline = false;
+  // Border sides (initial: no style, so they occupy no space). Widths are px and
+  // participate in the box model only when the style is not none/hidden; the
+  // initial color is currentColor (see UsedBorderColor).
+  BorderSide border_top;
+  BorderSide border_right;
+  BorderSide border_bottom;
+  BorderSide border_left;
+  // Box sizing and overflow clipping (M14b). Overflow is visible by default.
+  BoxSizing box_sizing = BoxSizing::kContentBox;
+  Overflow overflow_x = Overflow::kVisible;
+  Overflow overflow_y = Overflow::kVisible;
 };
 
 // One external author style sheet fetched from a `<link rel="stylesheet">`
@@ -147,8 +212,18 @@ StyleTree ComputeStyles(const dom::Document& document,
 // print rounded CSS pixels ("12px"), percentages rounded with "%" ("50%"),
 // "auto" for auto width/height/margins and "none" for unconstrained min/max.
 // line-height prints "normal", a unitless number (up to 3 decimals with trailing
-// zeros trimmed) or "NNpx"; text-decoration prints "none" or "underline". Used
-// by --dump-style and the style tests.
+// zeros trimmed) or "NNpx"; text-decoration prints "none" or the space-joined
+// tokens underline/line-through/overline in that order. Since M14b the line then
+// continues with " border-top-width= border-right-width= border-bottom-width=
+// border-left-width=" (USED widths in px, 0 for none/hidden), " border-top-style=
+// border-right-style= border-bottom-style= border-left-style=" (none/hidden/
+// solid/dashed/dotted/double/groove/ridge/inset/outset), a single
+// " border-color=" (four resolved #rrggbb colors, currentColor resolved to the
+// text color, alpha dropped), " box-sizing=content-box|border-box" and
+// " overflow=visible|hidden" (hidden if either axis is hidden). All M14b fields
+// are appended after the M14a fields, so the byte-compat normalization
+// (strip from " min-width=") covers them. Used by --dump-style and the style
+// tests.
 std::string DumpStyleTree(const dom::Document& document, const StyleTree& styles);
 
 }  // namespace toy::style

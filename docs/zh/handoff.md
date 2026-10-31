@@ -29,24 +29,26 @@
 | M12 | 外部样式表：公开 `style::LinkedStyleSheet` 与双参数 `ComputeStyles(document, linked_sheets)`，按文档顺序合并没有链接的样式表与 `<style>`（单参数重载与 M11 逐字节相同）；shell 私有 `LoadStyledDocument()` 在页面加载与 `--dump-style` 之间共享一条 抓取/解析/发现/过滤/抓取样式表/计算样式 路径；`rel`/`disabled`/`media`/`type` 过滤，`href` 相对重定向后的最终页面 URL 解析，只接受 200..299 body，失败/被过滤样式表静默跳过，每个 `<link>` 出现抓取一次（不去重）；`--dump-dom`/`--dump-body` 仍不抓取样式表；提交 `tests/fixtures/css_site/`、header-only `tests/support/http_server.h` loopback 服务器、`style.external_sheets` + `shell.external_css` + CLI 测试；70 个测试；字节兼容与 GCC/Clang 门禁全绿 |
 | M13 | 资源加载：公开 `net::Client`（pimpl、单线程），每个 origin 最多一条空闲 keep-alive HTTP/1.1 连接并复用；在私有 `Stream` 上增量解析 Content-Length/chunked body 与 trailer，读到的多余字节留给下一请求；遵循 HTTP/1.1/1.0 持久连接规则；用已批准的 zlib 透明解码 gzip（原始与解码后 body 都受限，其他编码是错误）；池化连接在收到任何响应字节前失败时在新连接上重试一次；重定向与 `file://` 走同一个 client；一次性 `Fetch()` 保持完全相同的请求字节/行为。shell `LoadPage` 每次加载创建一个 Client 用于页面 + 样式表 + 图片，并按解析后的图片 URL 在页内去重（重复 URL 共享一次抓取/解码/图片对象；失败 URL 被记住；每个 `<link>` 出现仍各抓一次；无跨加载缓存）。共享 loopback HTTP/TLS 测试服务器增加持久连接模式与连接/请求计数；`net.keep_alive`、`net.gzip`、`net.tls_keep_alive` 与 `shell.resource_loading`；74 个测试；字节兼容、GCC/Clang 与真实页面加载时间门禁全绿 |
 | M14a | CSS 值与排版：`%`/`rem` 单位、`rgb()`/`rgba()`/`hsl()`/`hsla()` 与完整 CSS 命名颜色集、`background` 简写颜色、逻辑属性映射到物理边、min/max-width/height、`margin: auto`、`line-height`、`text-align`、`text-decoration: underline`、`visibility`；新计算值模型 `Length`/`AutoLength`/`LineHeight`/`TextAlign`/`Visibility`（盒属性百分比留给 layout）；样式 dump 追加 `min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`；layout 按包含块内容宽度解析百分比、min/max 钳制、auto margin 居中、line-height half-leading 基线与 text-align 整行平移；paint 支持 visibility 与下划线；提交 `tests/fixtures/css_compat_site/`；`style.values`、`style.typography`、`layout.style_properties`、`shell.css_compat`、`shell.dump_style_css_compat`、`shell.css_compat_screenshot`；80 个测试；字节兼容（样式字段规范化）、GCC/Clang 与真实站点视觉门禁 |
+| M14b | 盒装饰与约束：`BorderSide`/`BorderStyle`/`BoxSizing`/`Overflow` 计算类型与 `UsedBorderWidth`/`UsedBorderColor` 辅助函数；border 长写（px/thin/medium/thick 宽度、十种样式、含 alpha/transparent/currentColor 的颜色）、1–4 值 width/style/color 简写、逐边与 `border` 简写（重置到初始值语义）、`box-sizing`、`overflow` 简写 + `overflow-x/y`、三标志 `text-decoration` 重置语义；样式 dump 扩展 `text-decoration=` 并追加 ` border-*-width= border-*-style= border-color= box-sizing= overflow=`；layout 把 used border 放入盒模型（border box = content+padding+borders，content-box vs border-box 宽高与 px min/max、auto margin 按最终 border box、行内水平 border、replaced 忽略 border）；paint 顺序 background→borders→image→children、四条 border FillRect（所有样式实心、逐矩形裁剪）、overflow-hidden padding-box clip 对、line-through/overline 与 underline；css_compat_site 增加 borders/overflow/decorations 页面；`style.borders`、`style.box_model`、`layout.box_model`、扩展 paint/shell 测试与 CLI 检查；85 个测试；字节兼容（样式规范化）、GCC/Clang 与真实站点视觉门禁 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-**下一计划里程碑：M14b —— 盒装饰与约束（已计划，尚未开始）。** M14a（CSS 值与排版）已交付：
-真实页面现在会应用 %/rem、rgb/rgba/hsl 与命名颜色、background 简写颜色、逻辑属性、min/max 尺寸、
-auto margin、line-height、text-align、下划线与 visibility。手工真实站点检查显示本批次生效
-（gnu.org 红色导航栏现在会绘制、w3.org 导航行距/居中生效、python.org 应用 275 个居中与 88 个
-line-height 元素）。M14b 补齐剩余高频盒装饰——border/border-*、box-sizing、overflow 裁剪与
-line-through/overline——它们主导了真实站点剩余的视觉差距（调查的样式表中 385 条 border 声明；
-另有 121 条 border-radius 除非单独划范围否则不做）。M15 随后覆盖 flexbox/position/float。
+**下一计划里程碑：M15 —— Flexbox / position / float 子集（已计划，尚未开始）。**
+M14（CSS 兼容批次 1）已完成：M14a 加入 CSS 值与排版层，M14b 加入盒装饰——border/border-*、
+box-sizing、overflow:hidden 裁剪与 line-through/overline。手工真实站点检查显示两批都生效
+（python.org 绘制每项彩色导航 border，其通用 `box-sizing: border-box` 使 836 个元素重排；w3.org 的
+skip-link border 与 overflow 裁剪生效；gnu.org 的 skip 链接绘制 border；更早的 M14a 检查：
+导航行距、居中、百分比/颜色）。M15 是下一个大型布局里程碑（position/float/flex/grid 子集）。
 HTTP 代理（M16）与 JavaScript 子集保持延后。
 
 尚未实现：并行/线程资源加载、跨页面图片缓存与懒加载（M13 只有串行复用与页内去重）、
-border/border-radius/box-sizing/overflow 裁剪/box-shadow 与剩余 text-decoration（M14b）、
-position/float/flexbox/grid 与其他 display 值（M15）、代理（M16）、JavaScript（已延后）、水平滚动/
-滚动条、hover/active 链接样式与表单控件、`@font-face`/webfont 下载、XShm/dirty-rect 呈现与 GPU
-渲染（刻意决策，见 roadmap M11）。自 M14a 起 CSS 值层覆盖 `%`/`rem`、颜色函数与完整命名颜色
-（仅旧式逗号语法）、逻辑属性（horizontal-tb）、min/max 尺寸、auto margin、line-height、
-text-align（不含 justify）、下划线与 visibility——已知限制见 [roadmap.md](roadmap.md)。
+`border-radius`、`box-shadow`、position/float/flexbox/grid 与其他 display 值、CSS 变量、at-rule/
+webfont、背景图片、transform/animation（M15 及以后/backlog）、代理（M16）、JavaScript（已延后）、
+水平滚动/滚动条、hover/active 链接样式与表单控件、`@font-face`/webfont 下载、XShm/dirty-rect
+呈现与 GPU 渲染（刻意决策，见 roadmap M11）。自 M14a 起 CSS 值层覆盖 `%`/`rem`、颜色函数与完整
+命名颜色（仅旧式逗号语法）、逻辑属性（horizontal-tb）、min/max 尺寸、auto margin、line-height、
+text-align（不含 justify）、装饰与 visibility；自 M14b 起 border（所有样式实心绘制、无百分比宽度）、
+box-sizing、overflow:hidden 裁剪（只影响绘制）与 line-through/overline 可用——已知限制见
+[roadmap.md](roadmap.md)。
 keep-alive HTTP/1.1、gzip 解码与页内图片去重自 M13 起可用；外部 `<link rel="stylesheet">` 样式表自
 M12 起可用（按文档顺序发现、过滤、相对最终 URL 解析、抓取，并与 `<style>`、`style` 属性一起级联；
 还没有 `@import`、media queries、alternate/disabled 样式表选择或 CSS 图片）；不带链接的页面与 M11
@@ -78,7 +80,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-预期：80/80 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。`CMakePresets.json` 把同样的命令封装为 `default`/`dev` presets，`.github/workflows/ci.yml` 用 GCC 与 Clang 运行 configure、build、test 与安装冒烟步骤。
+预期：85/85 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。`CMakePresets.json` 把同样的命令封装为 `default`/`dev` presets，`.github/workflows/ci.yml` 用 GCC 与 Clang 运行 configure、build、test 与安装冒烟步骤。
 
 ```sh
 # 外部样式表（M12）：提交的 fixture 站点在两个内联 <style> 之间链接子目录样式表，并包含
@@ -133,6 +135,26 @@ auto 居中、min/max 钳制、line-height 行盒），截图绘制对齐/下划
 `--dump-boxes`/截图像素上与 M13 逐字节相同；`--dump-style` 差异只限追加字段（byte-compat 门禁会
 规范化）。测试：`style.values`、`style.typography`、`layout.style_properties`、`shell.css_compat`、
 `shell.dump_style_css_compat`、`shell.css_compat_screenshot`；共 80 个测试。
+
+```sh
+# 盒装饰（M14b）：border、box-sizing、overflow 裁剪与 line-through/overline 有独立 fixture 页面；
+# legacy.html 与 M14a 页面必须保持 M14a 几何/像素。
+"$BUILD"/toybrowser --dump-style \
+    "file://$PWD/tests/fixtures/css_compat_site/borders.html" | head -n 4
+"$BUILD"/toybrowser --size 320x300 --dump-boxes \
+    "file://$PWD/tests/fixtures/css_compat_site/borders.html" | head
+"$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-borders.ppm \
+    "file://$PWD/tests/fixtures/css_compat_site/overflow.html" && file /tmp/toybrowser-borders.ppm
+```
+
+预期：border 行打印 used 宽度（none/hidden 为 0）、样式关键字、四个解析后的 `border-color`
+（currentColor 解析为文本色，dump 丢弃 alpha）、`box-sizing=` 与 `overflow=`；盒 dump 把 border 计入
+盒（border box = content + padding + borders，content-box 与 border-box 宽度不同）；overflow 截图把
+超大子元素裁剪到 padding box；装饰绘制 underline/line-through/overline 行。M14b 之前的页面保持逐字节
+盒 dump/PPM（样式 dump 只在追加字段处不同，字节兼容门禁会剥掉）；与更早的 M14（M13）二进制对比只在
+M14a fixture 页面上有差异。测试：`style.borders`、`style.box_model`、`layout.box_model`、扩展的
+paint 显示列表用例、扩展的 `shell.css_compat`、`shell.dump_style_css_compat_borders`、
+`shell.css_compat_screenshot_borders`；共 85 个测试。
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -201,30 +223,29 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 # 方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right 前进后退；窗口标题跟随 <title>。
 ```
 
-## 下一轮：M14b —— 盒装饰与约束（已计划；等维护者确认后开始）
+## 下一轮：M15 —— Flexbox / position / float 子集（已计划；等维护者确认后开始）
 
-**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M14b 代码。M14a 已完成且全绿，因此
-起点就是当前 HEAD。M15 是后续计划轮次；HTTP 代理仍在 M16，JavaScript 子集保持延后。契约在该轮开始时
-冻结。
+**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M15 代码或契约。M14 已完成且全绿，
+因此起点就是当前 HEAD。M15 的范围必须在开始前与维护者重新确认（它是剩余最大的 CSS/布局弧）。
+HTTP 代理仍在 M16，JavaScript 子集保持延后。
 
-- 目标：补齐 M14a 之后主导真实页面的剩余高频盒装饰差距：`border`/`border-*` 的宽度、样式与颜色
-  （长写与简写、绘制四边、把边框宽度计入盒几何/命中测试矩形）；`box-sizing`；`overflow: hidden`
-  裁剪；以及剩余 `text-decoration` 线值（`line-through`、`overline`）。除非单独划范围，
-  `border-radius` 留待以后（圆角光栅化本身是一个 paint/几何项目）。
-- 预期形态（spawn 前冻结）：parser/计算样式加入 border 长写与 border / box-sizing 简写；layout 从
-  内容盒减去边框宽度并扩大 border box；paint 用显示列表填充绘制边框（整数设备像素、冻结 SrcOver）
-  并裁剪 `overflow: hidden` 盒；只有保持确定性时才在 style/paint dump 增加字段，并在同一轮更新
-  字节兼容规范化。不使用新属性的页面保持逐字节输出。
-- 在重新划范围之前不做：flexbox/grid/position/float（M15）、`border-radius`（除非重新划范围）、
-  背景图片/渐变、CSS 变量、at-rule/webfont。
-- 测试：扩展 `tests/fixtures/css_compat_site/`，覆盖四边 border（混合样式/颜色）、box-sizing、
-  overflow 裁剪与 line-through/overline；确定性 dump/截图/像素测试；无回归；在视觉差距主要来自
-  border 的页面上做手工真实站点检查。
-- 验收：所有测试在 GCC/Clang WERROR 下全绿；不使用新属性的页面在 M14b 之前 dump/像素逐字节不变
-  （只对有意新增的 dump 字段做规范化）；每个属性都有 fixture 覆盖；真实站点检查显示 border/裁剪
-  生效；文档更新。
-- M14b 之后：M15 flexbox/position/float 子集。代理（M16）与 JavaScript 在维护者重新确认优先级之前
-  保持延后。
+- 目标：一个能让真实页面布局可用的小型 flexbox/position/float 子集：够用的 CSS position
+  （`position: relative/absolute` 与 `top/right/bottom/left`、包含块解析）以及 floats
+  （`float: left/right`、清除/行交互）以放置典型页面框架；如果维护者保留在范围内，再加刻意最小的
+  flexbox 子集（row/column 容器、`justify-content`、`align-items`、`gap`、grow/shrink/basis 基础）。
+  确切切片在 kickoff 时按真实站点频率证据冻结（position/float 在调查样式中约 219 条声明居首，
+  `display: inline-block/flex/grid/table` 约 132 条）。
+- 预期形态（spawn 前冻结）：parser/计算样式新增字段；`layout` 中加入定位/浮动层与包含块模型；
+  paint 支持定位/层叠盒；拆成小的、分别测试的切片与 fixture；不使用新属性的页面保持逐字节输出；
+  除非单独划范围，`border-radius`/背景图片/transform 不做。
+- 在重新划范围之前不做（除非另行确认）：完整 CSS grid、完整 flexbox 一致性、`position: fixed/
+  sticky`、transform/animation、`border-radius`、CSS 变量、at-rule/webfont。
+- 测试：每个支持属性/切片的 fixture（冻结盒几何与像素）；定位盒的命中测试与导航交互测试；无回归；
+  手工真实站点检查。
+- 验收：每个支持属性都有 fixture；所有测试在 GCC/Clang WERROR 下全绿；M15 之前页面逐字节不变；
+  导航/命中测试仍正确；真实站点检查显示支持的布局结构生效；文档更新。
+- M15 之后：M16 代理/backlog（代理、CSS 变量、border-radius、背景图片、`@media`/`@font-face` 等）
+  由维护者重新确认优先级。
 
 ## 仓库地图
 
@@ -251,7 +272,8 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
   `src/render/include/toy/render/font.h` —— 位图字体度量加真实 `Font` API（加载、度量、整形 advance；
   公开头文件不含 freetype/harfbuzz 类型），实现位于 `src/render/font_ttf.cpp`；显示列表与光栅化器在
   `toy/render/paint.h`，`src/paint/` 从盒树构建列表且不光栅化（M11：`src/paint/paint.cpp` 的
-  视口裁剪）。字体选择位于 `src/shell/fonts.h`/`fonts.cpp`（`Fonts` pimpl：fontconfig 匹配、run
+  视口裁剪；M14b 起还按 background/borders/image/children 顺序绘制、发出 border FillRect、
+  overflow-hidden padding-box clip 对与装饰行）。字体选择位于 `src/shell/fonts.h`/`fonts.cpp`（`Fonts` pimpl：fontconfig 匹配、run
   回退、M11 私有解析样式/度量/run 缓存），它是唯一使用 fontconfig 的地方；`src/shell/application.cpp`
   每次运行根据 `--font`/`--font-family` 或自动系统默认构建一个 `Fonts`。`src/render/font_ttf.cpp`
   含 M11 的 shaped-run/glyph 覆盖率缓存与私有 `src/render/font_cache_internal.h` LRU；`src/platform/window.cpp`
@@ -265,9 +287,9 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
   常规、粗体、斜体与一个小汉字 face，度量/字体族有文档；测试从不使用已安装字体）、
   `tests/fixtures/cjk_site/`（从磁盘加载的中文页面，断言逐单元文本盒、换行与绘制像素）、
   `tests/fixtures/css_site/`（M12 外部样式表 fixture 站点：子目录相对样式表、顺序、被过滤/失败/
-  重复链接，以及有文档的期望样式/几何/像素表）、`tests/fixtures/css_compat_site/`（M14a CSS 兼容
-  fixture：values/typography/boxes 页加一个输出与 M13 逐字节相同的 legacy 页；README 记录每个期望
-  计算值、盒矩形与像素）、`tests/fixtures/https_site/`（shell 测试通过 TLS 提供的 HTML+PNG 页面）与 `tests/fixtures/tls/`（提交的仅测试用 CA、`localhost` 叶证书与不受信任叶
+  重复链接，以及有文档的期望样式/几何/像素表）、`tests/fixtures/css_compat_site/`（M14 CSS 兼容
+  fixture：values/typography/boxes 与 M14b borders/overflow/decorations 页，加一个输出与 M13 逐字节
+  相同的 legacy 页；README 记录每个期望计算值、盒矩形、装饰行与像素）、`tests/fixtures/https_site/`（shell 测试通过 TLS 提供的 HTML+PNG 页面）与 `tests/fixtures/tls/`（提交的仅测试用 CA、`localhost` 叶证书与不受信任叶
   证书/私钥；重新生成方法见其 README）。二进制 fixture 的生成器与 fixture 一起提交：
   `tests/fixtures/fonts/generate_toy_test.py`、`tests/fixtures/fonts/generate_variants.py` 与
   `tests/fixtures/images/generate.py`（只用标准库、输出确定；见各 fixture README）。
@@ -287,10 +309,11 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 ## 冻结契约（不要随意改动）
 
 - CLI 模式、标志与退出码：`0` 成功，`1` 运行时错误，`2` 用法错误。可选的位置参数页面 URL（`toybrowser [options] [url]`）只用于窗口模式和 `--screenshot`；最多一个 URL，不能与 `--dump-*` 模式组合，不给 URL 时保留 M1 占位页。M8b 新增 `--font PATH` 与 `--font-family NAME`：各自需要非空参数，二者互斥，且与 `--dump-body`/`--dump-dom`/`--dump-style` 组合是用法错误（退出码 2）；允许与窗口模式、`--screenshot`、`--dump-boxes` 组合。选中的字体无法加载/解析是运行时错误（退出码 1）。两个标志都不给时浏览器使用自动系统字体（M10：计算出的 CSS 字体族/weight/style 经 fontconfig，带字符回退）；只有没有可用系统字体时才退化到内置位图字体。`--font PATH` 保持单一精确 face、无回退；`--font-family NAME` 强制首选字体族并保留字符回退，且自 M10 起也遵循计算出的 weight/style。
-- Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。style dump 自 M10 起在 `font-style=` 之后有 `font-family=` 字段：项之间用 ", " 连接，匹配 `[A-Za-z0-9_-]+` 的项原样输出，否则用双引号包裹并以反斜杠转义 `\` 与 `"`。自 M14a 起每行样式还在行尾按序追加 ` min-width= min-height= max-width= max-height= line-height= text-align= visibility= text-decoration=`：长度取整为 CSS px（`12px`）或百分比（`50%`），无约束 min/max 打印 `none`，auto 宽高/margin 打印 `auto`，line-height 打印 `normal`、去尾数的无单位数字（最多 3 位小数）或 `NNpx`，text-align 打印 `left|right|center|justify`（细节见 [architecture.md](architecture.md)）。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层，格式在 M10/M11 均未改变（CJK 文本只是每个断行单元一个文本盒）。
-- CSS 值契约（M14a）：`style::Length {value, unit(px/percent)}`、`AutoLength` margin、`LineHeight {kind: normal/number/px, value}` 以及 `TextAlign`/`Visibility` 枚举。字体相对单位在 style 内解析（`em` 相对元素自身最终字号、`%` 字号相对父元素、`rem` 相对根 html 元素的计算字号；根元素自身的 rem 用 16px 初始值）。盒属性 `%` 长度在 `ComputedStyle` 中保持未解析，交给 layout 解析。颜色：`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`、旧式逗号分隔 `rgb()`/`rgba()`/`hsl()`/`hsla()`、完整 CSS Color Level 4 命名颜色集与 `transparent`；文本颜色不透明（丢弃 alpha），背景颜色在 0xAARRGGBB 中保留 alpha。`background` 简写只应用颜色部分（第一个可解析颜色 token；其他组件忽略）。逻辑属性在 horizontal-tb 下映射到物理字段：`margin/padding-block-start|end`、`margin/padding-inline-start|end`、`margin/padding-block|inline` 简写、`inline-size`/`block-size`、`min/max-inline-size`/`min/max-block-size`。`line-height`/`text-align`/`visibility`/`text-decoration: underline` 在本 MVP 中继承（text-decoration 的传播简化为继承；只表示 underline 标志）；`justify` 能解析但按 left 排版；`line-through`/`overline` 能解析但 M14b 之前不绘制。不支持的写法（line-height 的 rem、vh/vw、现代空格分隔颜色函数语法、百分比高度）是 roadmap M14a 记录的已知限制。
-- 布局语义通过布局测试与 M5/M8a/M10 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，换行发生在空白处以及 M10 的 CJK 断行单元（每个 CJK 字符一个单元、简化标点禁则；拉丁词永不拆开、没有完整 UAX#14/词典断行）。自 M10 起 `MeasureText` 回调也收到文本的 `style::ComputedStyle`；`TextMetrics` 携带 `ascent_px`，每个文本盒携带 `baseline_offset_px` = 行最大 ascent（只是元数据，不参与 dump）。M8a replaced 元素：`LayoutOptions::replaced_sizes`（DOM 节点 id → 固有 CSS px）把行内元素变成原子行内级盒；CSS `width`/`height` px 覆盖固有尺寸，只指定一侧时保持固有宽高比，盒整体换行、抬高行高并顶部对齐；其 dump 行仍是 `<tag> inline x= y= width= height=`，没有子节点，`display:block` 的 replaced 元素不支持，replaced 盒的 margin/padding 被忽略。没有条目的页面保持原有几何逐字节不变。M14a 布局契约：`Length::kPercent` 盒长度相对包含块内容宽度解析（width、min/max-width、四边 margin 与 padding；垂直百分比也用宽度，按 CSS）；百分比高度与 min/max-height 不支持、按 auto/无约束处理；内容宽度在指定/auto 宽度解析后按 min 后 max 顺序钳制；宽度确定（指定或经钳制解析）时水平 `auto` margin 分配剩余空间，auto 宽度与过约束时保持 0；px min/max-height 在内容/固定高度之后钳制；文本项的 line-height 贡献为 px 值、数字×字号或 `normal` 的测量行高，行盒取最大贡献，half-leading 定位共享基线（`normal` 精确贡献测量行高，因此 M14 之前几何不变）；`text-align` 在断行后整体平移已定稿行的每个盒（right/center；`justify` 按 left，过长行保持左对齐）；行内/replaced 的百分比 margin/padding 用行宽，replaced 百分比宽度用包含宽度、百分比高度为 auto。visibility 从不改变布局。
-- 绘制语义通过 M6/M7 测试冻结：显示列表命令使用整数设备像素（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）；填充对不透明目标使用 SrcOver 公式 `(src * a + dst * (255 - a) + 127) / 255`；初始裁剪是整个 surface，光栅化工作量受裁剪限制；`shell` 把 canvas 填白；绘制顺序是盒树前序（先背景、再图片、再子节点/文本）；文本使用内置 8x16 ASCII 字形，最近邻缩放、无抗锯齿、非 ASCII 用 `?`、文本像素不透明。M14a 绘制：计算 `visibility` 为 hidden 的盒不输出背景/图片/文本（也不输出下划线），但遍历仍进入其子节点，因此可见后代正常绘制，布局空间不变；计算 `text-decoration: underline` 的文本盒在其文本命令之后发出一个 `FillRect(x = round(box.x), y = round(box.y) - scroll_y + round(box.baseline_offset_px) + 1, width = round(box.width), height = 1, color = 文本颜色)`，使用相同的文本裁剪；不使用这两个属性的页面保持与 M14 之前逐字节相同的命令列表。
+- Dump 格式（DOM、style、boxes）：确定性、面向行、由测试断言；任何改动都需要同一轮内更新测试和文档。style dump 自 M10 起在 `font-style=` 之后有 `font-family=` 字段：项之间用 ", " 连接，匹配 `[A-Za-z0-9_-]+` 的项原样输出，否则用双引号包裹并以反斜杠转义 `\` 与 `"`。自 M14a 起每行样式还在行尾按序追加 ` min-width= min-height= max-width= max-height= line-height= text-align= visibility= text-decoration=`：长度取整为 CSS px（`12px`）或百分比（`50%`），无约束 min/max 打印 `none`，auto 宽高/margin 打印 `auto`，line-height 打印 `normal`、去尾数的无单位数字（最多 3 位小数）或 `NNpx`，text-align 打印 `left|right|center|justify`；自 M14b 起 `text-decoration=` 打印 `none` 或空格连接的 token `underline line-through overline`，并继续追加 ` border-top-width= border-right-width= border-bottom-width= border-left-width= border-top-style= border-right-style= border-bottom-style= border-left-style= border-color= box-sizing= overflow=`：border 宽度是 USED 宽度（none/hidden 为 0，取整 px），样式是关键字，`border-color` 是 top/right/bottom/left 顺序的四个空格分隔 `#rrggbb`（currentColor 解析为文本色，dump 丢弃 alpha），box-sizing 为 `content-box|border-box`，overflow 为 `visible|hidden`（任一轴 hidden 即为 hidden）。所有 M14b 字段都在 M14a 字段之后，字节兼容规范化（从 ` min-width=` 剥掉）已覆盖。盒 dump 是前序遍历的行：`<tag> block|inline`、`anonymous block` 或 `text "..."`，后接 `x= y= width= height=`，全部是绝对 CSS 像素取整后的整数（`std::lround`）；缩进为每层盒深度两个空格，上限 64 层，格式在 M10/M11 均未改变（CJK 文本只是每个断行单元一个文本盒）。
+- CSS 值契约（M14a）：`style::Length {value, unit(px/percent)}`、`AutoLength` margin、`LineHeight {kind: normal/number/px, value}` 以及 `TextAlign`/`Visibility` 枚举。字体相对单位在 style 内解析（`em` 相对元素自身最终字号、`%` 字号相对父元素、`rem` 相对根 html 元素的计算字号；根元素自身的 rem 用 16px 初始值）。盒属性 `%` 长度在 `ComputedStyle` 中保持未解析，交给 layout 解析。颜色：`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`、旧式逗号分隔 `rgb()`/`rgba()`/`hsl()`/`hsla()`、完整 CSS Color Level 4 命名颜色集与 `transparent`；文本颜色不透明（丢弃 alpha），背景颜色在 0xAARRGGBB 中保留 alpha。`background` 简写只应用颜色部分（第一个可解析颜色 token；其他组件忽略）。逻辑属性在 horizontal-tb 下映射到物理字段：`margin/padding-block-start|end`、`margin/padding-inline-start|end`、`margin/padding-block|inline` 简写、`inline-size`/`block-size`、`min/max-inline-size`/`min/max-block-size`。`line-height`/`text-align`/`visibility`/三个 `text-decoration` 标志在本 MVP 中继承（text-decoration 的传播简化为继承；underline/line-through/overline 自 M14b 起都已表示并绘制）；`justify` 能解析但按 left 排版。自 M14b 起 `ComputedStyle` 还携带 `BorderSide {Length width; BorderStyle style; optional<uint32_t> color}`（颜色 nullopt = currentColor，`UsedBorderWidth` 对 none/hidden 为 0）、`BoxSizing` 与 `Overflow`，样式 dump 在 M14a 字段之后追加 `border-*-width/border-*-style/border-color/box-sizing/overflow`。不支持的写法（line-height 的 rem、vh/vw、现代空格分隔颜色函数语法、百分比高度）是 roadmap M14a 记录的已知限制。
+- 盒装饰契约（M14b）：`BorderSide {Length width; BorderStyle style; optional<uint32_t> color}`（nullopt = `currentColor`）、`BoxSizing` 与 `Overflow`，以及 `UsedBorderWidth`/`UsedBorderColor` 辅助函数。解析：`border-*-width` 的 px/thin/medium/thick（负数/%/其他单位忽略）、全部十种样式（none/hidden 的 used width 为 0；所有可见样式按实心绘制）、`border-*-color`（M14a 颜色形式含 alpha/transparent；currentColor 存 nullopt）、1–4 值 width/style/color 简写、逐边与完整 `border` 简写（CSS 重置到初始值语义；非法/重复组件使整个声明无效且不重置）、`box-sizing`、`overflow` 简写 + `overflow-x/y`（不支持的关键字是 no-op；任一轴 hidden 即裁剪），以及三标志 `text-decoration` 重置语义。border/box-sizing/overflow 不继承；装饰标志继承。dump 格式见上面的 dump 行。
+- 布局语义通过布局测试与 M5/M8a/M10 的 known-limits 冻结：视口宽度来自 `--size`，没有 margin 合并，行顶部对齐，文本盒以单词为单位，换行发生在空白处以及 M10 的 CJK 断行单元（每个 CJK 字符一个单元、简化标点禁则；拉丁词永不拆开、没有完整 UAX#14/词典断行）。自 M10 起 `MeasureText` 回调也收到文本的 `style::ComputedStyle`；`TextMetrics` 携带 `ascent_px`，每个文本盒携带 `baseline_offset_px` = 行最大 ascent（只是元数据，不参与 dump）。M8a replaced 元素：`LayoutOptions::replaced_sizes`（DOM 节点 id → 固有 CSS px）把行内元素变成原子行内级盒；CSS `width`/`height` px 覆盖固有尺寸，只指定一侧时保持固有宽高比，盒整体换行、抬高行高并顶部对齐；其 dump 行仍是 `<tag> inline x= y= width= height=`，没有子节点，`display:block` 的 replaced 元素不支持，replaced 盒的 margin/padding 被忽略。没有条目的页面保持原有几何逐字节不变。M14a 布局契约：`Length::kPercent` 盒长度相对包含块内容宽度解析（width、min/max-width、四边 margin 与 padding；垂直百分比也用宽度，按 CSS）；百分比高度与 min/max-height 不支持、按 auto/无约束处理；内容宽度在指定/auto 宽度解析后按 min 后 max 顺序钳制；宽度确定（指定或经钳制解析）时水平 `auto` margin 分配剩余空间，auto 宽度与过约束时保持 0；px min/max-height 在内容/固定高度之后钳制；文本项的 line-height 贡献为 px 值、数字×字号或 `normal` 的测量行高，行盒取最大贡献，half-leading 定位共享基线（`normal` 精确贡献测量行高，因此 M14 之前几何不变）；`text-align` 在断行后整体平移已定稿行的每个盒（right/center；`justify` 按 left，过长行保持左对齐）；行内/replaced 的百分比 margin/padding 用行宽，replaced 百分比宽度用包含宽度、百分比高度为 auto。visibility 从不改变布局。M14b 布局契约：used border 宽度通过 `UsedBorderWidth` 进入盒模型——border box = content + padding + 四边 borders，content box 内缩 border + padding。`content-box`（默认）保持宽高为内容尺寸（M14a 行为），auto 宽度填充 `包含宽度 - margin - padding - border`；`border-box` 使宽高为 border-box 尺寸（content = clamp(size - padding - border, >=0)），auto 宽度仍填充。px min/max-width/height 按 box-sizing 解释（content-box 钳制内容盒，border-box 钳制 border box，非负，先 min 后 max）；百分比尺寸/约束仍用包含块内容宽度；auto margin 分配 `包含宽度 - margin - 最终 border box 宽度`（CSS 10.4 居中，过约束 0）；固定/auto 高度遵循同样规则（百分比高度仍不支持）。行内元素把水平 border 加入左右 advance 与 fragment 宽度（首 fragment 含 border-left，末 fragment 含 border-right；行内垂直 border 仍忽略），replaced 行内元素按 M8a 限制忽略 border/padding/margin。overflow 与装饰从不改变布局，没有 border/box-sizing 变化的页面保持 M14b 之前几何逐字节不变。
+- 绘制语义通过 M6/M7 测试冻结：显示列表命令使用整数设备像素（`FillRect`、`DrawText`、`DrawImage`、`PushClip`/`PopClip`）；填充对不透明目标使用 SrcOver 公式 `(src * a + dst * (255 - a) + 127) / 255`；初始裁剪是整个 surface，光栅化工作量受裁剪限制；`shell` 把 canvas 填白；绘制顺序是盒树前序（先背景、再图片、再子节点/文本）；文本使用内置 8x16 ASCII 字形，最近邻缩放、无抗锯齿、非 ASCII 用 `?`、文本像素不透明。M14a 绘制：计算 `visibility` 为 hidden 的盒不输出背景/图片/文本（也不输出下划线），但遍历仍进入其子节点，因此可见后代正常绘制，布局空间不变；计算 `text-decoration: underline` 的文本盒在其文本命令之后发出一个 `FillRect(x = round(box.x), y = round(box.y) - scroll_y + round(box.baseline_offset_px) + 1, width = round(box.width), height = 1, color = 文本颜色)`，使用相同的文本裁剪；不使用这两个属性的页面保持与 M14 之前逐字节相同的命令列表。M14b 绘制：元素顺序为 background -> borders -> image -> children/text。border 从 border-box 矩形按 top/right/bottom/left 顺序发出最多四条 `FillRect`，颜色用解析后的 `UsedBorderColor`（currentColor -> 文本色，保留 alpha），每条按背景同样规则裁剪；所有解析到的 border 样式都按实心绘制，隐藏盒不绘制 border。`overflow:hidden`（任一轴）的盒在整棵子树周围发出一个成对的 `PushClip`/`PopClip`，裁剪到其 padding box（整数取整边界；空子树也成对、嵌套正确）；裁剪只影响绘制，因此 `ContentHeight` 仍包含溢出盒。文本装饰在文本命令之后按 underline -> line-through -> overline 顺序发出：underline 在 baseline+1，line-through 在 baseline - max(1, round(font_size/3))，overline 在盒顶部，各为 1px `FillRect`、不透明文本色，使用相同文本裁剪且隐藏文本不绘制。不使用新属性的页面构建与 M14b 之前逐字节相同的命令列表。
   M7 绘制：非空页面恰好被一个 `PushClip(0, 0, viewport)`/`PopClip` 对包裹，每条命令的 y 按
   `-scroll_y`（整数设备像素，x 不变）平移；没有图片的页面在滚动 0 必须与 M6/M7 逐字节一致。
   M8a 图片：节点 id 在 `paint::ImageMap` 中的行内 replaced 盒各发出一条 `DrawImage`，在该盒背景之后；
@@ -616,11 +639,10 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 - M14a 的 `--dump-style` 追加字段是冻结格式变更：字节兼容门禁在比较 M14 之前的样式 dump 前会剥掉
   从 ` min-width=` 到行尾（`sed -E 's/ min-width=.*$//'`），而盒 dump/PPM 仍必须 `cmp` 逐字节相同。
   再追加行尾样式字段时，要在同一轮更新门禁规范化、样式 dump 契约与 handoff/architecture 文档。
-- M14a 的百分比高度、min/max-height 百分比、line-height 的 rem、`justify`、`line-through`/
-  `overline`、文本 alpha、`border*`、`box-sizing`、`overflow` 裁剪与现代空格分隔 `rgb()`/`hsl()`
-  语法目前都是刻意限制——不要临时“修复”；M14b 负责 border/box-sizing/overflow/剩余装饰，其他范围
-  变更需要更新 roadmap。逻辑属性只支持 horizontal-tb；命名颜色是完整 CSS Color 4 集，但颜色函数只
-  支持旧式逗号语法。
+- M14a/M14b 之后，百分比高度、min/max-height 百分比、line-height 的 rem、`justify`、文本 alpha
+  与现代空格分隔 `rgb()`/`hsl()` 语法仍是刻意限制——不要临时“修复”；范围变更需要更新 roadmap。逻辑
+  属性只支持 horizontal-tb；命名颜色是完整 CSS Color 4 集，但颜色函数只支持旧式逗号语法。M14b 已加入
+  border/box-sizing/overflow/line-through/overline，剩余装饰/布局限制见下面几条。
 - M14a 布局不变量：盒属性百分比相对包含块内容宽度解析（含垂直 margin/padding），绝不相对高度；
   宽度确定（指定或经钳制解析）时 auto margin 才居中，过约束时保持 0；宽度钳制顺序是 min 后 max；
   `normal` line-height 必须保持 M14 之前几何逐字节不变（half-leading 0）；text-align 只平移已定稿
@@ -637,6 +659,26 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
   决策的临时证据，不是契约。
 - 新测试辅助代码要过双编译器：M14a 中 GCC 接受了 `tests/layout/` 匿名命名空间的未使用常量，而
   Clang `-Werror` 拒绝；始终对整棵测试树跑两个编译器。
+- M14b border/盒模型不变量：只有 `UsedBorderWidth` 参与布局/绘制（none/hidden 为 0；存储的初始宽度
+  medium 3px 但不可见）。border 从 border-box 矩形按冻结的 top/right/bottom/left 公式绘制并逐矩形
+  裁剪；所有 border 样式按实心绘制（dashed/dotted/double/groove/ridge/inset/outset 图案未实现），
+  百分比 border 宽度忽略，border 颜色 alpha 在绘制保留、在样式 dump 丢弃（`#rrggbb`，currentColor
+  解析为文本色）。`box-sizing` 同时改变宽高与 px min/max 的解释（content-box 钳制内容盒，border-box
+  钳制 border box）；auto 宽度填充 包含 - margin - padding - border，auto margin 按最终 border box
+  居中。行内垂直 border 与 replaced 元素的 border/padding/margin 仍按 M5/M8a 限制忽略。
+- M14b overflow/装饰不变量：`overflow` 只裁剪绘制——没有滚动条/水平滚动，`ContentHeight` 仍包含溢出
+  盒，且 `overflow-x`/`overflow-y: hidden` 任一轴都裁剪（有文档的 MVP 简化）。每个裁剪盒始终发出一个
+  成对 PushClip/PopClip（padding box，整数取整边界），空子树也成对，保证显示列表形状确定。装饰行在
+  文本命令之后按 underline -> line-through -> overline 顺序、用冻结公式发出；text-decoration 的
+  样式/颜色组件忽略（行用不透明文本色、1px）。不使用新属性的页面必须保持与 M14b 之前逐字节相同的
+  显示列表——paint 测试包含手写参考列表。
+- M14b 的样式 dump 在 M14a 字段之后追加第二段字段（`border-*-width/style`、`border-color`、
+  `box-sizing`、`overflow`）；字节兼容门禁的 `sed -E 's/ min-width=.*$//'` 已覆盖，`text-decoration=`
+  从 `none|underline` 扩为 `none` 或空格连接 token。再追加 dump 字段必须保持追加顺序并在同一轮更新
+  门禁规范化。
+- `tests/fixtures/css_compat_site/` 现在还冻结 borders/overflow/decorations 页面；改 border 公式、
+  clip 盒、装饰行、box-sizing 规则或 fixture CSS 时要同时更新 fixture README、paint/layout/style
+  测试与 shell e2e 断言（与之前 fixture 站点规则相同）。真实站点证据留在 `.tmp/`，绝不进入仓库/CTest。
 - fixture 生成器与它们生成的 fixture 一起提交（`tests/fixtures/fonts/generate_toy_test.py`、
   `tests/fixtures/fonts/generate_variants.py`、`tests/fixtures/images/generate.py`）。字体生成器逐字节
   复现已提交 TTF；PNG 生成器复现有文档的像素内容（精确 PNG 字节可能随本地 zlib 版本变化）。不要手工

@@ -1,12 +1,16 @@
 // Display-list construction: the box tree becomes an ordered list of background
-// fills, image draws and real-font text runs, clipped to the viewport and
-// scrolled vertically. Since M11, commands that cannot intersect the viewport
+// and border fills, image draws and real-font text runs, clipped to the viewport
+// and scrolled vertically. Since M14b an element paints background -> borders ->
+// image -> children, an overflow:hidden box clips its children to its padding
+// box, and text decorations (underline/line-through/overline) follow each text
+// command. Since M11, commands that cannot intersect the viewport
 // after the scroll translation are culled (see IntersectsViewport), so a scroll
 // or resize frame only pays for the visible part of a long page. No
 // rasterization happens here; render executes the list.
 
 #include "toy/paint/paint.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -103,20 +107,128 @@ void AppendBackground(const dom::Document& document, const style::StyleTree& sty
   list->FillRect(x, y, width, height, background);
 }
 
-// text-decoration: underline is one device-pixel FillRect one row below the text
-// baseline, emitted after that text box's text command(s). The text culling ran
-// before this call (the same expanded text-box check as the text command), so the
-// underline can only be painted together with its text. Decorations are not
-// painted for hidden text, so callers return before reaching this helper.
-void AppendUnderline(const style::ComputedStyle& style, const layout::Box& box,
-                     const Viewport& viewport, render::DisplayList* list) {
-  if (!style.text_decoration_underline) {
+// Element boxes paint their used border sides as up to four device-pixel
+// rectangles between the background and the image/children, in top, right,
+// bottom, left order. Each rectangle is culled exactly against the viewport like
+// the background; non-positive sides (none/hidden style, zero width or a width
+// that rounds to zero device pixels) emit nothing. All visible styles paint solid
+// in this MVP. A hidden element paints no borders: visibility removes the whole
+// box decoration (the layout space stays).
+void AppendBorders(const dom::Document& document, const style::StyleTree& styles,
+                   const layout::Box& box, const Viewport& viewport, render::DisplayList* list) {
+  if (box.kind != layout::BoxKind::kBlock && box.kind != layout::BoxKind::kInline) {
+    return;
+  }
+  if (box.node == dom::kInvalidNode) {
+    return;
+  }
+  if (document.Get(box.node).type != dom::NodeType::kElement) {
+    return;
+  }
+  const style::ComputedStyle& style = styles.Get(box.node);
+  if (style.visibility == style::Visibility::kHidden) {
+    return;
+  }
+  const float top_width = style::UsedBorderWidth(style.border_top);
+  const float right_width = style::UsedBorderWidth(style.border_right);
+  const float bottom_width = style::UsedBorderWidth(style.border_bottom);
+  const float left_width = style::UsedBorderWidth(style.border_left);
+  if (top_width <= 0.0f && right_width <= 0.0f && bottom_width <= 0.0f && left_width <= 0.0f) {
     return;
   }
   const int x = ToDevicePixels(box.x);
-  const int y = TranslatedY(box, viewport.scroll_y) + ToDevicePixels(box.baseline_offset_px) + 1;
   const int width = ToDevicePixels(box.width);
-  list->FillRect(x, y, width, 1, style.color | 0xFF000000u);
+  const int top_y = TranslatedY(box, viewport.scroll_y);
+  const int top = ToDevicePixels(top_width);
+  const int right = ToDevicePixels(right_width);
+  const int bottom = ToDevicePixels(bottom_width);
+  const int left = ToDevicePixels(left_width);
+  const int box_right = ToDevicePixels(box.x + box.width);
+  const int bottom_y = ToDevicePixels(box.y + box.height) - viewport.scroll_y - bottom;
+  const int side_y = top_y + top;
+  const int side_height = ToDevicePixels(box.height) - top - bottom;
+  const auto fill = [&](int rect_x, int rect_y, int rect_width, int rect_height,
+                        const style::BorderSide& side) {
+    if (!IntersectsViewport(rect_x, rect_y, rect_width, rect_height, viewport)) {
+      return;
+    }
+    list->FillRect(rect_x, rect_y, rect_width, rect_height,
+                   style::UsedBorderColor(side, style.color));
+  };
+  if (top_width > 0.0f) {
+    fill(x, top_y, width, top, style.border_top);
+  }
+  if (right_width > 0.0f) {
+    fill(box_right - right, side_y, right, side_height, style.border_right);
+  }
+  if (bottom_width > 0.0f) {
+    fill(x, bottom_y, width, bottom, style.border_bottom);
+  }
+  if (left_width > 0.0f) {
+    fill(x, side_y, left, side_height, style.border_left);
+  }
+}
+
+// Text decorations are one device-pixel FillRect per computed flag, emitted after
+// that text box's text command(s) in the frozen underline, line-through, overline
+// order. The text culling ran before this call (the same expanded text-box check
+// as the text command), so a decoration can only be painted together with its
+// text. Decorations are never painted for hidden text: callers return first.
+void AppendDecorations(const style::ComputedStyle& style, const layout::Box& box,
+                       const Viewport& viewport, render::DisplayList* list) {
+  const int x = ToDevicePixels(box.x);
+  const int width = ToDevicePixels(box.width);
+  const int top_y = TranslatedY(box, viewport.scroll_y);
+  const int baseline_y = top_y + ToDevicePixels(box.baseline_offset_px);
+  const std::uint32_t color = style.color | 0xFF000000u;
+  const auto emit = [&](int row_y) { list->FillRect(x, row_y, width, 1, color); };
+  if (style.text_decoration_underline) {
+    emit(baseline_y + 1);
+  }
+  if (style.text_decoration_line_through) {
+    const int offset = std::max(1, ToDevicePixels(style.font_size_px / 3.0f));
+    emit(baseline_y - offset);
+  }
+  if (style.text_decoration_overline) {
+    emit(top_y);
+  }
+}
+
+// True when `box` is an element box whose computed overflow hides content on
+// either axis: its descendants are painted inside one clip pair for the padding
+// box (visibility does not disable the clipping of a visible descendant).
+bool ClipsChildren(const dom::Document& document, const style::StyleTree& styles,
+                   const layout::Box& box) {
+  if (box.kind != layout::BoxKind::kBlock && box.kind != layout::BoxKind::kInline) {
+    return false;
+  }
+  if (box.node == dom::kInvalidNode) {
+    return false;
+  }
+  if (document.Get(box.node).type != dom::NodeType::kElement) {
+    return false;
+  }
+  const style::ComputedStyle& style = styles.Get(box.node);
+  return style.overflow_x == style::Overflow::kHidden ||
+         style.overflow_y == style::Overflow::kHidden;
+}
+
+// Emits the padding-box clip rectangle of an overflow:hidden box, translated by
+// the scroll offset. The rasterizer intersects it with the viewport and its own
+// clip, so a non-positive rect paints nothing; the pair is still emitted so the
+// display-list shape stays deterministic.
+void PushOverflowClip(const style::StyleTree& styles, const layout::Box& box,
+                      const Viewport& viewport, render::DisplayList* list) {
+  const style::ComputedStyle& style = styles.Get(box.node);
+  const int x = ToDevicePixels(box.x + style::UsedBorderWidth(style.border_left));
+  const int y =
+      ToDevicePixels(box.y + style::UsedBorderWidth(style.border_top)) - viewport.scroll_y;
+  const int right =
+      ToDevicePixels(box.x + box.width - style::UsedBorderWidth(style.border_right));
+  const int bottom =
+      ToDevicePixels(box.y + box.height - style::UsedBorderWidth(style.border_bottom)) -
+      viewport.scroll_y;
+  list->PushClip(x, y, right - x, bottom - y);
 }
 
 // A text box keeps the inherited computed style; its color is forced opaque
@@ -165,12 +277,12 @@ void AppendText(const style::StyleTree& styles, const layout::Box& box, const Vi
                                color);
         pen_x += run.font->MeasureTextWidth(run.text, font_size_px);
       }
-      AppendUnderline(style, box, viewport, list);
+      AppendDecorations(style, box, viewport, list);
       return;
     }
   }
   list->DrawText(box.text, static_cast<int>(x), static_cast<int>(y), font_size_px, color);
-  AppendUnderline(style, box, viewport, list);
+  AppendDecorations(style, box, viewport, list);
 }
 
 // An inline replaced box paints its image after its own background and before
@@ -221,18 +333,29 @@ render::DisplayList BuildDisplayList(const dom::Document& document, const style:
   list.PushClip(0, 0, viewport.width, viewport.height);
   // Iterative pre-order walk, like the box dump: deep pages must not overflow
   // the C++ stack. Culling only drops commands whose rect misses the viewport,
-  // so the relative order of the emitted commands is unchanged.
-  std::vector<layout::BoxId> pending;
-  pending.push_back(root);
+  // so the relative order of the emitted commands is unchanged. An
+  // overflow:hidden element emits its padding-box clip before its children and a
+  // matching PopClip after the whole subtree (a marker entry on the stack).
+  struct PendingEntry {
+    layout::BoxId box = layout::kInvalidBox;
+    bool pop_clip = false;
+  };
+  std::vector<PendingEntry> pending;
+  pending.push_back(PendingEntry{root, false});
   std::vector<layout::BoxId> children;
   while (!pending.empty()) {
-    const layout::BoxId id = pending.back();
+    const PendingEntry entry = pending.back();
     pending.pop_back();
-    const layout::Box& box = boxes.Get(id);
+    if (entry.pop_clip) {
+      list.PopClip();
+      continue;
+    }
+    const layout::Box& box = boxes.Get(entry.box);
     switch (box.kind) {
       case layout::BoxKind::kBlock:
       case layout::BoxKind::kInline:
         AppendBackground(document, styles, box, viewport, &list);
+        AppendBorders(document, styles, box, viewport, &list);
         AppendImage(styles, box, viewport, images, &list);
         break;
       case layout::BoxKind::kText:
@@ -241,13 +364,20 @@ render::DisplayList BuildDisplayList(const dom::Document& document, const style:
       case layout::BoxKind::kAnonymousBlock:
         break;
     }
+    const bool clips = ClipsChildren(document, styles, box);
     children.clear();
     for (layout::BoxId child = box.first_child; child != layout::kInvalidBox;
          child = boxes.Get(child).next_sibling) {
       children.push_back(child);
     }
+    // Push the pop marker first so it is processed after the whole subtree, then
+    // the children in reverse order (pre-order walk).
+    if (clips) {
+      PushOverflowClip(styles, box, viewport, &list);
+      pending.push_back(PendingEntry{layout::kInvalidBox, true});
+    }
     for (std::size_t index = children.size(); index-- > 0;) {
-      pending.push_back(children[index]);
+      pending.push_back(PendingEntry{children[index], false});
     }
   }
   list.PopClip();

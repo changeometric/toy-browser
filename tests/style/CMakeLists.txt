@@ -29,3 +29,13 @@ add_executable(style_typography_test typography_test.cpp)
 toybrowser_set_warnings(style_typography_test)
 target_link_libraries(style_typography_test PRIVATE toy_style toy_test_support)
 add_test(NAME style.typography COMMAND style_typography_test)
+
+add_executable(style_border_test border_test.cpp)
+toybrowser_set_warnings(style_border_test)
+target_link_libraries(style_border_test PRIVATE toy_style toy_test_support)
+add_test(NAME style.borders COMMAND style_border_test)
+
+add_executable(style_box_model_test box_model_test.cpp)
+toybrowser_set_warnings(style_box_model_test)
+target_link_libraries(style_box_model_test PRIVATE toy_style toy_test_support)
+add_test(NAME style.box_model COMMAND style_box_model_test)

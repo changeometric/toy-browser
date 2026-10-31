@@ -126,12 +126,17 @@ parent, `rem` against the root `<html>` element's computed font size (the root's
 color stays opaque (alpha dropped) and background color keeps alpha. The `background` shorthand
 applies only its color component. Logical properties (`margin`/`padding` block/inline longhands and
 shorthands, `inline-size`/`block-size`, min/max variants) map to physical fields in horizontal
-writing mode. `line-height`, `text-align`, `visibility` and `text-decoration: underline` inherit
-per the MVP contract (text-decoration propagation is simplified to inheritance, and only the
-underline flag is represented). Unsupported values (`%` heights, `line-height` in rem, `justify` as
-anything but left, space-separated color-function syntax, `pt`/`vh`/`vw` units) are ignored or
-documented limits. `DumpStyleTree()` keeps every pre-M14 field and appends
-`min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`.
+writing mode. `line-height`, `text-align`, `visibility` and the three `text-decoration` flags
+inherit per the MVP contract (text-decoration propagation is simplified to inheritance;
+underline/line-through/overline are all represented and painted since M14b). Unsupported values
+(`%` heights, `line-height` in rem, `justify` as anything but left, space-separated color-function
+syntax, `pt`/`vh`/`vw` units) are ignored or documented limits. `DumpStyleTree()` keeps every
+pre-M14 field and appends `min-width/min-height/max-width/max-height/line-height/text-align/
+visibility/text-decoration`; since M14b it also carries `BorderSide {Length width; BorderStyle
+style; optional<uint32_t> color}` sides (nullopt color = currentColor, `UsedBorderWidth` = 0 for
+none/hidden), `BoxSizing` and `Overflow` in `ComputedStyle`, and appends `border-*-width/
+border-*-style/border-color/box-sizing/overflow` after the M14a fields. Every visible border style
+is painted as a solid line in this MVP; percentages are not accepted for border widths.
 
 External stylesheets (M12): `shell`'s private `LoadStyledDocument()` (in `src/shell/page.h`) owns the
 whole resource policy: after fetching and parsing the page it walks the DOM once in document order,
@@ -186,6 +191,21 @@ whole (`justify` lays out as left; overlong lines stay left). Inline/replaced pe
 margins/paddings use the line width, replaced percentage width uses the containing width and
 percentage height stays auto. Visibility does not affect layout.
 
+M14b layout: used border widths (`UsedBorderWidth`) enter the box model: border box = content +
+padding + borders on each side, content box = border box inset by border + padding. With
+`box-sizing: content-box` (the default) width/height remain content sizes and an auto width fills
+`containing_width - margins - paddings - borders`; with `border-box` width/height are border-box
+sizes and content = clamp(size - paddings - borders, >= 0), while an auto width still fills.
+Px min/max-width/height follow the box-sizing (content-box clamps the content box, border-box
+clamps the border box, non-negative, min before max); percentage sizes/constraints still use the
+containing content width. Auto margins distribute `containing_width - margins - final border box
+width` (CSS 10.4 centering, over-constrained 0). Fixed and auto heights follow the same rules
+(percentage heights stay unsupported). Inline elements add their horizontal borders to left/right
+advances and fragment widths (first fragment gets border-left, last gets border-right; vertical
+inline borders stay ignored), replaced inline elements ignore borders/padding/margins per the M8a
+limit, and overflow/decorations never change layout. Pages without borders/box-sizing changes keep
+pre-M14b geometry byte for byte.
+
 Painting (M6): `paint` walks the box tree in pre-order and emits a flat `render::DisplayList`:
 every element box with a non-transparent computed background becomes a `FillRect` (backgrounds
 before children), every inline replaced box whose node id has a decoded image becomes a `DrawImage`
@@ -213,6 +233,18 @@ command(s) and under the same text culling. A page using neither property builds
 pre-M14 command list. The bitmap path still top-aligns glyph cells inside the line box, so a large
 CSS line-height shows the extra space below the glyphs (the real-font path centers glyphs via the
 half-leading baseline); this is a documented bitmap-mode simplification.
+
+M14b paint: element paint order is background -> borders -> image -> children/text. Borders are up
+to four `FillRect`s from the border-box rectangle in top/right/bottom/left order with the resolved
+`UsedBorderColor` (currentColor -> text color, alpha kept), each culled exactly like a background;
+every parsed border style paints solid and hidden boxes paint no borders. An `overflow:hidden` box
+(either axis) emits one balanced `PushClip`/`PopClip` pair around its whole subtree, clipping to its
+padding box (integer-rounded edges; the pair is emitted even for an empty subtree and nested clips
+nest); clipping is painting-only, so `ContentHeight` still includes overflowing boxes. Text
+decorations are emitted after a text box's text commands in underline -> line-through -> overline
+order: underline at baseline+1, line-through at baseline - max(1, round(font_size/3)), overline at
+the box top, each a 1px `FillRect` in the opaque text color, under the same text culling and never
+for hidden text. Pages without the new properties build the byte-identical pre-M14b command list.
 
 Images (M8a): `render` owns PNG decoding behind `render::DecodePng()`: the approved libpng
 dependency is wrapped in `src/render/image.cpp`, pixels are converted to straight-alpha ARGB
@@ -501,6 +533,23 @@ can't form ownership cycles. Revisit only if it actually hurts.
   geometry/order/culling plus a hand-built pre-M14 reference list. `legacy.html` proves pre-M14
   pages keep byte-identical box dumps/PPMs; the byte-compat gate normalizes only the appended style
   fields. Manual real-site checks stay out of CTest and `.tmp/` evidence is never committed.
+- M14b box-decoration tests are offline and deterministic: the committed
+  `tests/fixtures/css_compat_site/` gained `borders.html` (1–4 sides, mixed widths/styles/colors/
+  currentColor/rgba, shorthands, content-box vs border-box, nested boxes), `overflow.html`
+  (oversized clipped child + text, visible twin, bordered clip, following box) and
+  `decorations.html` (all three decorations individually/combined/inherited/reset), with the README
+  documenting every expected computed value, box rectangle, decoration row and pixel. `style.borders`
+  covers width/style/color longhands and shorthand reset/rejection semantics, `style.box_model`
+  covers box-sizing/overflow, `layout.box_model` covers border geometry/box-sizing/auto margins/
+  heights/inline borders/none-hidden/replaced-ignore and pre-M14b geometry equality, and extended
+  `paint.display_list` cases cover border rect order/geometry/color/alpha/culling, overflow clip
+  pairs + exact clipped pixels, line-through/overline rows (bitmap and real font) and a hand-built
+  pre-M14b reference list. `shell.css_compat` asserts computed values, frozen box geometry and
+  Browser pixels for the new pages; `shell.dump_style_css_compat_borders` and
+  `shell.css_compat_screenshot_borders` cover the CLI. The byte-compat gate compares against the M14a
+  binary (box dumps/PPMs/exit status identical; style dumps normalized from ` min-width=`), and a
+  pre-M14 (M13) comparison differs only in the M14a fixture pages. Real-site evidence stays in
+  `.tmp/` and never enters the repo/CTest.
 
 ## Reference material
 

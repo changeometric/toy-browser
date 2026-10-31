@@ -48,4 +48,12 @@ void ApplyFontSizeDeclaration(const css::Declaration& declaration, float parent_
 void ApplyDeclaration(const css::Declaration& declaration, float root_font_size_px,
                       ComputedStyle* style);
 
+// Sets one border side to its CSS initial value: a `medium` (3px) width, the
+// `none` style and `currentColor` (std::nullopt). The width is stored even
+// though `none` makes UsedBorderWidth 0.
+void ResetBorderSide(BorderSide* side);
+
+// Sets all four border sides to their CSS initial values (see ResetBorderSide).
+void ResetBorderSides(ComputedStyle* style);
+
 }  // namespace toy::style::detail

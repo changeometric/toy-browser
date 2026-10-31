@@ -1,6 +1,6 @@
-# M14a CLI check, run by CTest as one test:
-#   cmake -DTOYBROWSER=<toybrowser> -DFIXTURE_DIR=<css_compat_site> -DOUTPUT=<ppm> \
-#         -P css_compat_screenshot_check.cmake
+# M14a/M14b CLI check, run by CTest as one test:
+#   cmake -DTOYBROWSER=<toybrowser> -DFIXTURE_DIR=<css_compat_site> -DPAGE=<page.html>
+#         -DOUTPUT=<ppm> -P css_compat_screenshot_check.cmake
 #
 # One headless --screenshot run over the CSS-compatibility fixture site must exit
 # 0 and write a binary PPM of the requested size. No display and no network are
@@ -12,11 +12,14 @@ foreach(required TOYBROWSER FIXTURE_DIR OUTPUT)
     message(FATAL_ERROR "css_compat_screenshot_check.cmake: missing -D${required}")
   endif()
 endforeach()
+if(NOT DEFINED PAGE OR "${PAGE}" STREQUAL "")
+  set(PAGE "values.html")
+endif()
 
 file(REMOVE "${OUTPUT}")
 execute_process(
   COMMAND "${TOYBROWSER}" --size 320x400 --screenshot "${OUTPUT}"
-          "file://${FIXTURE_DIR}/values.html"
+          "file://${FIXTURE_DIR}/${PAGE}"
   RESULT_VARIABLE screenshot_result
   OUTPUT_VARIABLE screenshot_stdout
   ERROR_VARIABLE screenshot_stderr)

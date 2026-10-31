@@ -519,3 +519,29 @@ the round when possible. Clean up stale build directories and stray files.
   so line-height/underline screenshots are only representative on real sites (system fonts). Tests
   pin the deterministic bitmap path and the contract documents the divergence; do not "fix" the
   bitmap path without a pixel-compat decision.
+
+- M14b: the box-decoration round showed the value of the used-width helper contract — border widths
+  enter layout/painting only through `UsedBorderWidth` (0 for none/hidden), and every border/box
+  term is appended last in the float expressions, so a page with default borders keeps bit-identical
+  geometry. Verify this with the previous round's binary (31-case gate) instead of trusting the
+  module tests, and add a capstone comparison against an even older baseline (M13) to prove the
+  M14 changes only affected pages that use the new properties.
+- M14b: overflow clipping was deliberately scoped to painting (padding-box clip pairs, no
+  scrollbars, `ContentHeight` unchanged, either-axis-hidden clips). Writing that choice into the
+  paint contract and roadmap known-limits made the e2e pixel tests unambiguous; an ambiguous
+  "overflow" scope would have pulled in a whole scroll-container project.
+- M14b: border/decoration paint simplifications (every style solid, 1px decoration rows with frozen
+  offsets, currentColor resolved at paint/dump time, alpha dropped only in the dump) were frozen in
+  the contract header/README before implementation; the paint tests assert exact command geometry
+  and a hand-built pre-M14b reference list, which is what kept the "no-new-property pages unchanged"
+  promise verifiable.
+- M14b: the real-site check again doubled as the M15 scoping survey: python.org now paints 148 used
+  borders and its universal `*{box-sizing:border-box}` reflows 836 elements (23.8% pixel diff),
+  w3.org's skip-link border applies (0.53%), gnu.org's skip link paints its border (6.65%); the
+  remaining gap list (position/float 219 declarations, border-radius 121, box-shadow 129, display
+  inline-block/flex/grid 132, transforms 105, CSS variables, @media/@font-face) is the M15+ backlog.
+- M14 overall: splitting the oversized CSS batch into two sub-rounds with independent contracts,
+  task sets and commits (M14a values/typography, M14b box decorations) kept each reviewable and
+  allowed the same three teammates to be reused; each sub-round ran its own GCC/Clang, byte-compat
+  and real-site gates. When a roadmap batch is clearly larger than one round, propose the split
+  during intake with measured evidence instead of starting a mega-round.

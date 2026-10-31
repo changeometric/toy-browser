@@ -29,6 +29,20 @@
 // properties keeps byte-identical geometry: `normal` contributes exactly the
 // measured line height (zero half-leading) and `left` alignment shifts nothing.
 //
+// M14b: the box model includes borders and `box-sizing`. A block box's rect is
+// the border box: margins live outside it, then border widths, padding and the
+// content box inward. `box-sizing: content-box` (initial) makes a specified
+// `width`/`height` the content size; `box-sizing: border-box` makes it the
+// border-box size (content = max(0, size - padding - borders)). The px min/max
+// constraints follow the same sizing, percentages still resolve against the
+// containing content width, and auto horizontal margins distribute against the
+// final border box. Inline elements include their horizontal border widths in
+// the left/right advances and fragment widths (vertical inline borders are
+// ignored, the M5 inline-vertical limit); replaced elements keep ignoring
+// padding/margins/borders (M8a limit). Overflow clipping and decorations never
+// change layout. A page without borders or `box-sizing` keeps byte-identical
+// geometry: the border widths are 0 and the content-box path is the M14a path.
+//
 // Text nodes are split into break units by text_break.h: non-CJK text keeps the
 // pre-M10 word grouping, while every CJK code point is its own unit so Chinese,
 // Japanese and Korean text wraps between characters without spaces (with a
@@ -100,6 +114,12 @@ float ResolveMargin(const style::AutoLength& margin, float basis) {
   return margin.is_auto ? 0.0f : ResolveLength(margin.length, basis);
 }
 
+// The border width that occupies layout space: 0 for a none/hidden side,
+// otherwise the computed px width (clamped to >= 0 like padding).
+float ResolveBorder(const style::BorderSide& side) {
+  return ClampLength(style::UsedBorderWidth(side));
+}
+
 // The line-height contribution of one text item, in CSS px: the measured line
 // height for `normal` (pre-M14 behavior), otherwise the computed px value or the
 // unitless number times the item's own computed font size. Never negative.
@@ -117,19 +137,25 @@ float ResolveLineHeight(const style::LineHeight& line_height, const style::Compu
 }
 
 // Horizontal geometry of one block box after percentage resolution: the used
-// margins and padding plus the final content width, with the min/max-width clamp
-// and horizontal auto-margin distribution applied.
+// margins, borders and padding plus the final content and border-box widths,
+// with the box-sizing-aware min/max-width clamp and horizontal auto-margin
+// distribution applied.
 struct BlockHorizontal {
   float margin_left = 0.0f;
   float margin_right = 0.0f;
+  float border_left = 0.0f;
+  float border_right = 0.0f;
   float padding_left = 0.0f;
   float padding_right = 0.0f;
   float content_width = 0.0f;
+  float border_box_width = 0.0f;
 };
 
 BlockHorizontal ResolveBlockHorizontal(const style::ComputedStyle& style,
                                        float containing_width) {
   BlockHorizontal horizontal;
+  horizontal.border_left = ResolveBorder(style.border_left);
+  horizontal.border_right = ResolveBorder(style.border_right);
   horizontal.padding_left = ResolvePadding(style.padding_left, containing_width);
   horizontal.padding_right = ResolvePadding(style.padding_right, containing_width);
   const bool auto_left = style.margin_left.is_auto;
@@ -137,33 +163,79 @@ BlockHorizontal ResolveBlockHorizontal(const style::ComputedStyle& style,
   horizontal.margin_left = ResolveMargin(style.margin_left, containing_width);
   horizontal.margin_right = ResolveMargin(style.margin_right, containing_width);
 
-  // Tentative content width: the specified width, or the containing content
-  // width left over after margins and padding (auto margins count as 0 for now).
   const bool width_specified = style.width.has_value();
-  const float tentative =
-      width_specified
-          ? ClampLength(ResolveLength(*style.width, containing_width))
-          : ClampLength(containing_width - horizontal.margin_left - horizontal.margin_right -
-                        horizontal.padding_left - horizontal.padding_right);
+  const bool border_box_sizing = style.box_sizing == style::BoxSizing::kBorderBox;
+  // The horizontal space padding and borders take on top of the content width.
+  const float horizontal_extra = horizontal.padding_left + horizontal.padding_right +
+                                 horizontal.border_left + horizontal.border_right;
 
-  // CSS 10.4: min-width then max-width (percentages use the containing content
-  // width), never negative. A min wider than the max leaves the max winning.
-  float content_width = tentative;
-  if (style.min_width) {
-    content_width = std::max(content_width, ResolveLength(*style.min_width, containing_width));
+  // Tentative widths. content-box: `width` is the content width. border-box:
+  // `width` is the border-box width, so the content follows from it. An auto
+  // width fills the containing content width in both modes (auto margins count
+  // as 0 for now).
+  float tentative_content = 0.0f;
+  float tentative_border_box = 0.0f;
+  if (width_specified) {
+    const float resolved = ClampLength(ResolveLength(*style.width, containing_width));
+    if (border_box_sizing) {
+      tentative_border_box = resolved;
+      tentative_content = ClampLength(resolved - horizontal_extra);
+    } else {
+      tentative_content = resolved;
+      tentative_border_box = resolved + horizontal_extra;
+    }
+  } else {
+    // The borders are subtracted last so that the no-border expression and its
+    // float rounding are exactly the pre-M14b auto-width computation.
+    tentative_content = ClampLength(containing_width - horizontal.margin_left -
+                                    horizontal.margin_right - horizontal.padding_left -
+                                    horizontal.padding_right - horizontal.border_left -
+                                    horizontal.border_right);
+    tentative_border_box = tentative_content + horizontal_extra;
   }
-  if (style.max_width) {
-    content_width = std::min(content_width, ResolveLength(*style.max_width, containing_width));
+
+  // CSS 10.4: min-width then max-width (percentages still use the containing
+  // content width), never negative. The constraint applies to the content box
+  // for content-box and to the border box for border-box; a min wider than the
+  // max leaves the max winning.
+  bool constraint_applied = false;
+  if (border_box_sizing) {
+    float border_box = tentative_border_box;
+    if (style.min_width) {
+      border_box = std::max(border_box, ResolveLength(*style.min_width, containing_width));
+    }
+    if (style.max_width) {
+      border_box = std::min(border_box, ResolveLength(*style.max_width, containing_width));
+    }
+    border_box = ClampLength(border_box);
+    constraint_applied = border_box != tentative_border_box;
+    horizontal.content_width = ClampLength(border_box - horizontal_extra);
+  } else {
+    float content = tentative_content;
+    if (style.min_width) {
+      content = std::max(content, ResolveLength(*style.min_width, containing_width));
+    }
+    if (style.max_width) {
+      content = std::min(content, ResolveLength(*style.max_width, containing_width));
+    }
+    content = ClampLength(content);
+    constraint_applied = content != tentative_content;
+    horizontal.content_width = content;
   }
-  horizontal.content_width = ClampLength(content_width);
+  horizontal.border_box_width =
+      horizontal.content_width + horizontal.padding_left + horizontal.padding_right +
+      horizontal.border_left + horizontal.border_right;
 
   // CSS 10.3.3: a horizontal auto margin absorbs the remaining space when the
   // width is definite (specified, or made definite by the min/max clamp). With
   // an auto width and no clamp the box fills the containing block, so auto
   // margins are 0; an over-constrained box (no space left) keeps them at 0 too.
-  if ((auto_left || auto_right) && (width_specified || horizontal.content_width != tentative)) {
+  // The remainder is measured against the final border box; the borders are
+  // subtracted last so the no-border float result matches M14a exactly.
+  if ((auto_left || auto_right) && (width_specified || constraint_applied)) {
     const float remaining = containing_width - horizontal.margin_left - horizontal.margin_right -
                             horizontal.padding_left - horizontal.padding_right -
+                            horizontal.border_left - horizontal.border_right -
                             horizontal.content_width;
     if (remaining > 0.0f) {
       if (auto_left && auto_right) {
@@ -195,10 +267,12 @@ struct ContainingBlock {
 // resolved to CSS px against the containing block content width.
 struct OpenInline {
   dom::NodeId node = kNoNode;
+  float border_left = 0;
+  float border_right = 0;
   float padding_left = 0;
   float padding_right = 0;
-  float left_advance = 0;   // margin-left + padding-left, before first content
-  float right_advance = 0;  // padding-right + margin-right, after last content
+  float left_advance = 0;   // margin-left + border-left + padding-left, before content
+  float right_advance = 0;  // padding-right + border-right + margin-right, after content
   bool first_fragment_pending = true;
   bool has_fragment = false;
   BoxId current_fragment = kInvalidBox;
@@ -255,8 +329,11 @@ struct BlockFrame {
   float content_x = 0;
   float content_y = 0;
   float content_width = 0;
+  float border_top = 0;
+  float border_bottom = 0;
   float padding_top = 0;
   float padding_bottom = 0;
+  bool border_box_sizing = false;
   bool has_fixed_height = false;
   float fixed_height = 0;
   // px-only min/max-height constraints (percentage constraints are unsupported
@@ -366,7 +443,8 @@ BoxId LayoutEngine::CreateBlockBox(dom::NodeId element, const ContainingBlock& c
   Box& box = boxes_[id];
   box.x = containing.content_x + horizontal.margin_left;
   box.y = flow_y + margin_top;
-  box.width = horizontal.content_width + horizontal.padding_left + horizontal.padding_right;
+  box.width = horizontal.content_width + horizontal.padding_left + horizontal.padding_right +
+              horizontal.border_left + horizontal.border_right;
   box.height = 0.0f;  // Finalized after the children are laid out.
   if (parent != kInvalidBox) {
     AppendChild(parent, id);
@@ -515,11 +593,16 @@ bool LayoutEngine::RunProducesBoxes(const std::vector<StreamItem>& stream,
 
 BlockFrame LayoutEngine::MakeFrame(BoxId box, dom::NodeId element, float containing_width) {
   const style::ComputedStyle& style = styles_.Get(element);
+  const float border_left = ResolveBorder(style.border_left);
+  const float border_right = ResolveBorder(style.border_right);
   const float padding_left = ResolvePadding(style.padding_left, containing_width);
   const float padding_right = ResolvePadding(style.padding_right, containing_width);
   BlockFrame frame;
   frame.box = box;
   frame.element = element;
+  frame.border_top = ResolveBorder(style.border_top);
+  frame.border_bottom = ResolveBorder(style.border_bottom);
+  frame.border_box_sizing = style.box_sizing == style::BoxSizing::kBorderBox;
   frame.padding_top = ResolvePadding(style.padding_top, containing_width);
   frame.padding_bottom = ResolvePadding(style.padding_bottom, containing_width);
   // Percentage heights and min/max-heights are unsupported in M14: only px
@@ -531,9 +614,9 @@ BlockFrame LayoutEngine::MakeFrame(BoxId box, dom::NodeId element, float contain
   frame.has_max_height = style.max_height && IsPxLength(*style.max_height);
   frame.max_height = frame.has_max_height ? ClampLength(style.max_height->value) : 0.0f;
   const Box& box_ref = boxes_[box];
-  frame.content_x = box_ref.x + padding_left;
-  frame.content_y = box_ref.y + frame.padding_top;
-  frame.content_width = box_ref.width - padding_left - padding_right;
+  frame.content_x = box_ref.x + border_left + padding_left;
+  frame.content_y = box_ref.y + frame.border_top + frame.padding_top;
+  frame.content_width = box_ref.width - padding_left - padding_right - border_left - border_right;
   frame.stream = FlattenChildren(element);
   for (const StreamItem& item : frame.stream) {
     if (item.kind == StreamKind::kBlock) {
@@ -671,7 +754,12 @@ BoxId LayoutEngine::PlaceInlineItem(InlineState& state, float advance) {
     if (open.current_fragment == kInvalidBox) {
       const BoxId fragment = AddBox(BoxKind::kInline, open.node);
       Box& fragment_box = boxes_[fragment];
-      fragment_box.x = first_fragment ? state.cursor_x - open.padding_left : state.cursor_x;
+      // The fragment rect is the border box: on the first fragment it starts a
+      // margin before the content (left border and padding are inside it), on a
+      // continuation fragment it starts at the current cursor.
+      fragment_box.x = first_fragment
+                           ? state.cursor_x - open.padding_left - open.border_left
+                           : state.cursor_x;
       AppendChild(parent, fragment);
       open.current_fragment = fragment;
       open.current_border_x = fragment_box.x;
@@ -770,14 +858,20 @@ void LayoutEngine::ProcessBreak(InlineState& state, dom::NodeId br) {
 void LayoutEngine::ProcessOpen(InlineState& state, dom::NodeId element) {
   const style::ComputedStyle& style = styles_.Get(element);
   // Percentage inline margins/padding use the containing block content width,
-  // which is the line width of this inline formatting context.
+  // which is the line width of this inline formatting context. Horizontal
+  // borders add to the advances exactly like horizontal padding (vertical inline
+  // borders are ignored, the M5 inline-vertical limit).
   const float basis = state.line_width;
   OpenInline open;
   open.node = element;
+  open.border_left = ResolveBorder(style.border_left);
+  open.border_right = ResolveBorder(style.border_right);
   open.padding_left = ResolvePadding(style.padding_left, basis);
   open.padding_right = ResolvePadding(style.padding_right, basis);
-  open.left_advance = ResolveMargin(style.margin_left, basis) + open.padding_left;
-  open.right_advance = open.padding_right + ResolveMargin(style.margin_right, basis);
+  open.left_advance =
+      ResolveMargin(style.margin_left, basis) + open.padding_left + open.border_left;
+  open.right_advance =
+      open.padding_right + open.border_right + ResolveMargin(style.margin_right, basis);
   state.open.push_back(open);
 }
 
@@ -792,14 +886,15 @@ void LayoutEngine::ProcessClose(InlineState& state, dom::NodeId element) {
   state.open.pop_back();
   if (open.current_fragment != kInvalidBox) {
     // The fragment ends on the current line and its border box includes the
-    // element's right padding.
-    boxes_[open.current_fragment].width =
-        (state.cursor_x - open.current_border_x) + open.padding_right;
+    // element's right padding and border.
+    boxes_[open.current_fragment].width = (state.cursor_x - open.current_border_x) +
+                                          open.padding_right + open.border_right;
     state.cursor_x += open.right_advance;
   } else if (open.has_fragment) {
     // The last fragment ended at a line break; its border box still includes
-    // padding-right. margin-right would sit after a flushed line and is dropped.
-    boxes_[open.last_fragment].width += open.padding_right;
+    // padding-right and border-right. margin-right would sit after a flushed line
+    // and is dropped.
+    boxes_[open.last_fragment].width += open.padding_right + open.border_right;
   }
 }
 
@@ -920,10 +1015,11 @@ void LayoutEngine::Run(const LayoutOptions& options) {
     }
 
     // All children are laid out: finalize the block height and resume the
-    // parent's flow cursor. A px fixed height replaces the content height; then
-    // the px min/max-height constraints clamp it (min first, then max), and the
-    // content height is never negative. Percentage height constraints are
-    // unsupported in M14 (they behave as auto/no constraint).
+    // parent's flow cursor. In content-box the px height is the content height;
+    // in border-box it is the border-box height (the content follows from it).
+    // The px min/max-height constraints follow the same box-sizing rule and are
+    // clamped min first, then max, never negative. Percentage height constraints
+    // are unsupported in M14 (they behave as auto/no constraint).
     float content_height = 0.0f;
     if (frame.mixed) {
       FinishRun(frame);
@@ -931,21 +1027,39 @@ void LayoutEngine::Run(const LayoutOptions& options) {
     } else {
       content_height = FinishSession(frame.inline_state);
     }
-    if (frame.has_fixed_height) {
-      content_height = frame.fixed_height;
+    if (frame.border_box_sizing) {
+      const float vertical_extra = frame.padding_top + frame.padding_bottom +
+                                   frame.border_top + frame.border_bottom;
+      float border_height =
+          frame.has_fixed_height ? frame.fixed_height : content_height + vertical_extra;
+      if (frame.has_min_height) {
+        border_height = std::max(border_height, frame.min_height);
+      }
+      if (frame.has_max_height) {
+        border_height = std::min(border_height, frame.max_height);
+      }
+      border_height = ClampLength(border_height);
+      content_height = ClampLength(border_height - vertical_extra);
+    } else {
+      if (frame.has_fixed_height) {
+        content_height = frame.fixed_height;
+      }
+      if (frame.has_min_height) {
+        content_height = std::max(content_height, frame.min_height);
+      }
+      if (frame.has_max_height) {
+        content_height = std::min(content_height, frame.max_height);
+      }
+      content_height = ClampLength(content_height);
     }
-    if (frame.has_min_height) {
-      content_height = std::max(content_height, frame.min_height);
-    }
-    if (frame.has_max_height) {
-      content_height = std::min(content_height, frame.max_height);
-    }
-    content_height = ClampLength(content_height);
     const BoxId finished_box = frame.box;
     const float padding_top = frame.padding_top;
     const float padding_bottom = frame.padding_bottom;
+    const float border_top = frame.border_top;
+    const float border_bottom = frame.border_bottom;
     stack.pop_back();
-    boxes_[finished_box].height = content_height + padding_top + padding_bottom;
+    boxes_[finished_box].height = content_height + padding_top + padding_bottom + border_top +
+                                  border_bottom;
     if (!stack.empty()) {
       BlockFrame& parent = stack.back();
       if (parent.waiting_child) {

@@ -6,9 +6,9 @@
 
 HTTPS/TLS 问题已于 2026-10-31 解决：用户批准 OpenSSL，M9（最基础 HTTPS）已随之交付（见
 [dependencies.md](dependencies.md) 与 [roadmap.md](roadmap.md)）。M12（外部样式表）、M13（资源
-加载管线）与 M14a（CSS 值与排版）都已交付，没有新依赖或新的待决事项（M13 直接链接早已批准的 zlib）。
-下一计划里程碑是 M14b（盒装饰与约束：border、box-sizing、overflow 裁剪、line-through/overline），
-随后是 M15（flexbox/position/float 子集）。HTTP 代理（M16）已被用户降低优先级，不需要新依赖。
+加载管线）与 M14（CSS 兼容批次 1，拆成 M14a 值与排版 + M14b 盒装饰与约束）都已交付，没有新依赖或
+新的待决事项（M13 直接链接早已批准的 zlib）。下一计划里程碑是 M15（flexbox/position/float 子集），
+其范围需要在开始前与维护者重新确认；不需要新依赖。HTTP 代理（M16）已被用户降低优先级。
 
 ## 1. 外部测试语料 —— 可选，目前不需要
 

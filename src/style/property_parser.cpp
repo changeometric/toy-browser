@@ -818,42 +818,288 @@ void ApplyBackgroundShorthandValue(std::string_view value, ComputedStyle* style)
   }
 }
 
-// `none`, `underline`, `line-through` and `overline` are the decoration line
-// values; other shorthand components (style, color) are ignored. Only the
-// underline line is represented in M14a. A `none` combined with another
-// decoration is invalid CSS and ignored; a value with no decoration-line token
-// at all is ignored too.
+// The CSS initial border width: `medium` (3px). The stored width only
+// participates in the box model when the side's style is not none/hidden.
+constexpr float kInitialBorderWidthPx = 3.0f;
+
+// A border decoration line token sets one of the three flags. A declaration
+// resets all three flags first, so tokens absent from the value are cleared;
+// style/color components of the shorthand are tolerated and ignored.
 void ApplyTextDecorationValue(std::string_view value, ComputedStyle* style) {
   const std::vector<std::string_view> tokens = SplitWhitespace(value);
   if (tokens.empty()) {
     return;
   }
-  bool has_none = false;
-  bool has_underline = false;
-  bool has_other_decoration = false;
-  bool has_decoration_line = false;
+  bool underline = false;
+  bool line_through = false;
+  bool overline = false;
   for (const std::string_view token : tokens) {
     const std::string lower = ToLowerAscii(token);
-    if (lower == "none") {
-      has_none = true;
-      has_decoration_line = true;
-    } else if (lower == "underline") {
-      has_underline = true;
-      has_decoration_line = true;
-    } else if (lower == "overline" || lower == "line-through" || lower == "blink") {
-      has_other_decoration = true;
-      has_decoration_line = true;
+    if (lower == "underline") {
+      underline = true;
+    } else if (lower == "line-through") {
+      line_through = true;
+    } else if (lower == "overline") {
+      overline = true;
     }
-    // Any other token is an unsupported shorthand component (style or color)
-    // and does not affect the decoration line.
+    // `none` and style/color components (wavy, dotted, red, ...) do not set a
+    // line; they are tolerated because the declaration already reset the flags.
   }
-  if (!has_decoration_line) {
-    return;  // No decoration line at all: leave the inherited value alone.
+  style->text_decoration_underline = underline;
+  style->text_decoration_line_through = line_through;
+  style->text_decoration_overline = overline;
+}
+
+// ---- Borders (M14b) -------------------------------------------------------
+
+// A px border width from a keyword or px length. Negative values, percentages,
+// font-relative units and everything else are rejected.
+std::optional<Length> ParseBorderWidthValue(std::string_view text) {
+  const std::string keyword = ToLowerAscii(TrimAsciiWhitespace(text));
+  if (keyword == "thin") {
+    return Length{1.0f, Length::Unit::kPx};
   }
-  if (has_none && (has_underline || has_other_decoration)) {
-    return;  // `none` cannot be combined with a decoration.
+  if (keyword == "medium") {
+    return Length{kInitialBorderWidthPx, Length::Unit::kPx};
   }
-  style->text_decoration_underline = has_underline;
+  if (keyword == "thick") {
+    return Length{5.0f, Length::Unit::kPx};
+  }
+  const std::optional<ParsedLength> length = ParseLength(text);
+  if (!length || length->unit != ParsedLength::Unit::kPx || length->value < 0.0f) {
+    return std::nullopt;
+  }
+  return Length{length->value, Length::Unit::kPx};
+}
+
+std::optional<BorderStyle> ParseBorderStyleValue(std::string_view text) {
+  const std::string keyword = ToLowerAscii(TrimAsciiWhitespace(text));
+  if (keyword == "none") {
+    return BorderStyle::kNone;
+  }
+  if (keyword == "hidden") {
+    return BorderStyle::kHidden;
+  }
+  if (keyword == "solid") {
+    return BorderStyle::kSolid;
+  }
+  if (keyword == "dashed") {
+    return BorderStyle::kDashed;
+  }
+  if (keyword == "dotted") {
+    return BorderStyle::kDotted;
+  }
+  if (keyword == "double") {
+    return BorderStyle::kDouble;
+  }
+  if (keyword == "groove") {
+    return BorderStyle::kGroove;
+  }
+  if (keyword == "ridge") {
+    return BorderStyle::kRidge;
+  }
+  if (keyword == "inset") {
+    return BorderStyle::kInset;
+  }
+  if (keyword == "outset") {
+    return BorderStyle::kOutset;
+  }
+  return std::nullopt;
+}
+
+// One parsed border color token.
+struct BorderColorValue {
+  bool valid = false;
+  // CSS `currentColor`, stored as std::nullopt in BorderSide.
+  bool current_color = false;
+  std::uint32_t color = 0;
+};
+
+BorderColorValue ParseBorderColorValue(std::string_view text) {
+  BorderColorValue result;
+  if (const std::optional<std::uint32_t> color = ParseColor(text)) {
+    result.valid = true;
+    result.color = *color;
+    return result;
+  }
+  if (ToLowerAscii(TrimAsciiWhitespace(text)) == "currentcolor") {
+    result.valid = true;
+    result.current_color = true;
+  }
+  return result;
+}
+
+BorderSide* BorderSideAt(ComputedStyle* computed, std::size_t side) {
+  if (side == 0) {
+    return &computed->border_top;
+  }
+  if (side == 1) {
+    return &computed->border_right;
+  }
+  if (side == 2) {
+    return &computed->border_bottom;
+  }
+  return &computed->border_left;
+}
+
+void ApplyBorderWidthShorthand(std::string_view value, ComputedStyle* computed) {
+  const std::vector<std::string_view> tokens = SplitWhitespace(value);
+  if (tokens.empty() || tokens.size() > 4) {
+    return;
+  }
+  Length widths[4] = {};
+  for (std::size_t index = 0; index < tokens.size(); ++index) {
+    const std::optional<Length> width = ParseBorderWidthValue(tokens[index]);
+    if (!width) {
+      return;  // An invalid value makes the whole shorthand a no-op.
+    }
+    widths[index] = *width;
+  }
+  for (std::size_t side = 0; side < 4; ++side) {
+    BorderSideAt(computed, side)->width = widths[BoxShorthandSide(tokens.size(), side)];
+  }
+}
+
+void ApplyBorderStyleShorthand(std::string_view value, ComputedStyle* computed) {
+  const std::vector<std::string_view> tokens = SplitWhitespace(value);
+  if (tokens.empty() || tokens.size() > 4) {
+    return;
+  }
+  BorderStyle styles[4] = {};
+  for (std::size_t index = 0; index < tokens.size(); ++index) {
+    const std::optional<BorderStyle> style = ParseBorderStyleValue(tokens[index]);
+    if (!style) {
+      return;
+    }
+    styles[index] = *style;
+  }
+  for (std::size_t side = 0; side < 4; ++side) {
+    BorderSideAt(computed, side)->style = styles[BoxShorthandSide(tokens.size(), side)];
+  }
+}
+
+void ApplyBorderColorShorthand(std::string_view value, ComputedStyle* computed) {
+  const std::vector<std::string_view> tokens = SplitWhitespace(value);
+  if (tokens.empty() || tokens.size() > 4) {
+    return;
+  }
+  std::optional<std::uint32_t> colors[4];
+  for (std::size_t index = 0; index < tokens.size(); ++index) {
+    const BorderColorValue color = ParseBorderColorValue(tokens[index]);
+    if (!color.valid) {
+      return;
+    }
+    if (!color.current_color) {
+      colors[index] = color.color;
+    }
+  }
+  for (std::size_t side = 0; side < 4; ++side) {
+    BorderSideAt(computed, side)->color = colors[BoxShorthandSide(tokens.size(), side)];
+  }
+}
+
+// Parses a `<width> || <style> || <color>` component list: components may
+// appear in any order, each optional and at most once. Unknown tokens and
+// duplicate components invalidate the whole value. On success the out
+// parameters hold the provided components or the CSS initial values.
+bool ParseBorderComponents(std::string_view value, Length* width, BorderStyle* style,
+                           std::optional<std::uint32_t>* color) {
+  const std::vector<std::string_view> tokens = SplitWhitespace(value);
+  if (tokens.empty()) {
+    return false;
+  }
+  bool has_width = false;
+  bool has_style = false;
+  bool has_color = false;
+  *width = Length{kInitialBorderWidthPx, Length::Unit::kPx};
+  *style = BorderStyle::kNone;
+  *color = std::nullopt;
+  for (const std::string_view token : tokens) {
+    if (!has_width) {
+      if (const std::optional<Length> parsed = ParseBorderWidthValue(token)) {
+        *width = *parsed;
+        has_width = true;
+        continue;
+      }
+    }
+    if (!has_style) {
+      if (const std::optional<BorderStyle> parsed = ParseBorderStyleValue(token)) {
+        *style = *parsed;
+        has_style = true;
+        continue;
+      }
+    }
+    if (!has_color) {
+      const BorderColorValue parsed = ParseBorderColorValue(token);
+      if (parsed.valid) {
+        if (!parsed.current_color) {
+          *color = parsed.color;
+        }
+        has_color = true;
+        continue;
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
+void ApplyBorderSideShorthand(std::string_view value, BorderSide* side) {
+  Length width;
+  BorderStyle style = BorderStyle::kNone;
+  std::optional<std::uint32_t> color;
+  if (!ParseBorderComponents(value, &width, &style, &color)) {
+    return;
+  }
+  // CSS shorthand reset semantics: absent components reset to initial values.
+  side->width = width;
+  side->style = style;
+  side->color = color;
+}
+
+void ApplyBorderShorthand(std::string_view value, ComputedStyle* computed) {
+  Length width;
+  BorderStyle style = BorderStyle::kNone;
+  std::optional<std::uint32_t> color;
+  if (!ParseBorderComponents(value, &width, &style, &color)) {
+    return;
+  }
+  for (std::size_t side = 0; side < 4; ++side) {
+    BorderSide* border = BorderSideAt(computed, side);
+    border->width = width;
+    border->style = style;
+    border->color = color;
+  }
+}
+
+// ---- box-sizing and overflow (M14b) ---------------------------------------
+
+std::optional<Overflow> ParseOverflowKeyword(std::string_view text) {
+  const std::string keyword = ToLowerAscii(TrimAsciiWhitespace(text));
+  if (keyword == "visible") {
+    return Overflow::kVisible;
+  }
+  if (keyword == "hidden") {
+    return Overflow::kHidden;
+  }
+  return std::nullopt;
+}
+
+void ApplyOverflowShorthand(std::string_view value, ComputedStyle* style) {
+  const std::vector<std::string_view> tokens = SplitWhitespace(value);
+  if (tokens.empty() || tokens.size() > 2) {
+    return;
+  }
+  Overflow values[2] = {Overflow::kVisible, Overflow::kVisible};
+  for (std::size_t index = 0; index < tokens.size(); ++index) {
+    const std::optional<Overflow> overflow = ParseOverflowKeyword(tokens[index]);
+    if (!overflow) {
+      return;  // An unsupported keyword makes the whole shorthand a no-op.
+    }
+    values[index] = *overflow;
+  }
+  style->overflow_x = values[0];
+  style->overflow_y = tokens.size() == 2 ? values[1] : values[0];
 }
 
 void ApplyFontWeightValue(std::string_view value, ComputedStyle* style) {
@@ -880,6 +1126,19 @@ void ApplyFontWeightValue(std::string_view value, ComputedStyle* style) {
 }
 
 }  // namespace
+
+void ResetBorderSide(BorderSide* side) {
+  side->width = Length{kInitialBorderWidthPx, Length::Unit::kPx};
+  side->style = BorderStyle::kNone;
+  side->color = std::nullopt;
+}
+
+void ResetBorderSides(ComputedStyle* computed) {
+  ResetBorderSide(&computed->border_top);
+  ResetBorderSide(&computed->border_right);
+  ResetBorderSide(&computed->border_bottom);
+  ResetBorderSide(&computed->border_left);
+}
 
 std::optional<ParsedLength> ParseLength(std::string_view text) {
   const std::string_view trimmed = TrimAsciiWhitespace(text);
@@ -1058,6 +1317,109 @@ void ApplyDeclaration(const css::Declaration& declaration, float root_font_size_
   }
   if (property == "text-decoration") {
     ApplyTextDecorationValue(declaration.value, style);
+    return;
+  }
+  if (property == "box-sizing") {
+    const std::string value = ToLowerAscii(TrimAsciiWhitespace(declaration.value));
+    if (value == "content-box") {
+      style->box_sizing = BoxSizing::kContentBox;
+    } else if (value == "border-box") {
+      style->box_sizing = BoxSizing::kBorderBox;
+    }
+    return;
+  }
+  if (property == "overflow") {
+    ApplyOverflowShorthand(declaration.value, style);
+    return;
+  }
+  if (property == "overflow-x") {
+    const std::optional<Overflow> overflow = ParseOverflowKeyword(declaration.value);
+    if (overflow) {
+      style->overflow_x = *overflow;
+    }
+    return;
+  }
+  if (property == "overflow-y") {
+    const std::optional<Overflow> overflow = ParseOverflowKeyword(declaration.value);
+    if (overflow) {
+      style->overflow_y = *overflow;
+    }
+    return;
+  }
+  if (property == "border") {
+    ApplyBorderShorthand(declaration.value, style);
+    return;
+  }
+  if (property == "border-width") {
+    ApplyBorderWidthShorthand(declaration.value, style);
+    return;
+  }
+  if (property == "border-style") {
+    ApplyBorderStyleShorthand(declaration.value, style);
+    return;
+  }
+  if (property == "border-color") {
+    ApplyBorderColorShorthand(declaration.value, style);
+    return;
+  }
+  {
+    // Border longhands: border-<side>-<width|style|color>.
+    std::size_t border_side = 0;
+    std::size_t prefix_length = 0;
+    bool is_border_longhand = true;
+    if (property.starts_with("border-top-")) {
+      border_side = 0;
+      prefix_length = 11;  // "border-top-".size()
+    } else if (property.starts_with("border-right-")) {
+      border_side = 1;
+      prefix_length = 13;  // "border-right-".size()
+    } else if (property.starts_with("border-bottom-")) {
+      border_side = 2;
+      prefix_length = 14;  // "border-bottom-".size()
+    } else if (property.starts_with("border-left-")) {
+      border_side = 3;
+      prefix_length = 12;  // "border-left-".size()
+    } else {
+      is_border_longhand = false;
+    }
+    if (is_border_longhand) {
+      BorderSide* border = BorderSideAt(style, border_side);
+      const std::string_view component = property.substr(prefix_length);
+      if (component == "width") {
+        const std::optional<Length> width = ParseBorderWidthValue(declaration.value);
+        if (width) {
+          border->width = *width;
+        }
+      } else if (component == "style") {
+        const std::optional<BorderStyle> border_style =
+            ParseBorderStyleValue(declaration.value);
+        if (border_style) {
+          border->style = *border_style;
+        }
+      } else if (component == "color") {
+        const BorderColorValue color = ParseBorderColorValue(declaration.value);
+        if (color.valid) {
+          border->color =
+              color.current_color ? std::nullopt : std::optional<std::uint32_t>(color.color);
+        }
+      }
+      return;
+    }
+  }
+  if (property == "border-top") {
+    ApplyBorderSideShorthand(declaration.value, &style->border_top);
+    return;
+  }
+  if (property == "border-right") {
+    ApplyBorderSideShorthand(declaration.value, &style->border_right);
+    return;
+  }
+  if (property == "border-bottom") {
+    ApplyBorderSideShorthand(declaration.value, &style->border_bottom);
+    return;
+  }
+  if (property == "border-left") {
+    ApplyBorderSideShorthand(declaration.value, &style->border_left);
     return;
   }
   if (property == "line-height") {

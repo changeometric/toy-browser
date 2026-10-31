@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <title>CSS compatibility: borders</title>
+  <style>
+    /* One side only. */
+    #top-only { border-top: 4px solid #ff0000; height: 12px; }
+    /* Four sides with different widths and colors (content-box default). */
+    #four { border-top: 2px solid #ff0000; border-right: 3px solid #00ff00;
+            border-bottom: 4px solid #0000ff; border-left: 5px solid #ffff00;
+            width: 100px; height: 40px; background-color: #eeeeee; }
+    /* The border shorthand with currentColor (resolves to the text color). */
+    #shorthand { border: 3px solid; color: #123456; height: 20px;
+                 background-color: #dddddd; }
+    /* An rgba() border color keeps its alpha; the canvas white shows through. */
+    #alpha { border: 2px solid rgba(255,0,0,0.5); height: 20px; }
+    /* A non-solid style still paints solid in this MVP. */
+    #dashed { border: 2px dashed #770000; height: 10px; }
+    /* box-sizing: content-box vs border-box for a 100x20 box with 5 px borders. */
+    #content-box { box-sizing: content-box; width: 100px; height: 20px;
+                   border: 5px solid #333333; background-color: #bbbbbb; }
+    #border-box { box-sizing: border-box; width: 100px; height: 20px;
+                  border: 5px solid #444444; background-color: #aaaaaa; }
+    /* Nested bordered boxes with padding. */
+    #outer { border: 2px solid #555555; padding: 4px; background-color: #999999; }
+    #inner { border: 1px solid #666666; height: 10px; background-color: #888888; }
+  </style>
+</head>
+<body>
+  <div id="top-only"></div>
+  <div id="four"></div>
+  <div id="shorthand"></div>
+  <div id="alpha"></div>
+  <div id="dashed"></div>
+  <div id="content-box"></div>
+  <div id="border-box"></div>
+  <div id="outer"><div id="inner"></div></div>
+</body>
+</html>

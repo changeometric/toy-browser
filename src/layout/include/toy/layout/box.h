@@ -24,8 +24,12 @@ inline constexpr BoxId kInvalidBox = 0xFFFFFFFFu;
 enum class BoxKind { kBlock, kInline, kText, kAnonymousBlock };
 
 // One box in the arena. All geometry is absolute CSS pixels, viewport origin at
-// the top-left; x/y is the border-box top-left (borders do not exist in M4, so
-// border box = padding box), margins live outside the rect, padding inside.
+// the top-left; x/y and width/height describe the BORDER box (M14b; before that
+// borders did not exist, so the border box equaled the padding box). Margins live
+// outside the rect; border widths and padding are inside it, and the content box
+// starts at x + border-left + padding-left, y + border-top + padding-top. The
+// border box of an inline fragment is its horizontal extent on the line; vertical
+// inline borders and padding are ignored by layout (M5 limit).
 struct Box {
   BoxKind kind = BoxKind::kBlock;
   dom::NodeId node = dom::kInvalidNode;       // source element/text; kInvalidNode for anonymous
@@ -83,7 +87,9 @@ struct LayoutOptions {
   // - the box is unbreakable, contributes its height to the line height and is
   //   top-aligned on its line like every other inline-level box (no baseline
   //   alignment in this MVP);
-  // - it has no children and its content is not laid out.
+  // - it has no children and its content is not laid out;
+  // - its margins, padding, borders and box-sizing are ignored (the M8a and
+  //   M14b replaced-element limit), like before.
   // A replaced element with display:block is not supported yet: it lays out as
   // an ordinary empty block (MVP limit, documented in the roadmap).
   const ReplacedSizes* replaced_sizes = nullptr;

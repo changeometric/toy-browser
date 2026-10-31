@@ -271,7 +271,9 @@ StyleTree ComputeStyles(const dom::Document& document,
     std::sort(candidates.begin(), candidates.end(), CandidateLess);
 
     // Inherited properties start from the parent; everything else starts at
-    // its initial value (the defaults of ComputedStyle).
+    // its initial value (the defaults of ComputedStyle). Border sides are not
+    // inherited: they start at CSS initial values (medium width, no style,
+    // currentColor), so they occupy no space until a style is set.
     ComputedStyle style;
     style.color = parent_style.color;
     style.font_size_px = parent_style.font_size_px;
@@ -282,6 +284,9 @@ StyleTree ComputeStyles(const dom::Document& document,
     style.text_align = parent_style.text_align;
     style.visibility = parent_style.visibility;
     style.text_decoration_underline = parent_style.text_decoration_underline;
+    style.text_decoration_line_through = parent_style.text_decoration_line_through;
+    style.text_decoration_overline = parent_style.text_decoration_overline;
+    detail::ResetBorderSides(&style);
 
     // Font size first: the other longhands resolve `em` against it.
     for (const CascadeCandidate& candidate : candidates) {

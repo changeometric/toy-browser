@@ -51,3 +51,10 @@ add_executable(layout_style_properties_test style_properties_test.cpp)
 toybrowser_set_warnings(layout_style_properties_test)
 target_link_libraries(layout_style_properties_test PRIVATE toy_layout toy_test_support)
 add_test(NAME layout.style_properties COMMAND layout_style_properties_test)
+
+# M14b box model: borders, box-sizing, auto margins and heights around the
+# border box, inline borders, and byte-compatible pre-M14b geometry.
+add_executable(layout_box_model_test box_model_test.cpp)
+toybrowser_set_warnings(layout_box_model_test)
+target_link_libraries(layout_box_model_test PRIVATE toy_layout toy_test_support)
+add_test(NAME layout.box_model COMMAND layout_box_model_test)

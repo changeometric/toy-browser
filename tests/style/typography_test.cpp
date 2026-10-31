@@ -107,11 +107,22 @@ void ExpectVisibility(const StyleTree& styles, NodeId id, Visibility expected,
   }
 }
 
-void ExpectUnderline(const StyleTree& styles, NodeId id, bool expected, const char* description) {
-  if (styles.Get(id).text_decoration_underline != expected) {
-    Fail(description, expected ? "underline" : "none",
-         styles.Get(id).text_decoration_underline ? "underline" : "none");
+void ExpectDecorations(const StyleTree& styles, NodeId id, bool underline, bool line_through,
+                       bool overline, const char* description) {
+  const ComputedStyle& style = styles.Get(id);
+  if (style.text_decoration_underline == underline &&
+      style.text_decoration_line_through == line_through &&
+      style.text_decoration_overline == overline) {
+    return;
   }
+  const std::string expected = std::string("underline=") + (underline ? "1" : "0") +
+                               " line-through=" + (line_through ? "1" : "0") +
+                               " overline=" + (overline ? "1" : "0");
+  const std::string actual = std::string("underline=") +
+                             (style.text_decoration_underline ? "1" : "0") + " line-through=" +
+                             (style.text_decoration_line_through ? "1" : "0") + " overline=" +
+                             (style.text_decoration_overline ? "1" : "0");
+  Fail(description, expected, actual);
 }
 
 void TestLineHeightValues() {
@@ -299,71 +310,91 @@ void TestVisibility() {
 void TestTextDecoration() {
   struct Case {
     const char* value;
-    bool expected;
+    bool underline;
+    bool line_through;
+    bool overline;
     const char* description;
   };
   const Case cases[] = {
-      {"underline", true, "text-decoration: underline"},
-      {"none", false, "text-decoration: none"},
-      {"line-through", false, "line-through is accepted but not represented"},
-      {"overline", false, "overline is accepted but not represented"},
-      {"underline line-through", true, "underline is present in a token list"},
-      {"UNDERLINE", true, "text-decoration values are case-insensitive"},
-      {"underline overline", true, "an extra known token keeps the underline"},
-      {"underline dotted", true, "a style component keeps the underline"},
-      {"underline red", true, "a color component keeps the underline"},
-      {"none underline", false, "none combined with a decoration is invalid and ignored"},
-      {"blink", false, "blink is accepted but not represented"},
-      {"wavy", false, "a value with no decoration line leaves the initial value"},
+      {"underline", true, false, false, "text-decoration: underline"},
+      {"none", false, false, false, "text-decoration: none clears every line"},
+      {"line-through", false, true, false, "text-decoration: line-through sets its flag"},
+      {"overline", false, false, true, "text-decoration: overline sets its flag"},
+      {"underline line-through", true, true, false, "a combined token list sets both flags"},
+      {"underline overline", true, false, true, "a combined token list sets both flags"},
+      {"underline line-through overline", true, true, true, "all three lines at once"},
+      {"UNDERLINE LINE-THROUGH", true, true, false,
+       "text-decoration values are case-insensitive"},
+      {"underline dotted", true, false, false, "a style component keeps the underline"},
+      {"underline red", true, false, false, "a color component keeps the underline"},
+      {"none underline", true, false, false,
+       "the declaration resets then sets the provided line token"},
+      {"blink", false, false, false, "an unknown line token is tolerated and resets the flags"},
+      {"wavy", false, false, false,
+       "a style-only value resets the flags (the declaration resets first)"},
   };
   for (const Case& test : cases) {
     const Document document = TargetPage(std::string("text-decoration: ") + test.value);
     const StyleTree styles = toy::style::ComputeStyles(document);
-    ExpectUnderline(styles, FindElementById(document, "target"), test.expected, test.description);
+    ExpectDecorations(styles, FindElementById(document, "target"), test.underline,
+                      test.line_through, test.overline, test.description);
   }
   {
-    // The unsupported value leaves a previously applied decoration untouched.
+    // Every declaration resets the three flags, so a later token list without a
+    // line value clears an earlier declaration.
     const Document document = TargetPage("text-decoration: underline; text-decoration: wavy");
     const StyleTree styles = toy::style::ComputeStyles(document);
-    ExpectUnderline(styles, FindElementById(document, "target"), true,
-                    "an invalid later text-decoration leaves the earlier value");
+    ExpectDecorations(styles, FindElementById(document, "target"), false, false, false,
+                      "a later token list resets the previously applied decoration");
   }
   {
-    const Document document = TargetPage("text-decoration: underline; text-decoration: none");
+    const Document document =
+        TargetPage("text-decoration: underline line-through; text-decoration: none");
     const StyleTree styles = toy::style::ComputeStyles(document);
-    ExpectUnderline(styles, FindElementById(document, "target"), false,
-                    "a later none removes the decoration");
+    ExpectDecorations(styles, FindElementById(document, "target"), false, false, false,
+                      "a later none clears every decoration line");
   }
   {
     const Document document = toy::dom::ParseDocument(
-        "<div id=outer style='text-decoration: underline'><span id=inner>x</span></div>");
+        "<div id=outer style='text-decoration: underline line-through overline'>"
+        "<span id=inner>x</span></div>");
     const StyleTree styles = toy::style::ComputeStyles(document);
-    ExpectUnderline(styles, FindElementById(document, "inner"), true,
-                    "the MVP underline inherits to descendants");
+    ExpectDecorations(styles, FindElementById(document, "inner"), true, true, true,
+                      "all three MVP decoration flags inherit to descendants");
   }
   {
     const Document document = toy::dom::ParseDocument(
-        "<div style='text-decoration: underline'>"
+        "<div style='text-decoration: underline line-through'>"
         "<span id=inner style='text-decoration: none'>x</span></div>");
     const StyleTree styles = toy::style::ComputeStyles(document);
-    ExpectUnderline(styles, FindElementById(document, "inner"), false,
-                    "a child text-decoration: none overrides the inherited underline");
+    ExpectDecorations(styles, FindElementById(document, "inner"), false, false, false,
+                      "a child text-decoration: none clears the inherited lines");
+  }
+  {
+    // A child declaration resets the inherited flags, so only the listed line is
+    // set even if the parent had more.
+    const Document document = toy::dom::ParseDocument(
+        "<div style='text-decoration: underline line-through'>"
+        "<span id=inner style='text-decoration: overline'>x</span></div>");
+    const StyleTree styles = toy::style::ComputeStyles(document);
+    ExpectDecorations(styles, FindElementById(document, "inner"), false, false, true,
+                      "a child decoration resets the inherited flags");
   }
   {
     const Document document = toy::dom::ParseDocument(
         "<style>#target { text-decoration: underline !important; }</style>"
         "<div id=target style='text-decoration: none'>x</div>");
     const StyleTree styles = toy::style::ComputeStyles(document);
-    ExpectUnderline(styles, FindElementById(document, "target"), true,
-                    "a selector !important underline beats a normal inline none");
+    ExpectDecorations(styles, FindElementById(document, "target"), true, false, false,
+                      "a selector !important underline beats a normal inline none");
   }
   {
     const Document document = toy::dom::ParseDocument(
         "<style>#target { text-decoration: underline !important; }</style>"
         "<div id=target style='text-decoration: none !important'>x</div>");
     const StyleTree styles = toy::style::ComputeStyles(document);
-    ExpectUnderline(styles, FindElementById(document, "target"), false,
-                    "an inline !important none beats a selector !important underline");
+    ExpectDecorations(styles, FindElementById(document, "target"), false, false, false,
+                      "an inline !important none beats a selector !important underline");
   }
 }
 

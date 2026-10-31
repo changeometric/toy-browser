@@ -609,6 +609,286 @@ void TestLegacyPage(const std::string& site) {
   toy_test::Check(CountColorInRect(surface, 0xFFFF0000u, 16, 32, 304, 60) > 0,
                   "the legacy red text is painted");
 }
+
+// The three decoration flags of a computed style.
+void CheckDecorationFlags(const ComputedStyle& style, bool underline, bool line_through,
+                          bool overline, const char* description) {
+  const std::string prefix = std::string(description) + " decoration flags";
+  const bool matches = style.text_decoration_underline == underline &&
+                       style.text_decoration_line_through == line_through &&
+                       style.text_decoration_overline == overline;
+  if (!matches) {
+    std::fprintf(stderr, "  %s: underline=%d line-through=%d overline=%d\n", prefix.c_str(),
+                 style.text_decoration_underline ? 1 : 0,
+                 style.text_decoration_line_through ? 1 : 0,
+                 style.text_decoration_overline ? 1 : 0);
+  }
+  toy_test::Check(matches, prefix.c_str());
+}
+
+// --- M14b: borders, box-sizing, overflow and decoration lines ---------------
+
+void CheckBorderSide(const toy::style::BorderSide& side, float width_px,
+                     toy::style::BorderStyle border_style, const std::string& description) {
+  CheckPixelLength(side.width, width_px, description + " width");
+  if (side.style != border_style) {
+    std::fprintf(stderr, "  %s: wrong border style\n", description.c_str());
+  }
+  toy_test::Check(side.style == border_style, (description + " style").c_str());
+}
+
+void TestBordersComputed(const toy::shell::Page& page) {
+  using toy::style::BorderStyle;
+  using toy::style::BoxSizing;
+  using toy::style::UsedBorderColor;
+  using toy::style::UsedBorderWidth;
+
+  if (const ComputedStyle* style = StyleOf(page, "top-only", "one-sided border")) {
+    CheckBorderSide(style->border_top, 4.0f, BorderStyle::kSolid, "border-top: 4px solid");
+    toy_test::Check(style->border_top.color.has_value(), "the top border color is explicit");
+    if (style->border_top.color) {
+      toy_test::Check(*style->border_top.color == 0xFFFF0000u,
+                      "the top border color is #ff0000");
+    }
+    toy_test::Check(UsedBorderWidth(style->border_right) == 0.0f,
+                    "unset border sides have used width 0");
+    toy_test::Check(style->border_right.style == BorderStyle::kNone,
+                    "unset border sides stay none");
+  }
+
+  if (const ComputedStyle* style = StyleOf(page, "four", "four-sided border")) {
+    CheckBorderSide(style->border_top, 2.0f, BorderStyle::kSolid, "four/top");
+    CheckBorderSide(style->border_right, 3.0f, BorderStyle::kSolid, "four/right");
+    CheckBorderSide(style->border_bottom, 4.0f, BorderStyle::kSolid, "four/bottom");
+    CheckBorderSide(style->border_left, 5.0f, BorderStyle::kSolid, "four/left");
+    toy_test::Check(style->border_top.color && *style->border_top.color == 0xFFFF0000u,
+                    "four/top color");
+    toy_test::Check(style->border_right.color && *style->border_right.color == 0xFF00FF00u,
+                    "four/right color");
+    toy_test::Check(style->border_bottom.color && *style->border_bottom.color == 0xFF0000FFu,
+                    "four/bottom color");
+    toy_test::Check(style->border_left.color && *style->border_left.color == 0xFFFFFF00u,
+                    "four/left color");
+  }
+
+  // The border shorthand without a color leaves currentColor, resolved to the
+  // element's text color by UsedBorderColor.
+  if (const ComputedStyle* style = StyleOf(page, "shorthand", "border shorthand")) {
+    CheckBorderSide(style->border_top, 3.0f, BorderStyle::kSolid, "shorthand border");
+    toy_test::Check(!style->border_top.color.has_value(),
+                    "the shorthand border keeps currentColor");
+    toy_test::Check(UsedBorderColor(style->border_top, style->color) == 0xFF123456u,
+                    "currentColor resolves to the text color");
+    toy_test::Check(UsedBorderColor(style->border_left, style->color) == 0xFF123456u,
+                    "currentColor resolves on every side");
+  }
+
+  // An explicit rgba() border color keeps its alpha in the computed value.
+  if (const ComputedStyle* style = StyleOf(page, "alpha", "alpha border")) {
+    CheckBorderSide(style->border_top, 2.0f, BorderStyle::kSolid, "alpha border");
+    toy_test::Check(style->border_top.color && *style->border_top.color == 0x80FF0000u,
+                    "an rgba() border keeps its 128 alpha");
+  }
+
+  // A parsed non-solid style is kept in the computed style (paint draws it solid).
+  if (const ComputedStyle* style = StyleOf(page, "dashed", "dashed border")) {
+    CheckBorderSide(style->border_top, 2.0f, BorderStyle::kDashed, "dashed border");
+    CheckBorderSide(style->border_left, 2.0f, BorderStyle::kDashed, "dashed border side");
+  }
+
+  // box-sizing controls whether width/height is the content or border box.
+  if (const ComputedStyle* style = StyleOf(page, "content-box", "content-box sizing")) {
+    toy_test::Check(style->box_sizing == BoxSizing::kContentBox,
+                    "box-sizing: content-box is computed");
+  }
+  if (const ComputedStyle* style = StyleOf(page, "border-box", "border-box sizing")) {
+    toy_test::Check(style->box_sizing == BoxSizing::kBorderBox,
+                    "box-sizing: border-box is computed");
+  }
+}
+
+void TestBordersGeometryAndPixels(const std::string& site, const toy::shell::Page& page) {
+  // Border widths belong to the border box: content 100x40 + 5/3/4/2 = 108x46.
+  CheckElementBox(page, "top-only", 8, 8, 304, 16, "the top border grows the border box");
+  CheckElementBox(page, "four", 8, 24, 108, 46, "four borders grow the border box");
+  CheckElementBox(page, "shorthand", 8, 70, 304, 26, "the shorthand border grows the box");
+  CheckElementBox(page, "alpha", 8, 96, 304, 24, "the alpha border grows the box");
+  CheckElementBox(page, "dashed", 8, 120, 304, 14, "the dashed border grows the box");
+  CheckElementBox(page, "content-box", 8, 134, 110, 30,
+                  "content-box adds the borders to the 100x20 content");
+  CheckElementBox(page, "border-box", 8, 164, 100, 20,
+                  "border-box keeps the 100x20 border box");
+  CheckElementBox(page, "outer", 8, 184, 304, 24, "the nested outer border box");
+  CheckElementBox(page, "inner", 14, 190, 292, 12, "the nested inner border box");
+  CheckNearlyEqual(toy::layout::ContentHeight(page.boxes), 216.0f,
+                   "the borders page content height is 216 CSS px");
+
+  const toy::render::Surface surface = PaintPage(site, "borders.html", "borders.html paint");
+  // Four different side colors on #four.
+  CheckPixel(surface, 8, 24, 0xFFFF0000u, "the top border paints red");
+  CheckPixel(surface, 114, 40, 0xFF00FF00u, "the right border paints green");
+  CheckPixel(surface, 50, 67, 0xFF0000FFu, "the bottom border paints blue");
+  CheckPixel(surface, 9, 40, 0xFFFFFF00u, "the left border paints yellow");
+  CheckPixel(surface, 50, 40, 0xFFEEEEEEu, "the background fills the border box interior");
+  // currentColor resolves to #123456; the background is painted underneath.
+  CheckPixel(surface, 8, 70, 0xFF123456u, "the shorthand border uses currentColor");
+  CheckPixel(surface, 100, 80, 0xFFDDDDDDu, "the shorthand background is painted");
+  // rgba(255,0,0,0.5) over the white canvas blends to (255,127,127).
+  CheckPixel(surface, 8, 96, 0xFFFF7F7Fu, "an alpha border blends with the canvas");
+  CheckPixel(surface, 100, 106, 0xFFFFFFFFu, "the alpha-border box interior stays white");
+  CheckPixel(surface, 8, 120, 0xFF770000u, "a dashed border paints solid in this MVP");
+  // box-sizing: content-box has the smaller interior; border-box the larger one.
+  CheckPixel(surface, 8, 134, 0xFF333333u, "the content-box border is painted");
+  CheckPixel(surface, 50, 145, 0xFFBBBBBBu, "the content-box background is painted");
+  CheckPixel(surface, 8, 164, 0xFF444444u, "the border-box border is painted");
+  CheckPixel(surface, 50, 175, 0xFFAAAAAAu, "the border-box background is painted");
+  // Nested boxes: outer border, padding background, inner border and background.
+  CheckPixel(surface, 8, 184, 0xFF555555u, "the outer border is painted");
+  CheckPixel(surface, 11, 187, 0xFF999999u, "the outer padding background is painted");
+  CheckPixel(surface, 14, 190, 0xFF666666u, "the inner border is painted");
+  CheckPixel(surface, 20, 195, 0xFF888888u, "the inner background is painted");
+  // Exact color counts freeze the border ring areas (and thus box-sizing geometry).
+  toy_test::Check(CountColor(surface, 0xFFFF0000u) == 1432,
+                  "the red border areas have the frozen pixel count");
+  toy_test::Check(CountColor(surface, 0xFF00FF00u) == 120,
+                  "the green right border has the frozen pixel count");
+  toy_test::Check(CountColor(surface, 0xFF0000FFu) == 432,
+                  "the blue bottom border has the frozen pixel count");
+  toy_test::Check(CountColor(surface, 0xFFFFFF00u) == 200,
+                  "the yellow left border has the frozen pixel count");
+  toy_test::Check(CountColor(surface, 0xFF123456u) == 1944,
+                  "the currentColor shorthand border ring has the frozen pixel count");
+  toy_test::Check(CountColor(surface, 0xFF333333u) == 1300,
+                  "the content-box border ring has the frozen pixel count");
+  toy_test::Check(CountColor(surface, 0xFF444444u) == 1100,
+                  "the border-box border ring has the frozen pixel count");
+  toy_test::Check(CountColor(surface, 0xFFFF7F7Fu) == 1296,
+                  "the alpha border ring has the frozen pixel count");
+}
+
+void TestOverflowComputed(const toy::shell::Page& page) {
+  using toy::style::Overflow;
+  if (const ComputedStyle* style = StyleOf(page, "clip", "clipping box")) {
+    toy_test::Check(style->overflow_x == Overflow::kHidden,
+                    "overflow: hidden computes overflow-x hidden");
+    toy_test::Check(style->overflow_y == Overflow::kHidden,
+                    "overflow: hidden computes overflow-y hidden");
+  }
+  if (const ComputedStyle* style = StyleOf(page, "visible", "visible box")) {
+    toy_test::Check(style->overflow_x == Overflow::kVisible,
+                    "the default overflow stays visible");
+  }
+  if (const ComputedStyle* style = StyleOf(page, "bordered-clip", "bordered clipping box")) {
+    toy_test::Check(style->overflow_x == Overflow::kHidden,
+                    "a bordered box can clip too");
+    CheckBorderSide(style->border_top, 3.0f, toy::style::BorderStyle::kSolid,
+                    "bordered clip border");
+  }
+}
+
+void TestOverflowGeometryAndPixels(const std::string& site, const toy::shell::Page& page) {
+  CheckElementBox(page, "clip", 8, 8, 60, 24, "the clipping box keeps its fixed size");
+  CheckElementBox(page, "sibling", 8, 32, 304, 10, "the sibling after the clipping box");
+  CheckElementBox(page, "visible", 8, 42, 60, 24, "the visible-overflow box keeps its size");
+  CheckElementBox(page, "bordered-clip", 8, 66, 46, 22,
+                  "the bordered clipping box includes its 3 px borders");
+  CheckElementBox(page, "outside", 8, 88, 304, 16, "the box after the clipping examples");
+  // The clipped 60x24 box stays 24 px tall, but ContentHeight includes the
+  // overflowing text box (y=104..136): 136 CSS px (M14b limit: clipping is
+  // painting only, scrollable content height still sees overflowing boxes).
+  CheckNearlyEqual(toy::layout::ContentHeight(page.boxes), 136.0f,
+                   "the overflow page content height includes the overflowing text");
+
+  const toy::render::Surface surface = PaintPage(site, "overflow.html", "overflow.html paint");
+  // The oversized child background is clipped to the 60x24 padding box.
+  CheckPixel(surface, 50, 20, 0xFFFF0000u, "the clipped child paints inside the clip");
+  CheckPixel(surface, 67, 31, 0xFFFF0000u, "the clip's bottom-right pixel shows the child");
+  CheckPixel(surface, 70, 10, 0xFFFFFFFFu, "nothing paints right of the clip");
+  CheckPixel(surface, 50, 40, 0xFF00FF00u, "the sibling after the clip paints normally");
+  toy_test::Check(CountColor(surface, 0xFFFF0000u) == 60 * 24,
+                  "the clipped child paints exactly the clip area");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 8, 68, 32) == 0,
+                  "the clipped text inside the overflow box is not painted");
+  // overflow: visible lets the oversized child paint outside its parent.
+  CheckPixel(surface, 250, 60, 0xFF0000FFu, "the visible-overflow child paints outside");
+  toy_test::Check(CountColor(surface, 0xFF00FF00u) == 304 * 10,
+                  "the sibling background is painted before the visible overflow child");
+  // The bordered clip keeps its border and clips the child to the padding box.
+  CheckPixel(surface, 8, 66, 0xFF00FFFFu, "the clipping box border is painted");
+  CheckPixel(surface, 12, 70, 0xFFFFFF00u, "the child paints inside the padding-box clip");
+  CheckPixel(surface, 8, 70, 0xFF00FFFFu, "the border stays visible outside the clip");
+  toy_test::Check(CountColor(surface, 0xFFFFFF00u) == 40 * 16,
+                  "the bordered clip shows exactly the 40x16 padding-box area");
+  toy_test::Check(CountColor(surface, 0xFF00FFFFu) == 372,
+                  "the clipping box border ring has the frozen pixel count");
+  // The next box paints normally after the clipping examples.
+  CheckPixel(surface, 250, 100, 0xFFCCCCCCu, "the box after the clipping examples paints");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 88, 320, 104) > 0,
+                  "the text after the clipping examples is painted");
+}
+
+void TestDecorationsComputed(const toy::shell::Page& page) {
+  if (const ComputedStyle* style = StyleOf(page, "underline", "underline decoration")) {
+    CheckDecorationFlags(*style, true, false, false, "underline");
+  }
+  if (const ComputedStyle* style = StyleOf(page, "line-through", "line-through decoration")) {
+    CheckDecorationFlags(*style, false, true, false, "line-through");
+  }
+  if (const ComputedStyle* style = StyleOf(page, "overline", "overline decoration")) {
+    CheckDecorationFlags(*style, false, false, true, "overline");
+  }
+  if (const ComputedStyle* style = StyleOf(page, "combined", "combined decorations")) {
+    CheckDecorationFlags(*style, true, true, true, "combined");
+  }
+  if (const ComputedStyle* style = StyleOf(page, "parent", "parent decoration")) {
+    CheckDecorationFlags(*style, true, false, false, "parent");
+  }
+}
+
+void TestDecorationsGeometryAndPixels(const std::string& site, const toy::shell::Page& page) {
+  CheckElementBox(page, "underline", 8, 24, 304, 16, "the underlined block geometry");
+  CheckElementBox(page, "line-through", 8, 72, 304, 16, "the line-through block geometry");
+  CheckElementBox(page, "overline", 8, 120, 304, 16, "the overline block geometry");
+  CheckElementBox(page, "combined", 8, 168, 304, 16, "the combined decoration block geometry");
+  CheckNearlyEqual(toy::layout::ContentHeight(page.boxes), 304.0f,
+                   "the decorations page content height is 304 CSS px");
+  CheckTextBox(page, "Underline", 8, 24, 72, 16, "the underlined text box");
+  CheckTextBox(page, "Line", 8, 72, 32, 16, "the line-through text boxes");
+
+  const toy::render::Surface surface =
+      PaintPage(site, "decorations.html", "decorations.html paint");
+  // Bitmap 16 px metrics: box y + 16 is the baseline, so underline is y+17,
+  // line-through is baseline - round(16/3) = y+11 and overline is y.
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 41, 88, 42) == 72,
+                  "the underline row spans the 72 px text box width");
+  CheckPixel(surface, 8, 41, 0xFF000000u, "the underline starts at the text box x");
+  CheckPixel(surface, 88, 41, 0xFFFFFFFFu, "the underline ends with the text box width");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 83, 40, 84) == 32,
+                  "line-through covers the first word's 32 px text box");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 40, 83, 48, 84) == 0,
+                  "the space between the two text boxes has no line-through");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 120, 72, 121) == 64,
+                  "overline covers the 64 px text box at the box top");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 185, 72, 186) == 64,
+                  "the combined underline row");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 179, 72, 180) == 64,
+                  "the combined line-through row");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 168, 72, 169) == 64,
+                  "the combined overline row");
+  // Inherited decoration: the plain child inside #parent gets the underline.
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 233, 56, 234) == 48,
+                  "the parent text box underline row");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 64, 233, 136, 234) == 72,
+                  "the inherited decoration paints the child's 72 px underline row");
+  // A child declaration resets the inherited flags: it only gets line-through.
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 8, 281, 48, 282) == 0,
+                  "the undecorated text has no underline row");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 56, 275, 96, 276) == 40,
+                  "the child's line-through row");
+  toy_test::Check(CountColorInRect(surface, 0xFF000000u, 56, 281, 96, 282) == 0,
+                  "the child's own declaration dropped the inherited underline");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -636,6 +916,25 @@ int main(int argc, char** argv) {
   TestValuesGeometryAndPixels(site, values);
   TestTypographyGeometryAndPixels(site, typography);
   TestBoxesGeometryAndPixels(site, boxes);
+
+  toy::shell::Page borders;
+  toy_test::Check(LoadPageFile(site, "borders.html", &borders),
+                  "borders.html loads through the shell page loader");
+  TestBordersComputed(borders);
+  TestBordersGeometryAndPixels(site, borders);
+
+  toy::shell::Page overflow;
+  toy_test::Check(LoadPageFile(site, "overflow.html", &overflow),
+                  "overflow.html loads through the shell page loader");
+  TestOverflowComputed(overflow);
+  TestOverflowGeometryAndPixels(site, overflow);
+
+  toy::shell::Page decorations;
+  toy_test::Check(LoadPageFile(site, "decorations.html", &decorations),
+                  "decorations.html loads through the shell page loader");
+  TestDecorationsComputed(decorations);
+  TestDecorationsGeometryAndPixels(site, decorations);
+
   TestLegacyPage(site);
 
   return toy_test::Finish("shell css compatibility");

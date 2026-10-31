@@ -4,13 +4,22 @@
 // font-weight=... font-style=... font-family=... margin-*... padding-*...
 // width=... height=..." followed since M14 by " min-width=... min-height=...
 // max-width=... max-height=... line-height=... text-align=... visibility=...
-// text-decoration=...". The font-family list is joined with ", "; an item that
-// is not made only of [A-Za-z0-9_-] is double-quoted with '\' and '"' escaped by
-// a backslash (e.g. font-family="Toy Test Font", sans-serif), so the line stays
-// unambiguous and deterministic. Lengths print rounded CSS pixels ("12px") or
-// rounded percentages ("50%"); auto width/height and auto margins print "auto",
+// text-decoration=..." and since M14b by " border-top-width=
+// border-right-width= border-bottom-width= border-left-width=
+// border-top-style= border-right-style= border-bottom-style=
+// border-left-style= border-color= box-sizing= overflow=". The font-family list
+// is joined with ", "; an item that is not made only of [A-Za-z0-9_-] is
+// double-quoted with '\' and '"' escaped by a backslash (e.g.
+// font-family="Toy Test Font", sans-serif), so the line stays unambiguous and
+// deterministic. Lengths print rounded CSS pixels ("12px") or rounded
+// percentages ("50%"); auto width/height and auto margins print "auto",
 // unconstrained min/max print "none". line-height prints "normal", a unitless
 // multiplier (up to 3 decimals, trailing zeros trimmed) or "NNpx".
+// text-decoration prints "none" or the space-joined tokens underline,
+// line-through, overline in that order. Border widths print the USED width in
+// px (0 for none/hidden), border styles their keyword, and border-color the
+// four resolved #rrggbb colors (top/right/bottom/left, currentColor resolved to
+// the text color, alpha dropped).
 //
 // Indentation is capped at kMaxIndentDepth levels, like the DOM dump. Without
 // the cap a deeply nested document would make the dump grow quadratically
@@ -124,6 +133,68 @@ const char* VisibilityName(Visibility visibility) {
       return "hidden";
   }
   return "visible";
+}
+
+// `none`, or the set line tokens space-joined in the frozen order.
+std::string FormatTextDecoration(const ComputedStyle& style) {
+  std::string text;
+  if (style.text_decoration_underline) {
+    text.append("underline");
+  }
+  if (style.text_decoration_line_through) {
+    if (!text.empty()) {
+      text.push_back(' ');
+    }
+    text.append("line-through");
+  }
+  if (style.text_decoration_overline) {
+    if (!text.empty()) {
+      text.push_back(' ');
+    }
+    text.append("overline");
+  }
+  return text.empty() ? std::string("none") : text;
+}
+
+const char* BorderStyleName(BorderStyle border_style) {
+  switch (border_style) {
+    case BorderStyle::kNone:
+      return "none";
+    case BorderStyle::kHidden:
+      return "hidden";
+    case BorderStyle::kSolid:
+      return "solid";
+    case BorderStyle::kDashed:
+      return "dashed";
+    case BorderStyle::kDotted:
+      return "dotted";
+    case BorderStyle::kDouble:
+      return "double";
+    case BorderStyle::kGroove:
+      return "groove";
+    case BorderStyle::kRidge:
+      return "ridge";
+    case BorderStyle::kInset:
+      return "inset";
+    case BorderStyle::kOutset:
+      return "outset";
+  }
+  return "none";
+}
+
+// The four resolved border colors (top/right/bottom/left) as #rrggbb,
+// currentColor resolved to the computed text color; alpha is dropped.
+std::string FormatBorderColor(const ComputedStyle& style) {
+  const BorderSide* sides[4] = {&style.border_top, &style.border_right, &style.border_bottom,
+                                &style.border_left};
+  std::string text;
+  for (std::size_t index = 0; index < 4; ++index) {
+    if (index != 0) {
+      text.push_back(' ');
+    }
+    text.append(FormatColor(UsedBorderColor(*sides[index], style.color)));
+  }
+  return text;
 }
 
 const char* DisplayName(Display display) {
@@ -248,7 +319,32 @@ std::string StyleLine(const dom::Node& node, const ComputedStyle& style) {
   line.append(" visibility=");
   line.append(VisibilityName(style.visibility));
   line.append(" text-decoration=");
-  line.append(style.text_decoration_underline ? "underline" : "none");
+  line.append(FormatTextDecoration(style));
+  // M14b fields are appended after the M14a fields.
+  line.append(" border-top-width=");
+  line.append(FormatPxLength(UsedBorderWidth(style.border_top)));
+  line.append(" border-right-width=");
+  line.append(FormatPxLength(UsedBorderWidth(style.border_right)));
+  line.append(" border-bottom-width=");
+  line.append(FormatPxLength(UsedBorderWidth(style.border_bottom)));
+  line.append(" border-left-width=");
+  line.append(FormatPxLength(UsedBorderWidth(style.border_left)));
+  line.append(" border-top-style=");
+  line.append(BorderStyleName(style.border_top.style));
+  line.append(" border-right-style=");
+  line.append(BorderStyleName(style.border_right.style));
+  line.append(" border-bottom-style=");
+  line.append(BorderStyleName(style.border_bottom.style));
+  line.append(" border-left-style=");
+  line.append(BorderStyleName(style.border_left.style));
+  line.append(" border-color=");
+  line.append(FormatBorderColor(style));
+  line.append(" box-sizing=");
+  line.append(style.box_sizing == BoxSizing::kBorderBox ? "border-box" : "content-box");
+  line.append(" overflow=");
+  line.append(style.overflow_x == Overflow::kHidden || style.overflow_y == Overflow::kHidden
+                  ? "hidden"
+                  : "visible");
   return line;
 }
 

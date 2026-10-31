@@ -436,6 +436,19 @@ Surface RenderList(const DisplayList& list, int width, int height) {
   return surface;
 }
 
+// Exact-color pixel count in a rendered surface (0 means the color never paints).
+int CountColor(const Surface& surface, std::uint32_t color) {
+  int count = 0;
+  for (int y = 0; y < surface.height(); ++y) {
+    for (int x = 0; x < surface.width(); ++x) {
+      if (surface.At(x, y) == color) {
+        ++count;
+      }
+    }
+  }
+  return count;
+}
+
 bool SamePixels(const Surface& lhs, const Surface& rhs) {
   if (lhs.width() != rhs.width() || lhs.height() != rhs.height()) {
     return false;
@@ -1495,6 +1508,214 @@ void TestUnderlineRealFont(const std::shared_ptr<const Font>& font) {
                  "the real-font underline is one row below the rounded baseline");
 }
 
+
+// --- M14b: borders, overflow clipping and text decoration lines -------------
+
+// The four border sides paint as FillRects after the background, in
+// top/right/bottom/left order, from the box's border box (content 100x40 plus
+// borders 5/3/4/2 makes a 108x46 border box at the body content origin).
+void TestBorderRectsGeometryOrderAndColor() {
+  const DisplayList list = BuildPage(
+      "<div style=\"background-color: #eeeeee; width: 100px; height: 40px; "
+      "border-top: 2px solid #ff0000; border-right: 3px solid #00ff00; "
+      "border-bottom: 4px solid #0000ff; border-left: 5px solid #ffff00\"></div>",
+      320, 200);
+  ExpectSize(list, 7,
+             "a four-sided bordered block yields background + four border rects");
+  ExpectViewportClip(list, 320, 200, "the bordered page keeps the viewport clip pair");
+  ExpectFillRect(list, 1, 8, 8, 108, 46, 0xFFEEEEEEu,
+                 "the background still fills the whole border box");
+  ExpectFillRect(list, 2, 8, 8, 108, 2, 0xFFFF0000u, "the top border is painted first");
+  ExpectFillRect(list, 3, 113, 10, 3, 40, 0xFF00FF00u, "the right border follows the top");
+  ExpectFillRect(list, 4, 8, 50, 108, 4, 0xFF0000FFu, "the bottom border follows the right");
+  ExpectFillRect(list, 5, 8, 10, 5, 40, 0xFFFFFF00u, "the left border is painted last");
+
+  // 1-2-3-sided chrome: only the used sides emit a rectangle.
+  const DisplayList one_side =
+      BuildPage("<div style=\"height: 12px; border-top: 4px solid #123456\"></div>", 320, 200);
+  ExpectSize(one_side, 3, "a one-sided border yields exactly one FillRect");
+  ExpectFillRect(one_side, 1, 8, 8, 304, 4, 0xFF123456u,
+                 "the single border side paints its used width");
+
+  const DisplayList no_side =
+      BuildPage("<div style=\"height: 12px; border-top: 4px none #123456\"></div>", 320, 200);
+  ExpectSize(no_side, 2, "border-style none contributes no border command");
+}
+
+// currentColor resolves to the text color (opaque), an explicit rgba() keeps its
+// alpha, and every visible style paints solid in this MVP.
+void TestBorderColorResolution() {
+  const DisplayList current_color =
+      BuildPage("<div style=\"color: #123456; height: 20px; border: 3px solid\"></div>",
+                320, 200);
+  ExpectSize(current_color, 6, "a currentColor border yields four rects");
+  ExpectFillRect(current_color, 1, 8, 8, 304, 3, 0xFF123456u,
+                 "currentColor top border resolves to the text color");
+  ExpectFillRect(current_color, 2, 309, 11, 3, 20, 0xFF123456u,
+                 "currentColor right border resolves to the text color");
+
+  const DisplayList alpha =
+      BuildPage("<div style=\"height: 20px; border: 2px solid rgba(255,0,0,0.5)\"></div>",
+                320, 200);
+  ExpectSize(alpha, 6, "an alpha border color yields four rects");
+  ExpectFillRect(alpha, 1, 8, 8, 304, 2, 0x80FF0000u,
+                 "an rgba() border color keeps its alpha in the command");
+
+  const DisplayList dashed =
+      BuildPage("<div style=\"height: 10px; border-top: 2px dashed #770000\"></div>", 320, 200);
+  ExpectSize(dashed, 3, "a dashed border still paints one solid rect in this MVP");
+  ExpectFillRect(dashed, 1, 8, 8, 304, 2, 0xFF770000u,
+                 "a non-solid border style paints as a solid rectangle");
+}
+
+// Border rectangles use the same exact viewport culling as backgrounds.
+void TestBorderCulling() {
+  const std::string html =
+      "<div style=\"height: 20px; border: 2px solid #ff0000\"></div>";
+  const DisplayList scrolled = BuildPage(html, 320, 200, 5000);
+  ExpectSize(scrolled, 2, "a bordered box scrolled off screen emits no border rects");
+  ExpectViewportClip(scrolled, 320, 200, "the culled bordered page keeps the clip pair");
+
+  // (scroll 10 moves the 2 px top border fully above the viewport: it is culled
+  // like any other non-intersecting rect, while the side/bottom borders stay.)
+  const DisplayList partial = BuildPage(html, 320, 200, 10);
+  ExpectSize(partial, 5, "a partly visible bordered box keeps only the visible border rects");
+  ExpectFillRect(partial, 1, 310, 0, 2, 20, 0xFFFF0000u,
+                 "the right border starts at the translated box top");
+  ExpectFillRect(partial, 2, 8, 20, 304, 2, 0xFFFF0000u, "the bottom border keeps its row");
+  ExpectFillRect(partial, 3, 8, 0, 2, 20, 0xFFFF0000u, "the left border keeps its column");
+}
+
+// An overflow:hidden box emits one padding-box clip pair after its own
+// background/borders and around its children; the pixels outside the clip keep
+// the background/border and the descendant is clipped by the rasterizer.
+void TestOverflowHiddenClipAndPixels() {
+  const DisplayList list = BuildPage(
+      "<div style=\"overflow: hidden; width: 50px; height: 20px; "
+      "background-color: #eeeeee\"><div style=\"width: 200px; height: 200px; "
+      "background-color: #ff0000\"></div></div>", 320, 200);
+  ExpectSize(list, 6,
+             "an overflow:hidden box yields its background, clip pair and child background");
+  ExpectFillRect(list, 1, 8, 8, 50, 20, 0xFFEEEEEEu, "the outer background is painted first");
+  ExpectPushClip(list, 2, 8, 8, 50, 20, "the padding box clip is pushed after the background");
+  ExpectFillRect(list, 3, 8, 8, 200, 200, 0xFFFF0000u,
+                 "the oversized child background is emitted between the clip pair");
+  ExpectPopClip(list, 4, "the padding box clip is popped after the children");
+  ExpectPopClip(list, 5, "the viewport clip is popped last");
+  const Surface surface = RenderList(list, 320, 200);
+  toy_test::Check(CountColor(surface, 0xFFFF0000u) == 50 * 20,
+                  "the oversized child background is clipped to the 50x20 padding box");
+
+  toy_test::Check(surface.At(9, 9) == 0xFFFF0000u, "a pixel inside the clip shows the child");
+  toy_test::Check(surface.At(57, 27) == 0xFFFF0000u, "the clip bottom-right pixel shows the child");
+  toy_test::Check(surface.At(58, 27) == 0xFFFFFFFFu, "one pixel right of the clip is white");
+  toy_test::Check(surface.At(9, 28) == 0xFFFFFFFFu, "one pixel below the clip is white");
+}
+
+// The clip rectangle is the padding box: borders stay visible outside the clip
+// and the child background starts inside them.
+void TestOverflowClipUsesPaddingBox() {
+  const DisplayList list = BuildPage(
+      "<div style=\"overflow: hidden; width: 50px; height: 20px; border: 2px solid #00ff00; "
+      "background-color: #eeeeee\"><div style=\"width: 200px; height: 200px; "
+      "background-color: #ff0000\"></div></div>", 320, 200);
+  ExpectSize(list, 10,
+             "the bordered clipping box yields background, four borders, clip and child");
+  ExpectFillRect(list, 1, 8, 8, 54, 24, 0xFFEEEEEEu,
+                 "the background fills the 54x24 border box");
+  ExpectFillRect(list, 2, 8, 8, 54, 2, 0xFF00FF00u, "the top border is painted");
+  ExpectPushClip(list, 6, 10, 10, 50, 20,
+                 "the clip is the 50x20 padding box inside the 2 px borders");
+  ExpectFillRect(list, 7, 10, 10, 200, 200, 0xFFFF0000u,
+                 "the oversized child is painted inside the clip");
+  ExpectPopClip(list, 8, "the padding box clip is popped");
+  ExpectPopClip(list, 9, "the viewport clip is popped last");
+  const Surface surface = RenderList(list, 320, 200);
+  toy_test::Check(surface.At(8, 8) == 0xFF00FF00u, "the top-left border stays visible");
+  toy_test::Check(surface.At(10, 10) == 0xFFFF0000u, "the child starts at the padding box");
+  toy_test::Check(CountColor(surface, 0xFFFF0000u) == 50 * 20,
+                  "the child is clipped to the padding box, not the border box");
+}
+
+// Overflow hidden must emit a balanced pair even without children, and nested
+// clipping boxes nest the pairs deterministically.
+void TestOverflowClipPairsDeterministic() {
+  const DisplayList empty = BuildPage(
+      "<div style=\"overflow: hidden; width: 10px; height: 10px\"></div>", 320, 200);
+  ExpectSize(empty, 4, "an empty overflow:hidden box still emits one balanced clip pair");
+  ExpectPushClip(empty, 1, 8, 8, 10, 10, "the empty clipping box pushes its padding box");
+  ExpectPopClip(empty, 2, "the empty clipping box pops its padding box");
+  ExpectPopClip(empty, 3, "the viewport clip is popped last");
+
+  const DisplayList nested = BuildPage(
+      "<div style=\"overflow: hidden; width: 100px; height: 100px\">"
+      "<div style=\"overflow: hidden; width: 50px; height: 50px\">"
+      "<div style=\"width: 200px; height: 200px; background-color: #ff0000\"></div>"
+      "</div></div>",
+      320, 200);
+  ExpectSize(nested, 7, "two nested clipping boxes emit two clip pairs around one command");
+  ExpectPushClip(nested, 1, 8, 8, 100, 100, "the outer clip is pushed first");
+  ExpectPushClip(nested, 2, 8, 8, 50, 50, "the inner clip is pushed inside it");
+  ExpectFillRect(nested, 3, 8, 8, 200, 200, 0xFFFF0000u, "the child is inside both clips");
+  ExpectPopClip(nested, 4, "the inner clip is popped first");
+  ExpectPopClip(nested, 5, "the outer clip is popped second");
+  ExpectPopClip(nested, 6, "the viewport clip is popped last");
+
+  // overflow: visible emits no extra commands (the existing M14a list shape).
+  const DisplayList visible =
+      BuildPage("<div style=\"overflow: visible; width: 10px; height: 10px\"></div>", 320, 200);
+  ExpectSize(visible, 2, "overflow visible emits no clip commands");
+}
+
+// line-through and overline rows use the frozen formulas; the order is underline,
+// line-through, overline, all after the text commands.
+void TestDecorationLineThroughOverline() {
+  // Bitmap 16 px metrics: box y=24, baseline_offset=16, so baseline row is 40.
+  const DisplayList line_through =
+      BuildPage("<p style=\"text-decoration: line-through\">Hi</p>");
+  ExpectSize(line_through, 4, "line-through yields the text and one rectangle");
+  ExpectDrawText(line_through, 1, "Hi", 8, 24, 16.0f, 0xFF000000u, "the text is painted first");
+  ExpectFillRect(line_through, 2, 8, 35, 16, 1, 0xFF000000u,
+                 "line-through sits round(font-size/3)=5 rows above the baseline");
+
+  const DisplayList overline = BuildPage("<p style=\"text-decoration: overline\">Hi</p>");
+  ExpectSize(overline, 4, "overline yields the text and one rectangle");
+  ExpectFillRect(overline, 2, 8, 24, 16, 1, 0xFF000000u,
+                 "overline sits at the top of the text box");
+
+  const DisplayList combined = BuildPage(
+      "<p style=\"color: #336699; text-decoration: underline line-through overline\">Hi</p>");
+  ExpectSize(combined, 6, "three decorations yield three rectangles after the text");
+  ExpectDrawText(combined, 1, "Hi", 8, 24, 16.0f, 0xFF336699u, "the text is painted first");
+  ExpectFillRect(combined, 2, 8, 41, 16, 1, 0xFF336699u, "underline comes first");
+  ExpectFillRect(combined, 3, 8, 35, 16, 1, 0xFF336699u, "line-through comes second");
+  ExpectFillRect(combined, 4, 8, 24, 16, 1, 0xFF336699u, "overline comes last");
+}
+
+// Real-font decorations use the rounded box baseline (24 + round(ascent) = 37).
+void TestDecorationRealFont(const std::shared_ptr<const Font>& font) {
+  const DisplayList list = BuildFontPage(
+      "<p style=\"text-decoration: underline line-through overline\">Hi</p>", font);
+  ExpectSize(list, 6, "real-font combined decorations yield three rows after the text");
+  const int baseline_y = 24 + static_cast<int>(std::lround(font->AscentPx(16.0f)));
+  const int width = static_cast<int>(std::lround(font->MeasureTextWidth("Hi", 16.0f)));
+  ExpectDrawTextWithFont(list, 1, font, "Hi", 8, baseline_y, 16.0f, 0xFF000000u,
+                         "the real-font text is painted first");
+  ExpectFillRect(list, 2, 8, baseline_y + 1, width, 1, 0xFF000000u, "real-font underline row");
+  ExpectFillRect(list, 3, 8, baseline_y - 5, width, 1, 0xFF000000u,
+                 "real-font line-through is max(1, round(16/3))=5 rows above the baseline");
+  ExpectFillRect(list, 4, 8, 24, width, 1, 0xFF000000u, "real-font overline row");
+}
+
+// Decorations share the text culling, like the underline did in M14a.
+void TestDecorationLinesCulled() {
+  const std::string html =
+      "<div style=\"height: 1000px\"></div>"
+      "<p style=\"text-decoration: line-through overline\">Hi</p>";
+  const DisplayList list = BuildPage(html, 320, 200, 5000);
+  ExpectSize(list, 2, "culled text emits neither line-through nor overline");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1534,6 +1755,16 @@ int main(int argc, char** argv) {
   TestUnderlineCulledWithText();
   TestNoNewPropertiesKeepsPreM14List();
 
+  // M14b: borders, overflow clipping and line-through/overline.
+  TestBorderRectsGeometryOrderAndColor();
+  TestBorderColorResolution();
+  TestBorderCulling();
+  TestOverflowHiddenClipAndPixels();
+  TestOverflowClipUsesPaddingBox();
+  TestOverflowClipPairsDeterministic();
+  TestDecorationLineThroughOverline();
+  TestDecorationLinesCulled();
+
   // The real-font tests load the committed self-authored fixture font. CMake
   // passes its directory as argv[1], so no installed font is ever required.
   if (argc < 2) {
@@ -1572,6 +1803,7 @@ int main(int argc, char** argv) {
   TestPerBoxEmptyRunsKeepsBitmap(font);
   TestCullingRealFont(font, bold, italic);
   TestUnderlineRealFont(font);
+  TestDecorationRealFont(font);
 
   // The two-font tests split mixed ASCII/Han text by character coverage, like
   // the shell's system font selection does.

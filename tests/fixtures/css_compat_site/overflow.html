@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <title>CSS compatibility: overflow</title>
+  <style>
+    /* A fixed-size clipping box: its oversized child background and its text are
+       clipped to the padding box. */
+    #clip { overflow: hidden; width: 60px; height: 24px; background-color: #eeeeee; }
+    #wide { width: 300px; height: 80px; background-color: #ff0000; }
+    /* A sibling after the clipping box: painted normally, outside the clip. */
+    #sibling { height: 10px; background-color: #00ff00; }
+    /* The same oversized child with the default overflow: visible, so it paints
+       outside its 60x24 parent. */
+    #visible { width: 60px; height: 24px; background-color: #dddddd; }
+    #wide-visible { width: 300px; height: 80px; background-color: #0000ff; }
+    /* A box with a border: the clip is the padding box, the border stays visible. */
+    #bordered-clip { overflow: hidden; width: 40px; height: 16px;
+                     border: 3px solid #00ffff; background-color: #ffffff; }
+    #bordered-wide { width: 200px; height: 60px; background-color: #ffff00; }
+    #outside { background-color: #cccccc; }
+  </style>
+</head>
+<body>
+  <div id="clip"><div id="wide"></div><p id="clipped-text">Clipped text</p></div>
+  <div id="sibling"></div>
+  <div id="visible"><div id="wide-visible"></div></div>
+  <div id="bordered-clip"><div id="bordered-wide"></div></div>
+  <div id="outside">Outside</div>
+</body>
+</html>

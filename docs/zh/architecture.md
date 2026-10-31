@@ -56,11 +56,32 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 
 外部样式表（M12）：`shell` 的私有 `LoadStyledDocument()`（位于 `src/shell/page.h`）拥有全部资源策略：抓取并解析页面后，它按文档顺序遍历一次 DOM，过滤 `<link>` 元素（`rel` token 含 `stylesheet` 且不含 `alternate`、无 `disabled` 属性、`media` 为空/`all`/`screen`、`type` 为空/`text/css`），用 `net::ResolveUrl` 把每个 `href` 相对重定向后的最终页面 URL 解析，用与页面相同的 `net::Fetch` 抓取（默认超时与 16 MiB body 上限），只接受 200..299 的 body，每个适用出现抓取一次（不去重、无缓存，和图片一样），并静默跳过所有被过滤、失败或非 2xx 的样式表。得到的 `style::LinkedStyleSheet` 列表交给 `style::ComputeStyles`，同一条路径由正常页面加载（窗口、`--screenshot`、`--dump-boxes`）与 `--dump-style` 共享；`--dump-dom` 与 `--dump-body` 仍不抓取样式表。只有页面抓取可以让加载失败。媒体查询、`@import`、alternate/disabled 样式表、带参数的 `type` 值与 CSS 图片在本轮刻意不实现。
 
-CSS 值（M14a）：`ComputedStyle` 携带 M14a 值模型：盒长度 `Length {value, unit: px|percent}`（盒属性的百分比保持未解析交给 layout）、`AutoLength` margin、`LineHeight {kind: normal|number|px, value}`、`TextAlign` 与 `Visibility`。style 在存储前解析所有字体相对单位：`em` 相对元素自身最终字号、`%` 字号相对父元素、`rem` 相对根 `<html>` 元素的计算字号（根元素自身的 `rem` 用 16px 初始值）。颜色解析 `#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`、旧式逗号分隔 `rgb()`/`rgba()`/`hsl()`/`hsla()`、完整 CSS Color 4 命名颜色集与 `transparent`；文本颜色保持不透明（丢弃 alpha），背景色保留 alpha。`background` 简写只应用颜色部分。逻辑属性（margin/padding 的 block/inline 长写与简写、`inline-size`/`block-size`、min/max 变体）在 horizontal-tb 下映射到物理字段。`line-height`、`text-align`、`visibility` 与 `text-decoration: underline` 按 MVP 契约继承（text-decoration 传播简化为继承，只表示 underline 标志）。不支持的写法（百分比高度、line-height 的 rem、`justify` 只按 left、空格分隔颜色函数语法、`pt`/`vh`/`vw` 单位）被忽略或作为已知限制记录。`DumpStyleTree()` 保留所有 M14 之前字段并在行尾追加 `min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`。
+CSS 值（M14a）：`ComputedStyle` 携带 M14a 值模型：盒长度 `Length {value, unit: px|percent}`（盒属性的百分比保持未解析交给 layout）、`AutoLength` margin、`LineHeight {kind: normal|number|px, value}`、`TextAlign` 与 `Visibility`。style 在存储前解析所有字体相对单位：`em` 相对元素自身最终字号、`%` 字号相对父元素、`rem` 相对根 `<html>` 元素的计算字号（根元素自身的 `rem` 用 16px 初始值）。颜色解析 `#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`、旧式逗号分隔 `rgb()`/`rgba()`/`hsl()`/`hsla()`、完整 CSS Color 4 命名颜色集与 `transparent`；文本颜色保持不透明（丢弃 alpha），背景色保留 alpha。`background` 简写只应用颜色部分。逻辑属性（margin/padding 的 block/inline 长写与简写、`inline-size`/`block-size`、min/max 变体）在 horizontal-tb 下映射到物理字段。`line-height`、`text-align`、`visibility` 与 `text-decoration: underline` 按 MVP 契约继承（text-decoration 传播简化为继承，只表示 underline 标志）。不支持的写法（百分比高度、line-height 的 rem、`justify` 只按 left、空格分隔颜色函数语法、`pt`/`vh`/`vw` 单位）被忽略或作为已知限制记录。`DumpStyleTree()` 保留所有 M14 之前字段并在行尾追加 `min-width/min-height/max-width/max-height/line-height/text-align/visibility/text-decoration`；自 M14b 起 `ComputedStyle` 还携带 `BorderSide {Length width; BorderStyle style; optional<uint32_t> color}`（颜色 nullopt = currentColor，`UsedBorderWidth` 对 none/hidden 为 0）、`BoxSizing` 与 `Overflow`，并在 M14a 字段之后追加 `border-*-width/border-*-style/border-color/box-sizing/overflow`。本 MVP 中所有可见 border 样式都按实心线绘制；border 宽度不接受百分比。`line-height`/`text-align`/`visibility`/三个 `text-decoration` 标志按 MVP 契约继承（underline/line-through/overline 自 M14b 起都已表示并绘制）。
 
 M14a 布局：`Length::kPercent` 盒长度相对包含块内容宽度解析（width、min/max-width 与四边 margin/padding——CSS 对垂直百分比也用宽度）；百分比高度不支持、按 auto 处理，只有 px 的 min/max-height 在内容/固定高度之后钳制（先 min 后 max）。内容宽度在指定/auto 宽度解析后按 min 后 max 钳制；宽度确定（指定或经钳制解析，这正是常见 `max-width + margin: auto` 包裹盒居中的条件）时水平 `auto` margin 分配剩余空间，auto 宽度与过约束盒保持 0。文本项的 line-height 贡献为计算 px 值、数字×字号或 `normal` 的测量行高；行盒取最大贡献，half-leading 把共享基线定位到 `baseline_offset_px`（`normal` 精确贡献测量行高，因此 M14 之前几何不变）。断行后 `text-align: center/right` 整体平移已定稿行的盒（`justify` 按 left；过长行保持左对齐）。行内/replaced 的百分比 margin/padding 用行宽，replaced 百分比宽度用包含宽度、百分比高度保持 auto。visibility 不影响布局。
 
 M14a 绘制：`visibility` 为 hidden 的盒不输出背景、图片、文本或下划线，但遍历仍进入子节点，因此可见后代正常绘制；布局保留隐藏盒的空间。`text-decoration: underline` 的文本盒在其文本命令之后发出一个设备像素 `FillRect`，x=round(box.x)、y=round(box.y)-scroll_y+round(baseline_offset_px)+1、width=round(box.width)、height=1、颜色为不透明文本色，使用相同的文本裁剪。不使用这两个属性的页面构建与 M14 之前逐字节相同的命令列表。位图路径仍在行盒内顶部对齐字形，因此大 CSS line-height 会显示在字形下方多出空间（real-font 路径通过 half-leading 基线居中）；这是有文档的位图模式简化。
+
+M14b 布局：used border 宽度（`UsedBorderWidth`）进入盒模型：border box = content + padding + 四边
+borders，content box = border box 内缩 border + padding。`box-sizing: content-box`（默认）下宽高仍是
+内容尺寸，auto 宽度填充 `包含宽度 - margin - padding - border`；`border-box` 下宽高是 border-box
+尺寸，content = clamp(size - padding - border, >=0)，auto 宽度仍然填充。px min/max-width/height 按
+box-sizing 解释（content-box 钳制内容盒，border-box 钳制 border box，非负，先 min 后 max）；百分比
+尺寸/约束仍用包含块内容宽度。auto margin 分配 `包含宽度 - margin - 最终 border box 宽度`（CSS 10.4
+居中，过约束为 0）。固定/auto 高度遵循同样规则（百分比高度仍不支持）。行内元素把水平 border 加入
+左右 advance 与 fragment 宽度（首 fragment 含 border-left，末 fragment 含 border-right；行内垂直
+border 仍忽略），replaced 行内元素按 M8a 限制忽略 border/padding/margin，overflow/装饰从不改变布局。
+没有 border/box-sizing 变化的页面保持 M14b 之前几何逐字节不变。
+
+M14b 绘制：元素绘制顺序为 background -> borders -> image -> children/text。border 从 border-box
+矩形按 top/right/bottom/left 顺序发出最多四条 `FillRect`，颜色用解析后的 `UsedBorderColor`
+（currentColor -> 文本色，保留 alpha），每条按背景同样规则裁剪；所有解析到的 border 样式都按实心
+绘制，隐藏盒不绘制 border。`overflow:hidden`（任一轴）的盒在整棵子树周围发出一个成对的
+`PushClip`/`PopClip`，裁剪到其 padding box（整数取整边界；空子树也成对、嵌套正确）；裁剪只影响
+绘制，因此 `ContentHeight` 仍包含溢出盒。文本装饰在文本命令之后按 underline -> line-through ->
+overline 顺序发出：underline 在 baseline+1，line-through 在 baseline - max(1,
+round(font_size/3))，overline 在盒顶部，各为 1px `FillRect`、不透明文本色，使用相同文本裁剪且隐藏
+文本不绘制。不使用新属性的页面构建与 M14b 之前逐字节相同的命令列表。
 
 布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型加 `style::ComputedStyle`）；内置等宽位图字体度量位于 `render`，由 `shell` 适配——若为真实字体，则适配该字体的整形 advance、行高与 ascent（M8b/M10），布局本身仍然完全不了解字体。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。M10 起回调会收到文本的计算样式，因此 shell 能按样式选字体；`TextMetrics` 携带 ascent，布局把该行最大的 ascent 写进每个文本盒的 `Box::baseline_offset_px`（同一行不同字体因此在绘制时共享基线）。文本被切成断行单元（`src/layout/text_break.cpp`）：空白分隔单词，非 CJK 文本保持最长词，CJK 字符各自成为断行机会并带简化的标点禁则，因此没有空格的中文也能正常换行。每个单元仍是普通的可度量 word 级文本盒，复用 M5 的适配、行高与基线机制。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。M8a 把 replaced 元素加入同一套布局：`LayoutOptions::replaced_sizes` 把 DOM 节点 id 映射到 shell 提供的固有 CSS 像素尺寸；有条目的行内元素成为原子行内级盒（CSS width/height px 覆盖、只给一侧时保持固有宽高比、整体换行、顶部对齐、抬高行高），而 `layout` 仍然从不读取图片、也不依赖 `render`。M10 的断行单元模型是对 Unicode 断行的简化（没有完整 UAX#14、没有泰语/高棉语/老挝语词典断行、没有连字符断行、不做跨文本节点标点粘连）；拉丁词永不拆开。
 
@@ -221,8 +242,8 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
 - M12 外部样式表测试使用提交的 `tests/fixtures/css_site/` 站点（子目录相对样式表、文档序排序、
   被过滤/失败/重复链接、无样式表与全被过滤页面，以及有文档的期望计算值、几何与像素），并加上
   header-only 进程内 loopback HTTP 服务器 `tests/support/http_server.h` 覆盖重定向、绝对 URL、
-  相对最终 URL 解析、失败与不去重请求数等用例。`style.external_sheets` 直接覆盖级联 API，
-
+  相对最终 URL 解析、失败与不去重请求数等用例。`style.external_sheets` 直接覆盖级联 API，`shell.external_css` 覆盖 shell 端到端（含
+  `Browser`/绘制像素），CLI 检查覆盖带外部样式表的 `--dump-style`。没有测试使用公网。
 - M13 资源加载测试全部离线并断言计数、绝不断言耗时。`tests/support/http_server.h` 与
   `tests/support/tls_server.h` 现在能让一条连接服务多个请求并暴露连接/请求计数（HTTP server 还能
   强制关闭响应以模拟过期空闲连接）。`net.keep_alive` 覆盖同 origin 复用（Content-Length/chunked）、
@@ -243,8 +264,19 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
   扩展后的 `paint.display_list` 覆盖 visibility 与下划线命令的几何/顺序/裁剪以及手写 M14 之前参考
   列表。`legacy.html` 证明 M14 之前页面保持逐字节盒 dump/PPM；字节兼容门禁只规范化追加的样式字段。
   手工真实站点检查不进入 CTest，`.tmp/` 证据从不提交。
-  `shell.external_css` 覆盖 shell 端到端（含 `Browser`/绘制像素），CLI 检查覆盖带外部样式表的
-  `--dump-style`。没有测试使用公网。
+- M14b 盒装饰测试离线且确定：提交的 `tests/fixtures/css_compat_site/` 新增 `borders.html`
+  （1–4 边、不同宽度/样式/颜色/currentColor/rgba、简写、content-box vs border-box、嵌套 border
+  盒）、`overflow.html`（超大被裁剪子元素 + 文本、visible 对照、带 border 的裁剪、后续盒）与
+  `decorations.html`（三种装饰各自/组合/继承/重置），README 记录每个期望计算值、盒矩形、装饰行与
+  像素。`style.borders` 覆盖宽度/样式/颜色长写与简写重置/拒绝语义，`style.box_model` 覆盖
+  box-sizing/overflow，`layout.box_model` 覆盖 border 几何/box-sizing/auto margin/高度/行内
+  border/none-hidden/replaced 忽略与 M14b 之前几何相等；扩展后的 `paint.display_list` 覆盖 border
+  矩形顺序/几何/颜色/alpha/裁剪、overflow clip 对与精确裁剪像素、line-through/overline 行（位图
+  与真实字体）以及手写 M14b 之前参考列表。`shell.css_compat` 断言新页面的计算值、冻结盒几何与
+  Browser 像素；`shell.dump_style_css_compat_borders` 与 `shell.css_compat_screenshot_borders`
+  覆盖 CLI。字节兼容门禁对 M14a 二进制比较（盒 dump/PPM/退出码相同；样式 dump 从 ` min-width=`
+  规范化），与更早的 M14（M13）二进制比较只在 M14a fixture 页面上有差异。真实站点证据留在 `.tmp/`，
+  从不进入仓库/CTest。
 
 ## 参考资料
 

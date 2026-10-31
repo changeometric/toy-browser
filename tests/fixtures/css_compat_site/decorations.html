@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <title>CSS compatibility: decorations</title>
+  <style>
+    #underline { text-decoration: underline; }
+    #line-through { text-decoration: line-through; }
+    #overline { text-decoration: overline; }
+    /* The combination paints in the frozen underline, line-through, overline order. */
+    #combined { text-decoration: underline line-through overline; }
+    /* M14 MVP: decoration flags inherit, so the plain child gets the parent's
+       underline; a child that declares its own decoration resets the flags. */
+    #parent { text-decoration: underline; }
+    #child { text-decoration: line-through; }
+  </style>
+</head>
+<body>
+  <p id="underline">Underline</p>
+  <p id="line-through">Line through</p>
+  <p id="overline">Overline</p>
+  <p id="combined">Combined</p>
+  <p id="parent">Parent <span id="inherited">inherited</span></p>
+  <p id="reset">Reset <span id="child">child</span></p>
+</body>
+</html>

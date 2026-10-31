@@ -388,14 +388,33 @@ set_tests_properties(shell.dump_style_css_compat PROPERTIES
   PASS_REGULAR_EXPRESSION
     "<div> display=block color=#000000 background-color=#ddccdd[^\n]*width=50px[^\n]*min-width=150px min-height=none max-width=200px")
 
+# M14b: --dump-style appends the border/box-sizing/overflow fields after the M14a
+# fields; the four-sided #four box of borders.html proves the used border widths,
+# styles, resolved colors and box-sizing.
+add_test(NAME shell.dump_style_css_compat_borders
+  COMMAND $<TARGET_FILE:toybrowser> --dump-style
+          "file://${shell_css_compat_site}/borders.html")
+set_tests_properties(shell.dump_style_css_compat_borders PROPERTIES
+  PASS_REGULAR_EXPRESSION
+    "border-top-width=2px border-right-width=3px border-bottom-width=4px border-left-width=5px border-top-style=solid.*border-color=#ff0000 #00ff00 #0000ff #ffff00 box-sizing=content-box overflow=visible")
+
 # The CLI presentation path over the same fixture: --screenshot must succeed and
 # write one binary PPM of the requested size (pixels are asserted by
-# shell.css_compat).
+# shell.css_compat). The values page covers M14a and the borders page M14b.
 add_test(NAME shell.css_compat_screenshot
   COMMAND ${CMAKE_COMMAND}
           -DTOYBROWSER=$<TARGET_FILE:toybrowser>
           -DFIXTURE_DIR=${shell_css_compat_site}
+          -DPAGE=values.html
           -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/css_compat_screenshot.ppm
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/css_compat_screenshot_check.cmake")
+
+add_test(NAME shell.css_compat_screenshot_borders
+  COMMAND ${CMAKE_COMMAND}
+          -DTOYBROWSER=$<TARGET_FILE:toybrowser>
+          -DFIXTURE_DIR=${shell_css_compat_site}
+          -DPAGE=borders.html
+          -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/css_compat_screenshot_borders.ppm
           -P "${CMAKE_CURRENT_SOURCE_DIR}/css_compat_screenshot_check.cmake")
 
 # M10: every pre-M10 test that runs toybrowser or a Browser through the automatic
@@ -433,7 +452,9 @@ foreach(shell_bitmap_font_test IN ITEMS
     shell.resource_loading
     shell.css_compat
     shell.dump_style_css_compat
+    shell.dump_style_css_compat_borders
     shell.css_compat_screenshot
+    shell.css_compat_screenshot_borders
     shell.fonts
     shell.fonts_dump_boxes
     shell.fonts_missing_file

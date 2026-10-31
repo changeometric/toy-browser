@@ -53,9 +53,11 @@ using FontRunsProvider = std::function<std::vector<FontRun>(const style::Compute
 
 // Paints a laid-out page into a display list: it walks the box tree in pre-order
 // and emits one background FillRect per element box whose computed background is
-// not fully transparent, then one DrawImage per inline replaced box whose node id
-// is present in `images` (after that box's background, before its children), then
-// one text draw per text box.
+// not fully transparent, then up to four border FillRects (top/right/bottom/left)
+// for its used border widths, then one DrawImage per inline replaced box whose
+// node id is present in `images` (after that box's background and borders, before
+// its children), then one text draw per text box. Pages without borders keep the
+// pre-M14b command list byte for byte.
 //
 // Text: paint asks `font_runs` for the real-font runs of each text box. With a
 // non-empty run list (real font):
@@ -98,7 +100,30 @@ using FontRunsProvider = std::function<std::vector<FontRun>(const style::Compute
 // is never painted for hidden text. Pages that use neither property build exactly
 // the pre-M14 command list.
 //
-// Since M11 the list is culled: a background FillRect or DrawImage is emitted
+// Since M14b an element paints background -> borders -> image -> children. Border
+// rectangles are device-pixel FillRects from the box's border-box rectangle
+// translated by -scroll_y (top: x=round(box.x), y=TranslatedY, w=round(box.width),
+// h=round(used border width); bottom/right use the box's far edges and the left
+// rectangle spans the height between the top and bottom borders; the right
+// rectangle mirrors it). The command color is `style::UsedBorderColor(side,
+// style.color)`, alpha kept, and every visible style paints solid in this MVP. Each
+// border rect uses the same exact viewport culling as a background, so a zero or
+// off-screen side emits nothing. An element whose computed overflow is hidden on
+// either axis emits one PushClip for its padding box after its own background,
+// borders and image, and the matching PopClip after its whole subtree (always one
+// balanced pair, even for an empty subtree; the rasterizer intersects the rect);
+// overflow visible emits no extra commands. Descendant commands are unaffected by
+// the clip in the list and are clipped by the rasterizer. Text decorations are
+// emitted after a text box's text command(s) in underline, line-through, overline
+// order when the corresponding computed flag is set: underline is one row at
+// round(box.y)-scroll+round(baseline_offset_px)+1, line-through is one row at that
+// baseline minus max(1, round(font_size_px/3)), overline is one row at
+// round(box.y)-scroll; each is a FillRect(round(box.x), row, round(box.width), 1)
+// in the opaque text color and shares the text culling; hidden text paints no
+// decorations. Pages using none of the new properties build exactly the pre-M14b
+// command list.
+//
+// Since M11 the list is culled: a background/border FillRect or DrawImage is emitted
 // only when its device-pixel destination rectangle intersects the viewport, and
 // a text box only when its box expanded by 2 * font_size_px on every side
 // intersects it (a conservative margin covering glyph overhang, anti-aliasing
