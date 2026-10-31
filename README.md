@@ -2,18 +2,20 @@
 
 A toy web browser built from scratch: C++20, CMake, and no ready-made browser components.
 
-**Status: M8b — real fonts and PNG images.** The window and `--headless --screenshot` render the
-page given by an optional URL, including `<img src="...png">` images (approved libpng) and, when a
-real font is selected with `--font PATH` or `--font-family NAME` (approved freetype/harfbuzz/
-fontconfig), anti-aliased true-type text; without a font flag the built-in bitmap font is used and
-all pre-M8b output is byte-identical. In the window, links are clickable, the wheel and keyboard
-scroll, Alt+Left/Right move through history and the title follows `<title>`. **Next planned
-milestone: M9 — most-basic HTTPS** (OpenSSL approved, design documented in the
-[roadmap](docs/roadmap.md); no `https` support yet). Committed demos:
+**Status: M9 — most-basic HTTPS.** The browser fetches `http://`, `https://` and `file://` URLs;
+`https://` uses the approved OpenSSL library with certificate and hostname verification always on
+and no insecure mode. The window and `--headless --screenshot` render the page given by an optional
+URL, including `<img src="...png">` images (approved libpng) and, when a real font is selected with
+`--font PATH` or `--font-family NAME` (approved freetype/harfbuzz/fontconfig), anti-aliased
+true-type text; without a font flag the built-in bitmap font is used and all pre-M8b output is
+byte-identical. In the window, links are clickable, the wheel and keyboard scroll, Alt+Left/Right
+move through history and the title follows `<title>`. **Next planned milestone: M10 — HTTP proxy**
+(design sketch in the [roadmap](docs/roadmap.md)). Committed demos:
 [`tests/fixtures/font_site/`](tests/fixtures/font_site/) for real text + images,
-[`tests/fixtures/img_site/`](tests/fixtures/img_site/) for images and
-[`tests/fixtures/nav_site/`](tests/fixtures/nav_site/) for navigation. The `--dump-*` modes remain
-the primary headless debugging path. See the [roadmap](docs/roadmap.md). 中文版：
+[`tests/fixtures/img_site/`](tests/fixtures/img_site/) for images,
+[`tests/fixtures/nav_site/`](tests/fixtures/nav_site/) for navigation and
+[`tests/fixtures/https_site/`](tests/fixtures/https_site/) for the HTTPS pipeline. The `--dump-*`
+modes remain the primary headless debugging path. See the [roadmap](docs/roadmap.md). 中文版：
 [README.zh.md](README.zh.md).
 
 **New team or agent?** Start with [docs/handoff.md](docs/handoff.md) (current state and takeover
@@ -40,6 +42,9 @@ ctest --test-dir build --output-on-failure
     "file://$PWD/tests/fixtures/nav_site/index.html"   # any installed font family
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"   # images demo
 ./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # the committed nav demo site
+./build/toybrowser --dump-body https://example.com/   # fetch an https URL (TLS, always verified)
+./build/toybrowser --dump-dom  https://example.com/   # fetch + parse a real https page
+./build/toybrowser --size 1024x768 --screenshot out.ppm https://example.com/  # paint an https page
 ./build/toybrowser --dump-body file:///etc/hostname  # fetch a URL, raw bytes to stdout
 ./build/toybrowser --dump-dom  file:///etc/hostname  # fetch and dump the parsed DOM tree
 ./build/toybrowser --dump-style file:///etc/hostname # fetch, style, dump computed styles
@@ -47,7 +52,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 The window backend links libX11, image decoding links libpng, real-font rendering links freetype and
-harfbuzz, and family lookup links fontconfig (all approved; see
+harfbuzz, family lookup links fontconfig and `https://` links OpenSSL (all approved; see
 [dependencies](docs/dependencies.md)), so those development headers are build-time requirements
 even when only headless modes are used. Headless runs need no display and are the
 primary mode for testing and debugging: every rendered result can be inspected without opening a
@@ -73,10 +78,9 @@ machine's paths, toolchain version or installed package set.
 
 ## Dependencies
 
-Five third-party packages are linked today (libX11, libpng + zlib, freetype, harfbuzz and
-fontconfig); OpenSSL is approved for the planned M9 HTTPS milestone but not linked yet. The browser
-engine itself has no ready-made components (no HTML parser, CSS engine, JS engine, layout or
-rendering engine).
+Six third-party packages are linked today (libX11, libpng + zlib, freetype, harfbuzz, fontconfig
+and OpenSSL). The browser engine itself has no ready-made components (no HTML parser, CSS engine,
+JS engine, layout or rendering engine).
 
 | Component | Purpose | License | Status |
 | --- | --- | --- | --- |
@@ -86,7 +90,7 @@ rendering engine).
 | freetype | font metrics and glyph rasterization | FreeType License | linked since M8b |
 | harfbuzz | OpenType text shaping | MIT | linked since M8b |
 | fontconfig | installed-font discovery and matching | MIT-style | linked since M8b |
-| OpenSSL | TLS for `https://` | Apache-2.0 | approved, not linked yet (planned M9) |
+| OpenSSL | TLS for `https://` | Apache-2.0 | linked since M9 |
 
 The policy, the approval log and from-scratch alternatives live in
 [dependencies.md](docs/dependencies.md).

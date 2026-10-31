@@ -5,7 +5,7 @@ what is still being requested.
 
 ## Inventory today
 
-**Five third-party packages are linked:**
+**Six third-party packages are linked:**
 
 - **libX11 (MIT/X11)**, used by the X11 window backend (M1).
 - **libpng + zlib (libpng license / zlib license)**, used by `render` to decode PNG images (M8a).
@@ -16,8 +16,9 @@ what is still being requested.
   `find_package(harfbuzz CONFIG REQUIRED)`.
 - **fontconfig (MIT-style)**, used by `shell` for installed-font discovery and matching when a page
   is rendered with `--font-family` (M8b). Discovered with `find_package(Fontconfig REQUIRED)`.
-
-**One approved library is not linked yet: OpenSSL**, for TLS/`https://` in the planned M9 milestone.
+- **OpenSSL (libssl + libcrypto, Apache-2.0)**, used by `net` for TLS/`https://` fetching (M9).
+  Discovered with `find_package(OpenSSL REQUIRED)` and linked PRIVATE to `toy_net`; certificate
+  verification is always on against the default trust store and there is no insecure mode.
 
 Everything else is the C++20 standard library and standard POSIX interfaces. No HTML parser, CSS
 engine, JS engine, layout engine or browser engine is used — those are written in this repository.
@@ -44,12 +45,13 @@ Approved by the user on 2026-10-31, before M8a started, and linked in M8b:
   `--font-family NAME` to a font file. License: fontconfig's MIT-style license. Linked through
   `find_package(Fontconfig REQUIRED)` in `src/shell/CMakeLists.txt`.
 
-Approved by the user on 2026-10-31, for the planned M9 HTTPS milestone:
+Approved by the user on 2026-10-31, for M9 and linked since M9:
 
 - **OpenSSL (libssl + libcrypto)** — TLS 1.2/1.3 for `https://` fetches. License: Apache-2.0
-  (OpenSSL 3.x). To be discovered with CMake's `find_package(OpenSSL REQUIRED)` and linked
-  PRIVATE to `net`; no vendoring. Not linked yet. It will be used with certificate checking left
-  on, the system/default trust store and no insecure mode.
+  (OpenSSL 3.x). Discovered with CMake's `find_package(OpenSSL REQUIRED)` and linked PRIVATE to
+  `toy_net`; no vendoring. Used with certificate and hostname verification always on, OpenSSL's
+  default/system trust store (standard `SSL_CERT_FILE`/`SSL_CERT_DIR` overrides keep working) and no
+  insecure mode.
 
 Nothing else is linked. The C++20 standard library and standard OS/POSIX interfaces remain the
 default. All approved candidates use permissive licenses compatible with the project's MIT license.
@@ -78,11 +80,11 @@ without a display.
 | freetype | TTF glyph rasterization and metrics | Own subset TTF loader (cmap/glyf/hmtx, no hinting) | Medium | **Approved, linked since M8b** (used by `render::Font`) |
 | harfbuzz | OpenType shaping (ligatures, glyph selection, positioning) | Basic Latin shaping only | High | **Approved, linked since M8b** (used by `render::Font`) |
 | fontconfig | Installed-font discovery and matching | Hardcoded font path / no discovery | Medium | **Approved, linked since M8b** (used by `shell` for `--font-family`) |
-| OpenSSL | TLS, i.e. `https://` | Not realistic from scratch | High | **Approved on 2026-10-31, not linked yet — planned M9** (always-on certificate verification, system trust store) |
+| OpenSSL | TLS, i.e. `https://` | Not realistic from scratch | High | **Approved on 2026-10-31, linked since M9** (always-on certificate/hostname verification, default trust store) |
 | stb_truetype / stb_image | Drop-in single-header implementations | Own implementations | Low | **Not approved** — conflicts with the project's spirit |
 | icu | Unicode data and full internationalization | Small ASCII/Latin subset first | High | **Not planned** |
 
-Only the five packages listed at the top are linked today. Any other row needs the process below to
+Only the six packages listed at the top are linked today. Any other row needs the process below to
 be completed first.
 
 ## Approval process
@@ -106,5 +108,6 @@ be completed first.
   `render`) and fontconfig (the shell's `--font-family` path). These are required build
   dependencies; a build needs their development headers.
 - Do not assume what fonts, window manager, GPU or packages a machine has. Tests use the committed
-  self-authored font fixture (`tests/fixtures/fonts/`), never installed fonts, and the planned M9
-  TLS tests use committed self-signed test certificates, never public CAs or public sites.
+  self-authored font fixture (`tests/fixtures/fonts/`), never installed fonts, and the M9 TLS tests
+  use committed self-signed test certificates (`tests/fixtures/tls/`), never public CAs or public
+  sites.

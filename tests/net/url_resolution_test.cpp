@@ -1,5 +1,5 @@
 // Tests for toy::net::ResolveUrl: resolving a reference against an absolute
-// http:// or file:// base URL (RFC 3986 section 5.2, MVP subset).
+// http://, https:// or file:// base URL (RFC 3986 section 5.2, MVP subset).
 
 #include <cstdio>
 #include <optional>
@@ -14,6 +14,7 @@ namespace {
 using toy::net::Url;
 
 constexpr const char* kHttpBase = "http://example.com/dir/page.html?x=1#f";
+constexpr const char* kHttpsBase = "https://example.com/dir/page.html?x=1#f";
 constexpr const char* kFileBase = "file:///a/b/page.html";
 
 void ExpectResolved(const char* base_text, std::string_view reference, std::string_view expected,
@@ -85,6 +86,46 @@ void TestRelativePaths() {
                  "'..' from a trailing-slash base goes up one level");
   ExpectResolved("http://example.com/dir/", ".", "http://example.com/dir/",
                  "'.' against a directory base keeps the trailing slash");
+}
+
+void TestHttpsBase() {
+  ExpectResolved(kHttpsBase, "b.html", "https://example.com/dir/b.html",
+                 "a relative reference keeps the https scheme");
+  ExpectResolved(kHttpsBase, "", "https://example.com/dir/page.html?x=1",
+                 "an empty reference keeps the https base URL without its fragment");
+  ExpectResolved(kHttpsBase, "/x/y", "https://example.com/x/y",
+                 "an absolute path keeps the https scheme");
+  ExpectResolved(kHttpsBase, "//other.org/z", "https://other.org/z",
+                 "a scheme-relative reference inherits the https scheme");
+  ExpectResolved(kHttpsBase, "//other.org:8443/z", "https://other.org:8443/z",
+                 "a scheme-relative https reference keeps a non-default port");
+  ExpectResolved(kHttpsBase, "//example.com:443/z", "https://example.com/z",
+                 "an explicit https default port is normalized away");
+  ExpectResolved("https://example.com:8443/dir/page", "", "https://example.com:8443/dir/page",
+                 "an empty reference keeps a non-default https port");
+  ExpectResolved("https://example.com:8443/dir/page", "x", "https://example.com:8443/dir/x",
+                 "a relative https path keeps the non-default port");
+  ExpectResolved("https://example.com", "x", "https://example.com/x",
+                 "an https base without a written path has path '/'");
+  ExpectResolved(kHttpsBase, "?q=2", "https://example.com/dir/page.html?q=2",
+                 "a query-only reference keeps the https scheme");
+  ExpectResolved(kHttpsBase, "#top", "https://example.com/dir/page.html?x=1#top",
+                 "a fragment-only reference keeps the https scheme and query");
+}
+
+void TestSchemeSwitches() {
+  ExpectResolved(kHttpBase, "https://other.org/z", "https://other.org/z",
+                 "an absolute https reference switches away from an http base");
+  ExpectResolved(kHttpsBase, "http://other.org/z", "http://other.org/z",
+                 "an absolute http reference switches away from an https base");
+  ExpectResolved(kHttpBase, "HTTPS://other.org/z", "https://other.org/z",
+                 "an absolute https reference lowercases its scheme");
+  ExpectResolved(kHttpsBase, "https://example.com", "https://example.com/",
+                 "an absolute https reference without a path gets '/'");
+  ExpectResolved(kHttpsBase, "https://other.org/a/b/../", "https://other.org/a/",
+                 "dot segments are removed from an absolute https reference path");
+  ExpectResolved(kFileBase, "https://example.com/x", "https://example.com/x",
+                 "an absolute https reference against a file base switches scheme");
 }
 
 void TestAbsolutePaths() {
@@ -246,16 +287,19 @@ void TestFileBase() {
 }
 
 void TestErrors() {
-  ExpectResolveError(kHttpBase, "https://x/", "the https scheme is rejected");
-  ExpectResolveError(kHttpBase, "HTTPS://x/", "an uppercase https scheme is rejected");
   ExpectResolveError(kHttpBase, "mailto:a@b", "a mailto reference is rejected");
   ExpectResolveError(kHttpBase, "ftp://example.com/x", "the ftp scheme is rejected");
   ExpectResolveError(kHttpBase, "http:/example.com/x",
                      "an absolute http reference without '//' is rejected");
+  ExpectResolveError(kHttpsBase, "https:/example.com/x",
+                     "an absolute https reference without '//' is rejected");
   ExpectResolveError(kHttpBase, "file:/x", "an absolute file reference without '//' is rejected");
   ExpectResolveError(kHttpBase, "http:///path", "an http reference without a host is rejected");
+  ExpectResolveError(kHttpBase, "https:///path", "an https reference without a host is rejected");
   ExpectResolveError(kHttpBase, "http://example.com:0/",
                      "an http reference with port 0 is rejected");
+  ExpectResolveError(kHttpBase, "https://example.com:0/",
+                     "an https reference with port 0 is rejected");
   ExpectResolveError(kHttpBase, "b.html%zz", "an invalid percent escape is rejected");
   ExpectResolveError(kHttpBase, "//", "a scheme-relative reference with an empty host is rejected");
   ExpectResolveError(kFileBase, "//remotehost/x",
@@ -270,7 +314,9 @@ void TestNullErrorPointer() {
   }
   toy_test::Check(toy::net::ResolveUrl(*base, "b.html", nullptr).has_value(),
                   "resolving works with a null error pointer");
-  toy_test::Check(!toy::net::ResolveUrl(*base, "https://x/", nullptr).has_value(),
+  toy_test::Check(toy::net::ResolveUrl(*base, "https://x/", nullptr).has_value(),
+                  "an https reference resolves with a null error pointer");
+  toy_test::Check(!toy::net::ResolveUrl(*base, "ftp://x/", nullptr).has_value(),
                   "resolution failures work with a null error pointer");
 }
 
@@ -278,6 +324,8 @@ void TestNullErrorPointer() {
 
 int main() {
   TestRelativePaths();
+  TestHttpsBase();
+  TestSchemeSwitches();
   TestAbsolutePaths();
   TestSchemeRelative();
   TestQueryAndFragment();

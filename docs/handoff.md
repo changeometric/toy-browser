@@ -19,19 +19,21 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M7 | Navigation: headless `shell::Browser` (final URL, history, scroll, title), `net::ResolveUrl`, box hit-testing, scroll-clipped painting, X11 click/wheel/keys + window titles, committed demo site, `shell.navigation` test |
 | M8a | PNG images: `render::Image` + libpng decoder behind `render::DecodePng`, `DrawImage` display-list command/rasterizer, replaced inline `<img>` layout from caller-supplied intrinsic sizes, private shell page loader (fetch/resolve/decode/skip failures), image fixtures and `tests/fixtures/img_site/`, 46 tests |
 | M8b | Real fonts: `render::Font` (freetype metrics/rasterization + harfbuzz shaping, 4096 px effective size cap) behind a frozen pimpl, anti-aliased `DrawTextWithFont` with baseline placement, `--font PATH` / `--font-family NAME` (fontconfig) selection, self-authored font fixture and `tests/fixtures/font_site/`, 55 tests; the bitmap path stayed byte-identical |
+| M9 | `https://` fetching: `net` URL layer accepts https (default port 443), OpenSSL-backed TLS transport behind the unchanged blocking `Fetch()` sharing the HTTP/1.1 code through a private byte-stream abstraction, always-on certificate + hostname verification against OpenSSL's default trust store (no insecure mode), SNI, existing timeouts, redirects resolved with `net::ResolveUrl` (relative/protocol-relative, http<->https), committed test CA/leaf certs, in-process TLS loopback server, `net.tls` + `shell.https` end-to-end tests, 57 tests; http/file output stayed byte-identical |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-**Next planned milestone: M9 — most-basic HTTPS (documented, not started).** The user approved
-OpenSSL for TLS on 2026-10-31 (recorded in [dependencies.md](dependencies.md)); it is not linked
-yet. M10 (HTTP proxy) is planned after it, and the JavaScript subset was shelved by the user. This
-is a documentation/planning round: no M9 code exists yet, so the current behaviour and the 55
-tests are unchanged.
+**Next planned milestone: M10 — HTTP proxy (planned, not started).** M9 (most-basic HTTPS) shipped;
+the user approved OpenSSL for TLS on 2026-10-31 and it is linked since M9 (recorded in
+[dependencies.md](dependencies.md)). M10 adds an HTTP proxy (absolute-form for `http`, `CONNECT`
+for `https`) behind `FetchOptions`, which is what makes real-site testing practical on restricted
+networks. The JavaScript subset was shelved by the user.
 
-Not implemented yet: `https`/TLS (planned M9), proxies (planned M10), JavaScript (deferred),
+Not implemented yet: proxies (planned M10), JavaScript (deferred),
 external stylesheets, borders, horizontal scrolling/scrollbars, hover/active link styling and form
 controls, and CSS-driven font selection (`font-family`/`font-weight`/`font-style`, fallback chains,
-`@font-face`). PNG images work since M8a and real TTF text since M8b, both opt-in for fonts (see
-the M8a/M8b known limits in [roadmap.md](roadmap.md)). The window and `--screenshot` paint a real page when a URL is given and
+`@font-face`). PNG images work since M8a, real TTF text since M8b (opt-in) and `https://` since M9
+(see the known limits in [roadmap.md](roadmap.md)); `http://` and `file://` remain supported. The
+window and `--screenshot` paint a real page when a URL is given and
 the M1 placeholder page otherwise; with a page URL the window is also browsable (links,
 wheel/keyboard scrolling, Alt+Left/Right history, `<title>`). The `--dump-*` modes remain the
 primary debugging path.
@@ -56,11 +58,11 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 55/55 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 57/57 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
-or newer is required; building needs the X11, libpng, freetype, harfbuzz and fontconfig development
-headers (all approved dependencies); only windowed mode needs a running display.
+or newer is required; building needs the X11, libpng, freetype, harfbuzz, fontconfig and OpenSSL
+development headers (all approved dependencies); only windowed mode needs a running display.
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -85,6 +87,21 @@ no box. The fixture-font box dump shows real-font metrics (e.g. `<h1>` text "ABC
 instead of the bitmap font's 48); without a font flag every page keeps the bitmap output.
 
 ```sh
+# HTTPS (M9): deterministic TLS tests use the committed test certificates
+# (tests/fixtures/tls/) and in-process loopback servers, never the public network.
+ctest --test-dir "$BUILD" -R '^(net\.tls|shell\.https)$' --output-on-failure
+
+# Manual real-site check: network-dependent, not part of the test suite.
+"$BUILD"/toybrowser --dump-body https://example.com/ | head
+"$BUILD"/toybrowser --size 800x600 --screenshot /tmp/toybrowser-https.ppm \
+    https://example.com/ && file /tmp/toybrowser-https.ppm
+```
+
+Expected: `net.tls` and `shell.https` pass; a public `https://` page fetches and paints. Certificate,
+hostname and timeout failures are ordinary fetch errors (CLI exit 1 for page modes), verification is
+always on and there is no insecure mode.
+
+```sh
 "$BUILD"/toybrowser --size 400x200 --screenshot /tmp/toybrowser-nav.ppm \
     "file://$PWD/tests/fixtures/nav_site/index.html" && file /tmp/toybrowser-nav.ppm
 ```
@@ -100,34 +117,22 @@ Window demo (needs a display):
 # history; the title follows <title>.
 ```
 
-## Next round: M9 — most-basic HTTPS (planned; OpenSSL approved, not started)
+## Next round: M10 — HTTP proxy (planned; starts only on the user's go-ahead)
 
-**Status:** the design is frozen in [roadmap.md](roadmap.md) and [decisions.md](decisions.md) but
-**no M9 code has been written**. OpenSSL was approved on 2026-10-31 and is not linked yet
-([dependencies.md](dependencies.md)); implementation starts only on the user's go-ahead and needs
-the OpenSSL development headers (agents never install packages).
+**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M10 code exists. M9 is complete and
+green, so the starting point is the current HEAD.
 
-- Goal: `Fetch()` accepts absolute `https://` URLs so HTTPS pages/images render through the
-  existing pipeline. MVP bar: connect and issue the request; everything beyond that is out.
-- Settled decisions (details in the roadmap/decisions): `https` default port 443; HTTP/1.1 over
-  OpenSSL with always-on certificate/hostname verification and SNI, system/default trust store and
-  no insecure mode; existing timeouts and `FetchOptions` unchanged; redirects via
-  `net::ResolveUrl` (relative/protocol-relative, http<->https allowed); no proxy (M10), HTTP/2,
-  compression, cookies, HSTS or HTTP caching; deterministic tests use a committed self-signed test
-  CA/leaf certificate and an in-process TLS loopback server, never the public network.
-- Task split: (1) `net` URL + OpenSSL TLS transport + tests (`src/net/`, `tests/net/`,
-  `tests/fixtures/tls/`); (2) shell/test end-to-end HTTPS page (`tests/shell/`,
-  `tests/fixtures/https_site/`). The Lead freezes contracts, integrates, runs GCC+Clang WERROR and
-  the byte-compatibility gate, and makes one grouped commit.
-- Acceptance: existing 55 tests plus new URL/TLS/HTTPS tests green on GCC and Clang; a local HTTPS
-  page with an image renders headlessly; certificate/hostname/timeout failures are explicit;
-  http/file output stays byte-identical. Direct real-site checking is manual and network-dependent
-  (restricted networks wait for M10).
-- Main risk: non-blocking OpenSSL I/O/handshake timeouts. Verification stays on and no insecure
-  bypass is added. Real sites may still render poorly (HTTP/2, compression, cookies, JS).
+- Goal: fetch `http://` through an HTTP proxy using absolute-form request targets, and `https://`
+  through a proxy `CONNECT` tunnel followed by the normal TLS handshake. The browser's own proxy
+  support is what makes real-site testing practical on restricted networks.
+- Expected shape (contracts are frozen at the start of that round): `--proxy host:port` plus the
+  standard `http_proxy`/`https_proxy` environment fallback, kept inside `net` behind
+  `FetchOptions`; no new third-party dependency is expected; in-process fake-proxy tests (no
+  public network) and byte-identical output when no proxy is configured.
+- Non-goals until re-scoped: SOCKS proxies, proxy authentication, bypass lists, PAC.
 
-After M9: **M10 — HTTP proxy** (http absolute-form + https `CONNECT`) unlocks real-site testing on
-restricted networks.
+After M10 the umbrella roadmap is green; the remaining work is the documented backlog (more image
+formats, CSS font selection, external stylesheets, etc.) and any new user priorities.
 
 ## Map of the repository
 
@@ -144,12 +149,23 @@ restricted networks.
   `src/paint/` builds the list from the box tree without rasterizing. `src/shell/application.cpp`
   owns font selection (`--font`/`--font-family`, the only fontconfig user). `layout` consumes text
   metrics through a `shell`-supplied callback and has no `render` dependency.
+- `src/net/` — URLs (`url.cpp`), shared HTTP/1.1 request/response code (`http.cpp`), and the M9
+  private transport split: `socket_internal.h`/`socket.cpp` (TCP connect + poll helpers),
+  `stream_internal.h`/`stream.cpp` (the private `Stream` interface, plain `SocketStream` and
+  `ReadUntilEof`), `tls_internal.h`/`tls.cpp` (the OpenSSL-backed `TlsStream`, process-wide
+  `SSL_CTX`, verification/handshake loop, SIGPIPE guard). OpenSSL types stay out of the public
+  `include/` headers; the only net public API is `toy/net/url.h` + `toy/net/http.h`.
 - `tests/<module>/` — one executable per subject, registered with CTest; new tests use the
   header-only `tests/support/check.h`. Committed fixtures: `tests/fixtures/nav_site/` (three-page
-  navigation demo), `tests/fixtures/img_site/` (image pipeline demo), `tests/fixtures/font_site/`
-  (real-font + image demo), `tests/fixtures/images/` (hand-generated PNGs with documented pixel
-  content), `tests/fixtures/fonts/` (self-authored minimal TTF with documented metrics/family; the
-  tests never use installed fonts).
+  navigation demo; its "Unsupported page" link is a deliberate unsupported-scheme case so no test
+  touches the public network), `tests/fixtures/img_site/` (image pipeline demo),
+  `tests/fixtures/font_site/` (real-font + image demo), `tests/fixtures/images/` (hand-generated
+  PNGs with documented pixel content), `tests/fixtures/fonts/` (self-authored minimal TTF with
+  documented metrics/family; the tests never use installed fonts), `tests/fixtures/https_site/`
+  (HTML+PNG page served over TLS by the shell test) and `tests/fixtures/tls/` (committed test-only
+  CA, `localhost` leaf and untrusted leaf certificates/keys; see its README for regeneration).
+  `tests/support/tls_server.h` is the header-only in-process TLS loopback server shared by
+  `net.tls`/`net.http`/`shell.https`; no test ever contacts the public network.
 - `docs/` — architecture, roadmap, conventions, team workflow, decisions, dependencies, open
   questions (this file is the snapshot).
 - Shared task board — provided by the agent runtime (task create/claim/update with revision); if
@@ -218,9 +234,32 @@ restricted networks.
   8192 px and at most 16,777,216 pixels in total (inclusive maxima), rejected before allocation;
   failures return false with a human-readable error and leave `*out` untouched; no exceptions; no
   libpng type crosses a public header.
+- HTTPS/TLS contract (M9): the URL scheme set is `file`, `http`, `https` (lowercase); `https` uses
+  default port 443 and the same RFC 3986 authority/port/path rules as http, and
+  `ParseUrl`/`ResolveUrl`/`SerializeUrl` round-trip it. `Fetch` dispatches by scheme; http and https
+  share one HTTP/1.1 request/response implementation through a PRIVATE byte-stream abstraction
+  (`src/net/stream_internal.h`), and the plain transport keeps the pre-M9 observable behavior and
+  output. TLS is OpenSSL (linked PRIVATE to `toy_net`; no OpenSSL type in a public header): one
+  process-wide `SSL_CTX` created lazily on the first https fetch from OpenSSL's default verify paths
+  (so `SSL_CERT_FILE`/`SSL_CERT_DIR` take effect at that moment), `SSL_VERIFY_PEER` always on, SNI
+  sent for DNS hosts (not for IPv4 literals), chain + name verification (`SSL_set1_host` for DNS,
+  IP-SAN check for IPv4 literals), and no insecure mode or way to disable verification. TCP connect
+  uses `connect_timeout_ms`; the TLS handshake and all TLS reads/writes use `read_timeout_ms`.
+  Failures are ordinary fetch errors with readable messages: timeouts contain "timed out",
+  certificate verification failures contain "certificate", hostname mismatches contain "hostname".
+  A clean `close_notify` and an unclean EOF are both end of stream (truncation is still caught by
+  Content-Length/chunked parsing). The TLS path ignores `SIGPIPE` process-wide once on first use;
+  library code prints nothing to stdout/stderr. Redirect `Location` values are resolved with
+  `net::ResolveUrl` (absolute, relative, root-relative, protocol-relative, scheme-relative), may
+  switch between http and https, and file targets are rejected; `max_redirects` is unchanged. No
+  ALPN/HTTP2, compression, cookies, HSTS, client certificates, TLS session reuse or HTTP caching.
+  The shell needs no API or CLI change: page fetches, links, redirects and images reuse the same
+  `net` calls. TLS tests never use the public network: committed test-only certificates
+  (`tests/fixtures/tls/`), an in-process TLS loopback server (`tests/support/tls_server.h`) and
+  trust supplied only through the CTest `SSL_CERT_FILE` environment for the test CA.
 - Shell page loader contract (`src/shell/page.h`, private): after fetching/parsing/styling, load
   every `<img>` in document order (iterative walk), take its first `src`, resolve it against the
-  page's final URL, fetch it with `net::Fetch` (http/file only), decode it, and keep
+  page's final URL, fetch it with `net::Fetch` (http/https/file), decode it, and keep
   `layout::ReplacedSizes` + `paint::ImageMap` keyed by the img DOM node id. Missing/failed/unsupported
   images are skipped silently (no broken-image UI, no stderr, page load still succeeds, the element
   lays out as an empty inline); there is no image cache (one fetch per occurrence) and images are
@@ -229,7 +268,8 @@ restricted networks.
 - Navigation/session contract (`toy/shell/browser.h`): one history entry per successful load,
   failed loads change nothing, every successful load resets the scroll offset to 0, a reference
   that only changes the fragment is a no-op, the title is the first `<title>` text (collapsed,
-  falling back to the serialized final URL), and only `http`/`file` links navigate. M8a keeps the
+  falling back to the serialized final URL), and only `http`, `https` and `file` references
+  navigate. M8a keeps the
   public methods identical but hides the page (DOM/styles/boxes/images) behind a forward
   declaration, an out-of-line destructor and a `std::unique_ptr`, so the header no longer exposes
   the page data and `Browser` is non-copyable.
@@ -266,9 +306,38 @@ restricted networks.
   Layout is deliberately iterative (10,000 nested divs are a test): do not turn it back into DOM
   recursion.
 - Build artifacts and object files must never be committed; use isolated build directories.
-- `https` is not implemented yet (M9 planned): `http://` and `file://` work. The M9 plan above is
-  the only agreed direction; do not start it without the user's go-ahead, and do not add an
-  insecure TLS mode.
+- `https` works since M9 (`http`/`https`/`file`); the M9 TLS contract above is frozen. Verification
+  is always on: never add an insecure mode, a "skip verification" flag or a public-network test.
+- The TLS tests rely on two pieces of infrastructure that must stay test-only: the committed
+  certificates in `tests/fixtures/tls/` (a CA plus a `localhost` leaf and an unrelated untrusted
+  leaf; they expire in 2046) and the header-only in-process server `tests/support/tls_server.h`.
+  Trust is supplied only by the CTest `ENVIRONMENT` property pointing `SSL_CERT_FILE` at the test
+  CA — do not `setenv` overrides inside tests and do not use installed/system CAs.
+- The process-wide `SSL_CTX` is created lazily on the first `https://` fetch, so the default verify
+  paths (including `SSL_CERT_FILE`/`SSL_CERT_DIR`) are read at that moment and later changes in the
+  same process are ignored. That is why the CTest environment is the trust mechanism; tests must
+  not switch trust stores mid-process.
+- The TLS path installs `SIGPIPE` ignore once (process-wide) because OpenSSL's write path may raise
+  it; the plain HTTP path uses `MSG_NOSIGNAL`. Do not remove either without a better mechanism.
+- OpenSSL failures must stay ordinary `Fetch` errors with readable text (tests assert the
+  substrings "timed out", "certificate", "hostname"): never let OpenSSL types or exceptions reach
+  a public header or a caller, and never print from library code.
+- `SSL_CTX_set_default_verify_paths` plus `SSL_VERIFY_PEER` is the whole trust policy: there is no
+  certificate pinning, host allowlist, HSTS or client certificate support, and no HTTP/2/ALPN,
+  compression, cookies or proxy. Real sites that require those features will fail or look wrong —
+  documented M9 limits, not bugs.
+- Redirects now go through `net::ResolveUrl`, so relative, protocol-relative and scheme-relative
+  `Location` values are followed and http<->https switches are allowed; `file` redirect targets are
+  rejected. The pre-M9 behavior (relative Location = error) is intentionally gone.
+- The nav fixture's "Unsupported page" link deliberately uses `ftp://example.com/` so the
+  unsupported-scheme click case cannot reach the network now that https navigates; do not change it
+  back to an https link. The navigation test still hardcodes that link's coordinates.
+- M9 has the same byte-compatibility gate as M8b: every pre-M9 dump and screenshot for http/file
+  inputs must stay `cmp`-identical to the M8b baseline, and GCC/Clang must produce byte-identical
+  PPMs. Rerun a `git worktree` baseline after touching `net`/painting.
+- Real-site checking is manual: public `https://` pages render through the limited HTML/CSS subset,
+  so they look incomplete; that is expected. Do not commit downloaded page content, captured
+  screenshots, proxy/network details or site-specific fixtures.
 - The HTML/CSS/URL parsers are error-tolerant by design; they never fail on malformed input, so
   "it didn't error" is not evidence of correctness — compare dumps with the golden tests.
 - `--dump-boxes` uses `--size`'s width as the viewport and ignores the height; heights come from
@@ -359,3 +428,8 @@ restricted networks.
 - `src/render/CMakeLists.txt` now `find_package`s freetype (config/module) and harfbuzz (CONFIG,
   target `harfbuzz::harfbuzz`); `src/shell/CMakeLists.txt` finds fontconfig (target
   `Fontconfig::Fontconfig`). All stay PRIVATE, no versions/paths are hardcoded.
+- `src/net/CMakeLists.txt` finds OpenSSL (`OpenSSL::SSL` + `OpenSSL::Crypto`) PRIVATE. The
+  `net.tls`/`net.http`/`shell.https` test executables also link OpenSSL because they compile the
+  in-process test server; the fixture paths they pass are derived from `CMAKE_CURRENT_SOURCE_DIR`
+  (CMake-generated, never hardcoded). Keep OpenSSL out of public headers and do not add versions,
+  paths or vendoring.

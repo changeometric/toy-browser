@@ -3,9 +3,9 @@
 Decisions that still need the user. Everything approved so far is recorded in
 [dependencies.md](dependencies.md) and [roadmap.md](roadmap.md).
 
-The HTTPS/TLS question was resolved on 2026-10-31: the user approved OpenSSL for the planned M9
-HTTPS milestone (see [dependencies.md](dependencies.md) and [roadmap.md](roadmap.md)); the HTTP
-proxy is planned as M10 and does not need a new dependency.
+The HTTPS/TLS question was resolved on 2026-10-31: the user approved OpenSSL, and M9 (most-basic
+HTTPS) shipped with it (see [dependencies.md](dependencies.md) and [roadmap.md](roadmap.md)). The
+next milestone is M10 (HTTP proxy), which does not need a new dependency.
 
 ## 1. External test corpora — optional, not needed so far
 

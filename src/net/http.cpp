@@ -1,21 +1,15 @@
-// Blocking HTTP/1.1 GET client and file:// reader behind toy::net::Fetch.
+// Blocking HTTP/1.1 GET client over plain TCP or TLS, and file:// reader, behind
+// toy::net::Fetch.
 
 #include "toy/net/http.h"
 
-#include <netdb.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,6 +17,8 @@
 #include <utility>
 #include <vector>
 
+#include "stream_internal.h"
+#include "tls_internal.h"
 #include "toy/net/url.h"
 #include "url_internal.h"
 
@@ -32,7 +28,6 @@ namespace {
 constexpr const char* kUserAgent = "toybrowser/0.1";
 // Read budget above the body limit, so a large-but-legal header block still fits.
 constexpr std::size_t kMaxHeaderBytes = 64 * 1024;
-constexpr std::size_t kReadBufferBytes = 16 * 1024;
 
 void SetError(std::string* error, std::string message) {
   if (error != nullptr) {
@@ -93,182 +88,6 @@ std::string_view FindHeader(const std::vector<std::pair<std::string, std::string
     }
   }
   return {};
-}
-
-class Socket {
- public:
-  Socket() = default;
-  explicit Socket(int fd) : fd_(fd) {}
-  ~Socket() { Close(); }
-
-  Socket(const Socket&) = delete;
-  Socket& operator=(const Socket&) = delete;
-
-  int get() const { return fd_; }
-
-  // Hands the descriptor to the caller, which then owns it.
-  int Release() {
-    const int fd = fd_;
-    fd_ = -1;
-    return fd;
-  }
-
-  void Close() {
-    if (fd_ >= 0) {
-      ::close(fd_);
-      fd_ = -1;
-    }
-  }
-
- private:
-  int fd_ = -1;
-};
-
-// Waits for the socket to become ready. Returns 1 when ready, 0 on timeout and
-// -1 on failure with `error` set.
-int WaitForEvents(int fd, short events, int timeout_ms, std::string* error) {
-  pollfd entry{};
-  entry.fd = fd;
-  entry.events = events;
-  for (;;) {
-    const int result = ::poll(&entry, 1, timeout_ms);
-    if (result > 0) {
-      if ((entry.revents & POLLNVAL) != 0) {
-        SetError(error, "invalid socket while waiting for I/O");
-        return -1;
-      }
-      return 1;
-    }
-    if (result == 0) {
-      return 0;
-    }
-    if (errno == EINTR) {
-      continue;
-    }
-    SetError(error, std::string("poll failed: ") + std::strerror(errno));
-    return -1;
-  }
-}
-
-std::string EndpointText(const Url& url) { return url.host + ":" + std::to_string(url.port); }
-
-// Connects to url over TCP. Returns false with `error` (or the best per-address
-// failure) when every address fails.
-bool ConnectTcp(const Url& url, int timeout_ms, int* connected_fd, std::string* error) {
-  addrinfo hints{};
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  const std::string port_text = std::to_string(url.port);
-  addrinfo* addresses = nullptr;
-  const int lookup = ::getaddrinfo(url.host.c_str(), port_text.c_str(), &hints, &addresses);
-  if (lookup != 0) {
-    SetError(error, "cannot resolve host '" + url.host + "': " + ::gai_strerror(lookup));
-    return false;
-  }
-  struct AddressList {
-    addrinfo* head;
-    ~AddressList() { ::freeaddrinfo(head); }
-  } address_list{addresses};
-
-  std::string last_error = "no usable address for host '" + url.host + "'";
-  for (const addrinfo* address = addresses; address != nullptr; address = address->ai_next) {
-    const int fd = ::socket(address->ai_family, address->ai_socktype | SOCK_CLOEXEC | SOCK_NONBLOCK,
-                            address->ai_protocol);
-    if (fd < 0) {
-      last_error = std::string("cannot create socket: ") + std::strerror(errno);
-      continue;
-    }
-    Socket candidate(fd);
-    const int result = ::connect(fd, address->ai_addr, address->ai_addrlen);
-    if (result != 0 && errno != EINPROGRESS) {
-      last_error = "cannot connect to " + EndpointText(url) + ": " + std::strerror(errno);
-      continue;
-    }
-    if (result != 0) {
-      std::string wait_error;
-      const int ready = WaitForEvents(fd, POLLOUT, timeout_ms, &wait_error);
-      if (ready <= 0) {
-        last_error = ready == 0 ? "connect timed out to " + EndpointText(url) : wait_error;
-        continue;
-      }
-      int socket_error = 0;
-      socklen_t socket_error_size = sizeof(socket_error);
-      if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error, &socket_error_size) != 0) {
-        last_error = std::string("cannot inspect socket state: ") + std::strerror(errno);
-        continue;
-      }
-      if (socket_error != 0) {
-        last_error = "cannot connect to " + EndpointText(url) + ": " + std::strerror(socket_error);
-        continue;
-      }
-    }
-    *connected_fd = candidate.Release();
-    return true;
-  }
-  SetError(error, last_error);
-  return false;
-}
-
-bool SendAll(int fd, std::string_view data, int timeout_ms, std::string* error) {
-  std::size_t offset = 0;
-  while (offset < data.size()) {
-    const ssize_t sent = ::send(fd, data.data() + offset, data.size() - offset, MSG_NOSIGNAL);
-    if (sent > 0) {
-      offset += static_cast<std::size_t>(sent);
-      continue;
-    }
-    if (sent < 0 && errno == EINTR) {
-      continue;
-    }
-    if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      const int ready = WaitForEvents(fd, POLLOUT, timeout_ms, error);
-      if (ready == 0) {
-        SetError(error, "send timed out");
-      }
-      if (ready != 1) {
-        return false;
-      }
-      continue;
-    }
-    SetError(error, std::string("send failed: ") + std::strerror(errno));
-    return false;
-  }
-  return true;
-}
-
-// Reads until the peer closes the connection, failing once `limit` bytes are exceeded.
-bool ReadUntilEof(int fd, int timeout_ms, std::size_t limit, std::string* data,
-                  std::string* error) {
-  char buffer[kReadBufferBytes];
-  for (;;) {
-    const ssize_t received = ::recv(fd, buffer, sizeof(buffer), 0);
-    if (received > 0) {
-      data->append(buffer, static_cast<std::size_t>(received));
-      if (data->size() > limit) {
-        SetError(error, "HTTP response exceeds the size limit");
-        return false;
-      }
-      continue;
-    }
-    if (received == 0) {
-      return true;
-    }
-    if (errno == EINTR) {
-      continue;
-    }
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      const int ready = WaitForEvents(fd, POLLIN, timeout_ms, error);
-      if (ready == 0) {
-        SetError(error, "read timed out");
-      }
-      if (ready != 1) {
-        return false;
-      }
-      continue;
-    }
-    SetError(error, std::string("receive failed: ") + std::strerror(errno));
-    return false;
-  }
 }
 
 int HexDigitValue(char character) {
@@ -478,6 +297,8 @@ bool ParseResponse(std::string_view raw, std::size_t max_body_bytes, Response* r
   return true;
 }
 
+std::uint16_t DefaultPort(const Url& url) { return url.scheme == "https" ? 443 : 80; }
+
 std::string BuildRequest(const Url& url) {
   std::string target = EncodePath(url.path.empty() ? std::string_view("/") : url.path);
   if (!url.query.empty()) {
@@ -485,7 +306,7 @@ std::string BuildRequest(const Url& url) {
     target += EncodeQuery(url.query);
   }
   std::string host = url.host;
-  if (url.port != 80) {
+  if (url.port != DefaultPort(url)) {
     host += ':';
     host += std::to_string(url.port);
   }
@@ -511,81 +332,32 @@ bool IsRedirectStatus(int status) {
   return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
 
-bool LooksLikeAbsoluteUrl(std::string_view text) {
-  constexpr std::size_t kNotFound = std::string_view::npos;
-  const std::size_t colon = text.find(':');
-  if (colon == kNotFound || colon == 0) {
-    return false;
+// Opens the byte stream for one request: plain TCP for http, verified TLS for https.
+std::unique_ptr<internal::Stream> OpenStream(const Url& url, const FetchOptions& options,
+                                             std::string* error) {
+  if (url.scheme == "https") {
+    return internal::OpenTlsStream(url, options, error);
   }
-  const std::size_t slash = text.find('/');
-  if (slash != kNotFound && slash < colon) {
-    return false;
-  }
-  const char first = text.front();
-  if (!((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z'))) {
-    return false;
-  }
-  for (std::size_t index = 0; index < colon; ++index) {
-    const char character = text[index];
-    const bool valid = (character >= 'a' && character <= 'z') ||
-                       (character >= 'A' && character <= 'Z') ||
-                       (character >= '0' && character <= '9') || character == '+' ||
-                       character == '-' || character == '.';
-    if (!valid) {
-      return false;
-    }
-  }
-  return true;
+  return internal::OpenTcpStream(url, options, error);
 }
 
-bool ResolveRedirect(const Url& base, const std::string& location, Url* next, std::string* error) {
-  if (LooksLikeAbsoluteUrl(location)) {
-    const std::optional<Url> parsed = ParseUrl(location, error);
-    if (!parsed) {
-      return false;
-    }
-    *next = *parsed;
-    return true;
-  }
-  if (location.size() >= 2 && location[0] == '/' && location[1] == '/') {
-    SetError(error, "unsupported protocol-relative redirect Location '" + location + "'");
-    return false;
-  }
-  if (location.empty() || location.front() != '/') {
-    SetError(error, "unsupported redirect Location '" + location +
-                        "': only absolute and root-relative URLs are supported");
-    return false;
-  }
-  std::string absolute = base.scheme + "://" + base.host;
-  if (base.port != 80) {
-    absolute += ':';
-    absolute += std::to_string(base.port);
-  }
-  absolute += location;
-  const std::optional<Url> parsed = ParseUrl(absolute, error);
-  if (!parsed) {
-    return false;
-  }
-  *next = *parsed;
-  return true;
-}
-
-bool FetchHttpOnce(const Url& url, const FetchOptions& options, Response* out, std::string* error) {
+// One request/response exchange. The HTTP/1.1 code above is shared by http and
+// https; only the byte stream differs.
+bool FetchOnce(const Url& url, const FetchOptions& options, Response* out, std::string* error) {
   if (url.host.empty()) {
-    SetError(error, "HTTP URL has no host");
+    SetError(error, (url.scheme == "https" ? "HTTPS" : "HTTP") + std::string(" URL has no host"));
     return false;
   }
-  int connected_fd = -1;
-  if (!ConnectTcp(url, options.connect_timeout_ms, &connected_fd, error)) {
+  const std::unique_ptr<internal::Stream> stream = OpenStream(url, options, error);
+  if (!stream) {
     return false;
   }
-  Socket socket(connected_fd);
-  if (!SendAll(socket.get(), BuildRequest(url), options.read_timeout_ms, error)) {
+  if (!stream->WriteAll(BuildRequest(url), options.read_timeout_ms, error)) {
     return false;
   }
   std::string raw;
-  if (!ReadUntilEof(socket.get(), options.read_timeout_ms, ResponseReadLimit(options), &raw,
-                    error)) {
+  if (!internal::ReadUntilEof(*stream, options.read_timeout_ms, ResponseReadLimit(options), &raw,
+                              error)) {
     return false;
   }
   return ParseResponse(raw, options.max_body_bytes, out, error);
@@ -668,7 +440,7 @@ bool Fetch(const Url& url, const FetchOptions& options, Response* out, std::stri
   if (url.scheme == "file") {
     return FetchFile(url, options, out, error);
   }
-  if (url.scheme != "http") {
+  if (url.scheme != "http" && url.scheme != "https") {
     SetError(error, "unsupported URL scheme '" + url.scheme + "'");
     return false;
   }
@@ -676,7 +448,7 @@ bool Fetch(const Url& url, const FetchOptions& options, Response* out, std::stri
   Url current = url;
   for (int redirects = 0;;) {
     Response response;
-    if (!FetchHttpOnce(current, options, &response, error)) {
+    if (!FetchOnce(current, options, &response, error)) {
       return false;
     }
     response.final_url = current;
@@ -687,15 +459,15 @@ bool Fetch(const Url& url, const FetchOptions& options, Response* out, std::stri
           SetError(error, "too many redirects while fetching " + SerializeUrl(url));
           return false;
         }
-        Url next;
-        if (!ResolveRedirect(current, location, &next, error)) {
+        const std::optional<Url> next = ResolveUrl(current, location, error);
+        if (!next) {
           return false;
         }
-        if (next.scheme != "http") {
-          SetError(error, "redirect to unsupported URL scheme '" + next.scheme + "'");
+        if (next->scheme != "http" && next->scheme != "https") {
+          SetError(error, "redirect to unsupported URL scheme '" + next->scheme + "'");
           return false;
         }
-        current = std::move(next);
+        current = *next;
         ++redirects;
         continue;
       }

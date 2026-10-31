@@ -254,3 +254,23 @@ add_test(NAME shell.fonts_screenshot
           -DFIXTURE_DIR=${shell_font_site}
           -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fonts_screenshot.ppm
           -P "${CMAKE_CURRENT_SOURCE_DIR}/fonts_screenshot_check.cmake")
+
+# M9 end-to-end HTTPS: the committed https_site page is served from memory over an in-process
+# TLS loopback server (tests/support/tls_server.h) and rendered through toy::shell::Browser,
+# including its PNG over the same transport. The test proves the TLS transport works end to end
+# through the shell; trust comes only from the committed test CA via SSL_CERT_FILE in the CTest
+# ENVIRONMENT (never in code), so no public network, display or installed certificate is needed.
+find_package(OpenSSL REQUIRED)
+
+set(shell_https_site "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/https_site")
+set(shell_tls_fixtures "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/tls")
+
+add_executable(shell_https_test https_test.cpp)
+target_link_libraries(shell_https_test PRIVATE
+  toy_shell toy_test_support OpenSSL::SSL OpenSSL::Crypto)
+toybrowser_set_warnings(shell_https_test)
+
+add_test(NAME shell.https
+  COMMAND shell_https_test "${shell_https_site}" "${shell_tls_fixtures}")
+set_tests_properties(shell.https PROPERTIES
+  ENVIRONMENT "SSL_CERT_FILE=${shell_tls_fixtures}/test_ca.pem")

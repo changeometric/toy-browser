@@ -4,9 +4,8 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M8 已完成（M8a 图片、M8b 真实字体）。M9（最基础 HTTPS）已计划并写入文档，但尚未
-开始；之后是 M10（HTTP 代理）；JavaScript 子集已暂缓。** 快照与接管指南见
-[handoff.md](handoff.md)。
+**当前状态：M0–M9 已完成（M9 = 最基础 HTTPS）。下一个计划里程碑是 M10（HTTP 代理）；JavaScript
+子集已暂缓。** 快照与接管指南见 [handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
 
@@ -97,7 +96,7 @@
 - `paint`：对节点 id 有解码图片的行内 replaced 盒，在其背景之后、子内容之前发出一条 `DrawImage`；
   空图片映射保持 M7 的列表。
 - `shell`：私有页面加载器（最终 URL、DOM、样式、盒树、replaced 尺寸与图片映射）把每个
-  `<img src>` 相对页面最终 URL 解析，用既有 `net::Fetch` 抓取（仅 http/file），用
+  `<img src>` 相对页面最终 URL 解析，用既有 `net::Fetch` 抓取（M8a 时仅 http/file；M9 起含 https），用
   `render::DecodePng` 解码；失败或缺失的图片被静默跳过（没有 broken-image UI、没有错误输出、
   没有图片缓存）。`shell::Browser` 持有页面及其图片并绘制它们，resize 时重新布局而不重新抓取；
   `--dump-boxes` 使用同一个加载器，因此保留的图片盒会出现在盒 dump 中。CLI 不变。
@@ -111,7 +110,7 @@
   每个 `<img>` 处各抓取一次），HTML `width`/`height` 属性被忽略（只用 CSS px），
   `display:block` 的 replaced 元素以及 replaced 元素的 margin/padding 不支持，replaced 盒顶部
   对齐（没有基线对齐，同 M5），缩放为无抗锯齿的最近邻，元素不可见时也会抓取图片（没有懒加载），
-  图片 URL 在 M8a 时只支持 `http`/`file`（M9 计划解除这一限制），并且 `--dump-dom`/`--dump-style`
+  图片 URL 在 M8a 时只支持 `http`/`file`（https 在 M9 加入），并且 `--dump-dom`/`--dump-style`
 不抓取图片。
 
 ## M8b — 真实字体 ✅（已完成）
@@ -142,36 +141,43 @@
   分段），fontconfig 总是返回最佳匹配，因此未知字体族会静默回退，只支持 face 0（忽略 TTC/face
   index），缺失码点渲染字体的 `.notdef` 字形，real-font 字号超过 4096 px 时等同 4096 px，且不
   支持整形 advance 之外的亚像素定位/kerning。位图回退仍只有 ASCII。
-## M9 — 最基础 HTTPS（已计划；OpenSSL 已批准，尚未开始）
+## M9 — 最基础 HTTPS ✅（已完成）
 
-- 目标：抓取绝对 `https://` URL，让 HTTPS 站点的页面与图片走现有 pipeline 渲染。MVP 定义刻意很小：
-  **能连上并发出请求**——不要过度构建。
-- MVP 范围：
-  - `net` URL 层：`https` scheme（默认端口 443），解析/序列化/base 解析；链接、导航、重定向与图片
-    加载自动复用。
-  - `net` TLS：现有阻塞 `Fetch()` 之后接 OpenSSL 客户端，通过一个很小的字节流抽象与纯 HTTP 共享
-    HTTP/1.1 请求/响应代码。SNI、主机名校验与证书校验（OpenSSL 默认信任库，即系统 CA；标准
-    `SSL_CERT_FILE`/`SSL_CERT_DIR` 覆盖仍可用于特殊情况）。证书始终校验，没有 insecure 模式。
-  - 超时：TCP 连接沿用 `connect_timeout_ms`；TLS 握手与 TLS 读沿用 `read_timeout_ms`。M9 不新增
-    `FetchOptions` 字段。
-  - `shell`：预计无需改动公开 API 或 CLI——`--dump-body`、`--dump-*`、`--screenshot`、窗口模式与
-    导航通过现有代码路径接受 `https://`。
-  - 测试（确定性、不依赖公网）：提交的自签测试 CA + `localhost` 叶证书/私钥（仅测试用，README 记录
-    重新生成方法）与进程内 TLS loopback 服务器；`net` 测试覆盖成功、不受信任证书、主机名不匹配、
-    超时与 http<->https 重定向；shell 测试通过 TLS 提供提交的 HTML+PNG 页面并断渲染像素。
-- 冻结的设计决策（kickoff 前冻结，记录在 [decisions.md](decisions.md)）：
-  - scheme 集合为 `file`、`http`、`https`；`https` 默认端口 443；`ResolveUrl`/`SerializeUrl` 遵循
-    与 http 相同的 RFC 3986 子集。
-  - 重定向用 `net::ResolveUrl` 解析（支持相对与协议相对 `Location`）；重定向目标必须是 http/https，
-    允许二者互切；拒绝 file 目标。
-  - 不做 ALPN/HTTP/2：保持 HTTP/1.1 + `Connection: close`；不做压缩、cookie、会话、HSTS、混合内容
-    拦截、客户端证书、TLS 会话复用或 HTTP 缓存。
-  - M9 中 `FetchOptions` 保持不变；失败是可读的 fetch 错误（CLI 退出码 1）。
-- 验收：所有 55 个既有测试加新的 URL/TLS/https 测试在 GCC 与 Clang 下、警告视为错误时通过；本地
-  HTTPS 页面（含图片）可 headless 渲染；证书、主机名与超时失败给出明确错误；`http://`/`file://`
-  的 dump 与截图逐字节不变；真实站点直连检查是手动的，取决于网络（受限网络需要 M10 代理）。
-- M9 之后的已知限制：没有 HTTP/2、压缩、cookie、代理（M10）、依赖 JS 的站点或 HSTS；真实站点渲染
-  仍受现有 HTML/CSS 子集限制。
+- 目标已达成：抓取绝对 `https://` URL，让 HTTPS 站点的页面与图片走现有 pipeline 渲染。MVP 标准仍是
+  “能连上并发出请求”。
+- `net` URL 层：`https` scheme，默认端口 443，与 http 相同的 RFC 3986 authority/端口/path 规则；
+  `ParseUrl`/`ResolveUrl`/`SerializeUrl` 接受并可往返序列化；scheme 相对引用继承 base scheme，
+  显式 http<->https 引用允许。
+- `net` 传输层：保持阻塞 `Fetch()` 不变，内部使用已批准的 OpenSSL（`find_package(OpenSSL REQUIRED)`，
+  PRIVATE 链接到 `toy_net`）；纯 HTTP 与 TLS 通过私有字节流抽象（`Stream`、`SocketStream`、
+  `TlsStream`）共享同一套 HTTP/1.1 请求/响应代码，因此 body 上限、header/chunked 解析与超时都在
+  一处。进程级 `SSL_CTX` 在第一次 https 抓取时惰性创建，来自 OpenSSL 默认校验路径；`SSL_VERIFY_PEER`
+  始终开启，DNS 主机发送 SNI（IPv4 字面量不发送），证书链与主机名校验覆盖 DNS 名与 IPv4 字面量，
+  没有 insecure 模式。TCP 连接用 `connect_timeout_ms`；TLS 握手与所有 TLS I/O 用
+  `read_timeout_ms`；干净与非干净的 EOF 都视为流结束（截断仍由 Content-Length/chunked 捕获）；TLS
+  路径在进程内忽略一次 `SIGPIPE`，坏掉的对端无法终止浏览器。
+- 重定向：`Location` 用 `net::ResolveUrl` 解析（绝对、相对、根相对、协议相对、scheme 相对）；
+  允许 http<->https 目标，拒绝 `file` 目标，`max_redirects` 不变。
+- `shell`：无需改动 API 或 CLI——页面抓取、链接导航（https 链接现在可导航）、重定向与图片加载都复用
+  现有 `net` 调用；页面加载器、`--dump-*` 模式、`--screenshot`、窗口模式与导航自动接受 `https://`。
+- 测试：提交仅测试用的 TLS fixture（`tests/fixtures/tls/`：CA、`localhost` 叶证书、无关的不受信任
+  叶证书；README 记录重新生成方法）与 header-only 的进程内 TLS loopback 服务器
+  （`tests/support/tls_server.h`）。`net.tls` 覆盖成功 GET、不受信任证书、主机名不匹配、握手超时、
+  https->https / http->https / https->http 重定向与 body 上限；`net.http` 增加相对与协议相对重定向
+  覆盖，并删除过时的“https 重定向是错误”用例；`net.url`/`net.url_resolution` 覆盖 https 解析、序列化
+  与解析；`shell.https` 通过 TLS 提供提交的 HTML+PNG 页面（`tests/fixtures/https_site/`），断言
+  URL/标题/内容高度、文本与图片像素、请求顺序以及不受信任证书失败路径。M7 导航 fixture 的
+  “Unsupported page” 链接现在故意使用 `ftp://`，任何测试都无法访问公网。
+- 已达成验收：55 个 M9 之前的测试加新的 URL/TLS/https 测试在 GCC 与 Clang 下、警告视为错误时通过
+  （共 57 个测试）；本地 HTTPS 页面（含图片）可 headless 渲染；证书、主机名与超时失败给出明确错误；
+  所有 M9 之前的 `http`/`file` dump 与截图与 M8b 基线逐字节相同，GCC/Clang 的 PPM 也逐字节相同；
+  手工公网站点检查（原始 body、DOM dump、截图）可用。真实站点检查是手动的、依赖网络；受限网络仍需
+  M10 代理。
+- M9 已知限制：只有 HTTP/1.1（无 ALPN/HTTP/2）、无压缩（不发送 `Accept-Encoding`）、无
+  cookie/会话、HSTS、混合内容拦截、客户端证书、TLS 会话复用或 HTTP 缓存；无代理（M10）；IPv6 字面量
+  https URL 仍不被 URL 解析器支持；信任策略就是 OpenSSL 默认信任库加标准环境变量覆盖（无 pinning，
+  也没有 insecure 模式）；TLS context 每个进程惰性创建一次；真实站点渲染仍受现有 HTML/CSS 子集限制；
+  公网细节从不提交，真实站点检查保持手工。
 
 ## M10 — HTTP 代理（M9 之后计划）
 

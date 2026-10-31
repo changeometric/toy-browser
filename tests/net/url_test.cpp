@@ -1,4 +1,4 @@
-// Tests for URL parsing and serialization (http and file schemes).
+// Tests for URL parsing and serialization (http, https and file schemes).
 
 #include "toy/net/url.h"
 
@@ -84,6 +84,22 @@ void TestHttpParsing() {
             "'+' is kept as a literal plus, not decoded to a space");
 }
 
+void TestHttpsParsing() {
+  ExpectUrl("https://Example.COM/a%20b?q=1#frag",
+            Url{"https", "example.com", 443, "/a b", "q=1", "frag"},
+            "https URL defaults to port 443 and keeps the other http rules");
+  ExpectUrl("https://example.com", Url{"https", "example.com", 443, "/", "", ""},
+            "https URL defaults to port 443 and path /");
+  ExpectUrl("HTTPS://EXAMPLE.COM:8443/Path", Url{"https", "example.com", 8443, "/Path", "", ""},
+            "the https scheme is lowercased and a non-default port is kept");
+  ExpectUrl("https://example.com:1/", Url{"https", "example.com", 1, "/", "", ""},
+            "the smallest valid https port is accepted");
+  ExpectUrl("https://example.com:65535/", Url{"https", "example.com", 65535, "/", "", ""},
+            "the largest valid https port is accepted");
+  ExpectUrl("https://127.0.0.1:4443/", Url{"https", "127.0.0.1", 4443, "/", "", ""},
+            "an IPv4 literal is a valid https host");
+}
+
 void TestFileParsing() {
   ExpectUrl("file:///tmp/a%20b.txt", Url{"file", "", 0, "/tmp/a b.txt", "", ""},
             "file URL with an empty host and an escaped path");
@@ -101,6 +117,17 @@ void TestSerialization() {
   if (ParseSucceeds("http://example.com", &url)) {
     ExpectSerialize(url, "http://example.com/", "default port is omitted on serialization");
   }
+  if (ParseSucceeds("https://example.com", &url)) {
+    ExpectSerialize(url, "https://example.com/",
+                    "the https default port 443 is omitted on serialization");
+  }
+  if (ParseSucceeds("https://Example.COM:443/a%20b?q=1#frag", &url)) {
+    ExpectSerialize(url, "https://example.com/a%20b?q=1#frag",
+                    "an explicit https default port is omitted on serialization");
+  }
+  if (ParseSucceeds("https://example.com:8443/", &url)) {
+    ExpectSerialize(url, "https://example.com:8443/", "a non-default https port is serialized");
+  }
   if (ParseSucceeds("file:///tmp/a%20b.txt", &url)) {
     ExpectSerialize(url, "file:///tmp/a%20b.txt", "file URL round-trips percent escapes");
   }
@@ -109,10 +136,9 @@ void TestSerialization() {
   }
 
   const char* const kRoundTripUrls[] = {
-      "http://example.com/",
-      "http://example.com:8080/a%20b?q=1#frag",
-      "file:///tmp/a%20b.txt",
-      "http://example.com/caf%C3%A9",
+      "http://example.com/",   "http://example.com:8080/a%20b?q=1#frag",
+      "file:///tmp/a%20b.txt", "http://example.com/caf%C3%A9",
+      "https://example.com/",  "https://example.com:8443/a%20b?q=1#frag",
   };
   for (const char* text : kRoundTripUrls) {
     Url first;
@@ -133,7 +159,6 @@ void TestSerialization() {
 void TestParseErrors() {
   ExpectParseError("page.html", "a relative URL is rejected");
   ExpectParseError("/absolute/path", "a root-relative URL is rejected");
-  ExpectParseError("https://example.com/", "the https scheme is rejected");
   ExpectParseError("ftp://example.com/", "the ftp scheme is rejected");
   ExpectParseError("http:/example.com", "a missing // after the scheme is rejected");
   ExpectParseError("http://", "an http URL without a host is rejected");
@@ -145,6 +170,13 @@ void TestParseErrors() {
   ExpectParseError("http://example.com:abc/", "a non-numeric http port is rejected");
   ExpectParseError("http://example.com/%zz", "an invalid percent escape is rejected");
   ExpectParseError("http://example.com/%2", "a truncated percent escape is rejected");
+  ExpectParseError("https://", "an https URL without a host is rejected");
+  ExpectParseError("https:///path", "an https URL with an empty authority is rejected");
+  ExpectParseError("https://:443/", "an https URL with an empty host is rejected");
+  ExpectParseError("https://example.com:/", "an https URL with an empty port is rejected");
+  ExpectParseError("https://example.com:0/", "https port 0 is rejected");
+  ExpectParseError("https://example.com:65536/", "an https port above 65535 is rejected");
+  ExpectParseError("https://example.com:abc/", "a non-numeric https port is rejected");
   ExpectParseError("file://remotehost/tmp/x", "a file URL with a remote host is rejected");
   ExpectParseError("file://", "a file URL without an absolute path is rejected");
   ExpectParseError("file:///tmp/x?q=1", "a file URL with a query is rejected");
@@ -159,20 +191,29 @@ void TestParseErrorMessages() {
   Check(error.find("ResolveUrl") != std::string::npos,
         "the relative URL error points at ResolveUrl");
   error.clear();
-  toy::net::ParseUrl("https://example.com/", &error);
+  toy::net::ParseUrl("ftp://example.com/", &error);
   Check(error.find("unsupported URL scheme") != std::string::npos,
         "the unsupported scheme error names the problem");
-  Check(error.find("https") != std::string::npos, "the unsupported scheme error names the scheme");
+  Check(error.find("ftp") != std::string::npos, "the unsupported scheme error names the scheme");
   error.clear();
   toy::net::ParseUrl("http:/example.com", &error);
   Check(error.find("expected 'http://'") != std::string::npos,
         "the unsupported form error shows the expected http form");
+  error.clear();
+  toy::net::ParseUrl("https:/example.com", &error);
+  Check(error.find("expected 'https://'") != std::string::npos,
+        "the unsupported form error shows the expected https form");
+  error.clear();
+  toy::net::ParseUrl("https://", &error);
+  Check(error.find("HTTPS URL requires a host") != std::string::npos,
+        "the https missing-host error names the scheme");
 }
 
 }  // namespace
 
 int main() {
   TestHttpParsing();
+  TestHttpsParsing();
   TestFileParsing();
   TestSerialization();
   TestParseErrors();

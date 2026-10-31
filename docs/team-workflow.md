@@ -362,3 +362,31 @@ the round when possible. Clean up stale build directories and stray files.
 - M8b: the shell owner derived the real-font dump geometry independently with a scratch layout
   harness before the render implementation landed (as in M5/M6), so integration only had to confirm
   it; contract numbers in the task description again paid off.
+- M9: the Lead built the cross-task test infrastructure before kickoff (committed test-only
+  certificates plus a header-only in-process TLS loopback server), validated it with `openssl
+  s_client` and a throwaway `.tmp` smoke program, and handed the frozen API to both implementers;
+  this removed the "who writes the shared test server" negotiation and let the net and shell tasks
+  run in parallel.
+- M9: a frozen M7 assumption became a real failure once https worked: the nav fixture linked to
+  `https://example.com/` and the test expected an unsupported-scheme error, so the full suite would
+  have touched the public network and failed. The Lead repurposed the fixture link to `ftp://` and
+  extended the shell owner's scope, keeping the failure-case coverage deterministic. Re-audit old
+  "unsupported" tests whenever a scheme becomes supported.
+- M9: TLS test determinism came from committed certificates plus the standard env override: the CTest
+  `ENVIRONMENT` property sets `SSL_CERT_FILE=<test CA>`, which exercises the real verification path
+  (the same binary without the env fails), instead of adding an in-code "trust this CA" hook. That
+  keeps test-only trust out of production code and proves verification is always on.
+- M9: the net owner handled the OpenSSL pitfalls explicitly: one lazily created process-wide
+  `SSL_CTX` (trust env read once), non-blocking handshake/read poll loops on
+  `WANT_READ`/`WANT_WRITE`, retrying `SSL_read`/`SSL_write` with the same arguments, treating clean
+  `close_notify` and unclean EOF as end of stream, `SSL_OP_IGNORE_UNEXPECTED_EOF` with a reason-code
+  fallback, and a once-per-process `SIGPIPE` ignore because OpenSSL's write path does not use
+  `MSG_NOSIGNAL`. These belong in the contract, not only in the completion report.
+- M9: the byte-compatibility gate became mechanical with a `.tmp` script that compares stdout,
+  stderr, exit status and PPM bytes across 12 http/file cases between a `git worktree` of the
+  previous commit and the new build, and between GCC and Clang; everything was identical, which let
+  the round prove the net refactor changed nothing for existing pages.
+- M9: manual public-site checks against a documentation site and the public `badssl` domains
+  validated the security behavior end to end (expired/self-signed/wrong-host pages fail with
+  readable errors and exit 1; normal pages fetch, dump and screenshot). Such checks stay manual and
+  their network details never enter the repository.

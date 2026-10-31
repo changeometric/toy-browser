@@ -16,9 +16,11 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
+#include "support/tls_server.h"
 #include "toy/net/url.h"
 
 namespace {
@@ -158,6 +160,10 @@ class LoopbackServer {
   std::condition_variable wake_;
   bool stop_ = false;
 };
+
+std::string TlsFixture(const char* name) {
+  return std::string(TOYBROWSER_TLS_FIXTURES) + "/" + name;
+}
 
 bool MakeHttpUrl(std::uint16_t port, const std::string& path, toy::net::Url* url) {
   const std::string text = "http://127.0.0.1:" + std::to_string(port) + path;
@@ -346,15 +352,38 @@ void TestRedirectLimit() {
   Check(error.find("redirect") != std::string::npos, "the redirect loop error mentions redirects");
 }
 
-void TestRedirectToUnsupportedScheme() {
+void TestRedirectToHttps() {
+  toy_test::TlsServer tls_server;
+  std::string tls_error;
+  Check(tls_server.Start(
+            TlsFixture("localhost_cert.pem"), TlsFixture("localhost_key.pem"),
+            [](std::string_view target) {
+              toy_test::HttpResponse response;
+              if (target == "/final") {
+                response.status = 200;
+                response.body = "secure";
+              } else {
+                response.status = 404;
+                response.body = "missing";
+              }
+              return response;
+            },
+            &tls_error),
+        "the TLS server starts");
+  if (!tls_server.started()) {
+    std::fprintf(stderr, "http test: TLS server failed: %s\n", tls_error.c_str());
+    return;
+  }
+  const std::string https_url = tls_server.Url("/final");
+
   LoopbackServer server;
   Check(server.ok(), "the loopback server is listening");
   if (!server.ok()) {
     return;
   }
-  server.Start([](const std::string&) {
-    return std::string(
-        "HTTP/1.1 302 Found\r\nLocation: https://example.com/\r\nContent-Length: 0\r\n\r\n");
+  server.Start([https_url](const std::string&) {
+    return std::string("HTTP/1.1 302 Found\r\nLocation: ") + https_url +
+           "\r\nContent-Length: 0\r\n\r\n";
   });
 
   toy::net::Url url;
@@ -363,9 +392,94 @@ void TestRedirectToUnsupportedScheme() {
   }
   toy::net::Response response;
   std::string error;
+  Check(toy::net::Fetch(url, toy::net::FetchOptions{}, &response, &error),
+        "a redirect from http to https is followed");
+  Check(response.status == 200, "the https redirect target status is 200");
+  Check(response.body == "secure", "the https redirect target body is returned");
+  Check(response.final_url.scheme == "https", "final_url switches to the https scheme");
+  Check(response.final_url.port == tls_server.port(), "final_url keeps the TLS server port");
+}
+
+void TestRelativeRedirect() {
+  LoopbackServer server;
+  Check(server.ok(), "the loopback server is listening");
+  if (!server.ok()) {
+    return;
+  }
+  server.Start([](const std::string& request) -> std::string {
+    if (request.starts_with("GET /dir/start ")) {
+      return std::string("HTTP/1.1 302 Found\r\nLocation: target\r\nContent-Length: 0\r\n\r\n");
+    }
+    if (request.starts_with("GET /dir/target ")) {
+      return std::string("HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nrelative");
+    }
+    return std::string("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+  });
+
+  toy::net::Url url;
+  if (!MakeHttpUrl(server.port(), "/dir/start", &url)) {
+    return;
+  }
+  toy::net::Response response;
+  std::string error;
+  Check(toy::net::Fetch(url, toy::net::FetchOptions{}, &response, &error),
+        "a relative Location is followed");
+  Check(response.body == "relative", "the relative redirect target body is returned");
+  Check(response.final_url.path == "/dir/target",
+        "a relative Location resolves against the current request path");
+}
+
+void TestProtocolRelativeRedirect() {
+  LoopbackServer server;
+  Check(server.ok(), "the loopback server is listening");
+  if (!server.ok()) {
+    return;
+  }
+  const std::uint16_t port = server.port();
+  server.Start([port](const std::string& request) -> std::string {
+    if (request.starts_with("GET /start ")) {
+      return std::string("HTTP/1.1 302 Found\r\nLocation: //127.0.0.1:") + std::to_string(port) +
+             "/final\r\nContent-Length: 0\r\n\r\n";
+    }
+    if (request.starts_with("GET /final ")) {
+      return std::string("HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nprotocol");
+    }
+    return std::string("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+  });
+
+  toy::net::Url url;
+  if (!MakeHttpUrl(port, "/start", &url)) {
+    return;
+  }
+  toy::net::Response response;
+  std::string error;
+  Check(toy::net::Fetch(url, toy::net::FetchOptions{}, &response, &error),
+        "a protocol-relative Location is followed");
+  Check(response.body == "protocol", "the protocol-relative redirect target body is returned");
+  Check(response.final_url.host == "127.0.0.1",
+        "a protocol-relative Location inherits the base scheme");
+}
+
+void TestRedirectToFile() {
+  LoopbackServer server;
+  Check(server.ok(), "the loopback server is listening");
+  if (!server.ok()) {
+    return;
+  }
+  server.Start([](const std::string&) {
+    return std::string(
+        "HTTP/1.1 302 Found\r\nLocation: file:///tmp/redirected\r\nContent-Length: 0\r\n\r\n");
+  });
+
+  toy::net::Url url;
+  if (!MakeHttpUrl(server.port(), "/to-file", &url)) {
+    return;
+  }
+  toy::net::Response response;
+  std::string error;
   Check(!toy::net::Fetch(url, toy::net::FetchOptions{}, &response, &error),
-        "a redirect to https is an error (no TLS yet)");
-  Check(error.find("https") != std::string::npos, "the redirect error names the https scheme");
+        "a redirect to a file URL is rejected");
+  Check(error.find("file") != std::string::npos, "the redirect error names the file scheme");
 }
 
 void TestConnectionRefused() {
@@ -430,7 +544,10 @@ int main() {
   TestRootRelativeRedirect();
   TestNotFound();
   TestRedirectLimit();
-  TestRedirectToUnsupportedScheme();
+  TestRedirectToHttps();
+  TestRelativeRedirect();
+  TestProtocolRelativeRedirect();
+  TestRedirectToFile();
   TestConnectionRefused();
   TestReadTimeout();
   if (g_failures.load() != 0) {

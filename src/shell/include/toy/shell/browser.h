@@ -45,7 +45,7 @@ class Browser {
   // Out of line: the page data type is complete only inside the shell module.
   ~Browser();
 
-  // Loads the absolute http:// or file:// URL `url` as the current page and
+  // Loads the absolute http://, https:// or file:// URL `url` as the current page and
   // appends a history entry on success; the scroll offset resets to 0. On failure
   // returns false, sets *error (when not null) to a ready-to-print message and
   // leaves the current page, scroll offset and history unchanged.

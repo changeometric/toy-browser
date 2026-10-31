@@ -44,12 +44,13 @@
 - 每个主题一个文件：`tests/<module>/<topic>_test.cpp`；CTest 名称 `<module>.<topic>`。
 - 确定性：无网络、无显示器、不依赖时间、locale、家目录或已安装字体。
 - 解析器和布局优先使用 golden dump 比较。新测试使用 header-only 的 `tests/support/check.h`（CMake 接口目标 `toy_test_support`），不再复制本地 `Check`/`g_failures` 测试支架；旧文件在被改动时迁移。不引入测试框架依赖。
+- 依赖网络的功能只用进程内 loopback 服务器测试：`net` 测试中的纯 HTTP 服务器与 header-only 的 TLS 服务器 `tests/support/tls_server.h`（提交的仅测试用证书在 `tests/fixtures/tls/`，信任通过 CTest `ENVIRONMENT` 属性提供）。任何测试都不访问公网或使用已安装证书库。
 - 没有回归测试的 bug 修复不算完成，除非用户明确豁免。
 
 ## 构建
 
 ```sh
-# 快速构建浏览器本体：测试是 opt-in 的，因此不会编译 55 个测试可执行文件。
+# 快速构建浏览器本体：测试是 opt-in 的，因此不会编译 57 个测试可执行文件。
 cmake -S . -B build
 cmake --build build
 

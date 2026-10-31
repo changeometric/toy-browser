@@ -11,7 +11,7 @@
 | `base` | 小型共享工具（几何、日志、UTF-8），只在出现需要时才存在 | — | 首次需要时 |
 | `platform` | 窗口、输入事件、事件循环、呈现像素表面 | `base` | M1 |
 | `render` | 显示列表、软件光栅化器、内置位图字体（度量与字形）、PNG 图片解码（已批准的 libpng）、真实字体引擎（已批准的 freetype + harfbuzz） | `base` | M1 |
-| `net` | URL 解析、socket、HTTP/1.1 抓取、经由已批准 OpenSSL 的 TLS（计划 M9） | `base` | M2 |
+| `net` | URL 解析、socket、HTTP/1.1 抓取（纯 TCP 或经校验的 TLS，已批准 OpenSSL）、`file://` 读取 | `base` | M2 |
 | `dom` | HTML tokenizer（词法分析器）、树构建器、DOM arena（区域分配器） | `base` | M3 |
 | `css` | CSS tokenizer、规则/声明解析器、选择器 | `base` | M4 |
 | `style` | 层叠与计算样式、默认样式表 | `dom`、`css` | M4 |
@@ -40,9 +40,9 @@
 
 MVP 保持整条链路同步、单线程。每个阶段接收普通数据并返回普通数据，因此每个阶段都能在测试中通过 `--dump-*` 命令单独驱动。
 
-网络（M2）：`net` 拥有 URL、socket 和 HTTP。抓取是阻塞式 HTTP/1.1 GET——每个连接一个请求、连接与读取超时、`Content-Length` 或 chunked body、重定向、尚无 TLS、无 keep-alive——封装在 `Fetch()` 之后，因此以后可以改成非阻塞而不改调用方。`net` 是唯一允许触碰 socket 的模块；页面代码永远看不到 socket。代理支持（先支持 HTTP 代理）计划为 M10，放在 `FetchOptions` 后面并保持在 `net` 内部；它不需要新依赖。
+网络（M2，TLS 在 M9）：`net` 拥有 URL、socket 和 HTTP。抓取是阻塞式 HTTP/1.1 GET——每个连接一个请求、连接与读取超时、`Content-Length` 或 chunked body、重定向（M9 起用 `net::ResolveUrl` 解析，因此相对与协议相对 `Location` 可用）与 `Connection: close`——封装在 `Fetch()` 之后，因此以后可以改成非阻塞而不改调用方。`net` 是唯一允许触碰 socket 的模块；页面代码永远看不到 socket。代理支持（先支持 HTTP 代理）计划为 M10，放在 `FetchOptions` 后面并保持在 `net` 内部；它不需要新依赖。
 
-TLS / HTTPS（M9，已计划；尚无代码）：`net` 将接受 `https` scheme（默认端口 443），并让同一套 HTTP/1.1 请求/响应代码运行在一个很小的字节流抽象之上，使纯 socket 与 TLS 共享同一份 HTTP 实现。TLS 使用已批准的 OpenSSL 库并位于 `Fetch()` 之后：`SSL_CTX` 从 OpenSSL 默认信任库初始化一次，每连接设置 SNI 与主机名校验，证书校验始终开启，握手/读取循环使用现有非阻塞 socket + `poll` 超时（TCP 连接用 `connect_timeout_ms`，TLS 握手与读取用 `read_timeout_ms`）。重定向将用 `net::ResolveUrl` 解析，并允许在 http 与 https 之间切换。M9 不计划 ALPN/HTTP/2、压缩、cookie、HSTS、客户端证书或 insecure 模式；由于 shell 已经全部经过 `ParseUrl`/`ResolveUrl`/`Fetch`，预计无需改动 shell 的 API 或 CLI。
+TLS / HTTPS（M9）：`net` 接受 `https` URL（默认端口 443），通过已批准的 OpenSSL 库在保持不变的阻塞 `Fetch()` 之后抓取。纯 TCP 与 TLS 共享同一份 HTTP/1.1 实现：`src/net/http.cpp` 在一个私有的 `internal::Stream` 接口（“写入全部字节” + “读若干字节直到 EOF”）之上构建请求、解析响应，接口由纯 `SocketStream` 与 `TlsStream` 实现；传输层按 URL scheme 在一处选择（`src/net/stream_internal.h`、`socket_internal.h`、`tls_internal.h` 均为私有，公开头文件中没有 OpenSSL 类型）。进程级 `SSL_CTX` 在第一次 https 抓取时从 OpenSSL 默认校验路径惰性创建（标准 `SSL_CERT_FILE`/`SSL_CERT_DIR` 覆盖在该时刻生效），`SSL_VERIFY_PEER` 始终开启，DNS 主机每连接发送 SNI，证书链 + 主机名校验（DNS 名用 `SSL_set1_host`，IPv4 字面量用 IP SAN 校验）。没有 insecure 模式。TCP 连接用 `connect_timeout_ms`；TLS 握手与所有 TLS I/O 用 `read_timeout_ms`，运行在现有非阻塞 socket + `poll` 循环上；超时、证书与主机名失败都是普通可读的 `Fetch` 错误。干净的 `close_notify` 与非干净 EOF 都结束流（截断仍由 Content-Length/chunked 捕获），TLS 路径忽略一次 `SIGPIPE`，坏掉的对端无法杀死浏览器。未实现 ALPN/HTTP/2、压缩、cookie、HSTS、客户端证书、TLS 会话复用或缓存；由于 shell 已经全部经过 `ParseUrl`/`ResolveUrl`/`Fetch`，无需改动其 API 或 CLI。
 
 HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM。解析是容错的，且总是产生一个带 `head` 和 `body` 子节点的 `html` 元素；tokenizer 覆盖支持的子集（元素与属性、注释、doctype、raw-text 与 RCDATA 元素、少量实体），遇到畸形输入也永不失败。`DumpDocument()` 是确定性的文本形式，供 `--dump-dom` 与解析器测试使用。节点用整数 id 寻址（没有持有指针、没有环）；DOM 完全不了解 CSS、布局或脚本。
 
@@ -56,7 +56,7 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 `src/render/image.cpp` 中，像素转换成直通 alpha 的 ARGB `render::Image`，尺寸与像素数在分配前校验，
 公开头文件里不出现任何 libpng 类型。`shell` 通过私有加载器（`src/shell/page.h`）拥有页面级策略：
 在抓取、解析与样式之后、布局之前，把每个 `<img src>` 相对页面最终 URL 解析，用与页面相同的
-`net::Fetch` 抓取（仅 http/file），解码，并维护按 img DOM 节点 id 索引的 `paint::ImageMap` 与
+`net::Fetch` 抓取（http/https/file），解码，并维护按 img DOM 节点 id 索引的 `paint::ImageMap` 与
 `layout::ReplacedSizes` 映射。缺失或失败的图片被静默跳过，元素按空行内布局（MVP 限制）。
 `paint` 把有解码图片的行内 replaced 盒变成 `DrawImage` 命令；显示列表持有
 `shared_ptr<const Image>`，因此列表可以比构建它的页面数据活得更久。`render` 用冻结的最近邻整数
@@ -156,7 +156,7 @@ freetype/harfbuzz 类型，加载失败是普通错误，字体自己持有 face
 - 解析器/布局的 golden 文件是逐行比较的文本 dump。截图是确定性的（整数像素、无抗锯齿），因此绘制测试精确比较像素，跨编译器运行产出逐字节相同的 PPM；不需要图像容差。
 - 测试是确定性的，从不需要网络、显示器、已安装字体或特定 locale。
 - M8b real-font 测试使用提交的自造 `tests/fixtures/fonts/toy_test.ttf`（从不使用已安装字体）：`render.font_ttf` 覆盖加载/度量/整形/钳制，扩展后的 `render.paint` 覆盖 AA 覆盖率/裁剪/基线/no-op，`shell.fonts` 覆盖端到端 real-font 页面，CLI 检查覆盖 `--font`、`--font-family`（配合测试局部 `FONTCONFIG_FILE`）、错误退出码与截图输出。
-- M9（计划）TLS 测试将使用提交的自签测试 CA 加 `localhost` 叶证书/私钥与进程内 TLS loopback 服务器；`net.tls` 将覆盖握手成功、不受信任证书、主机名不匹配、超时与 http<->https 重定向，shell 测试将通过 TLS 提供提交的 HTML+PNG 页面以证明渲染 pipeline。没有测试会访问公网或公共 CA。
+- M9 TLS 测试使用 `tests/fixtures/tls/` 中提交的仅测试用证书（CA、`localhost` 叶证书与无关的不受信任叶证书；README 记录重新生成方法）与 header-only 的进程内 TLS loopback 服务器 `tests/support/tls_server.h`。信任只通过 CTest `ENVIRONMENT` 属性（`SSL_CERT_FILE=<测试 CA>`）提供，因此走的是正常校验路径。`net.tls` 覆盖成功 GET、不受信任证书、主机名不匹配、握手超时、http<->https 重定向与 body 上限；`shell.https` 通过 `shell::Browser` 用 TLS 提供提交的 HTML+PNG 页面（`tests/fixtures/https_site/`）并断言渲染像素，以及不受信任证书失败路径。没有测试使用公网或公共 CA，M7 导航 fixture 的不支持 scheme 用例改为离线 `ftp://` 链接。
 - M8a 图片测试使用像素内容有文档的手工生成 PNG fixtures（`tests/fixtures/images/`）与提交的图片演示站点（`tests/fixtures/img_site/`）：解码器被直接测试，布局用假 replaced 尺寸测试，shell 端到端通过 `shell::Browser` 以及 CLI 的 `--dump-boxes`/`--screenshot` 检查。
 
 ## 参考资料
@@ -171,7 +171,7 @@ freetype/harfbuzz 类型，加载失败是普通错误，字体自己持有 face
 - CSS Cascading and Inheritance Level 4：<https://www.w3.org/TR/css-cascade-4/>
 - CSS Values and Units Level 3：<https://www.w3.org/TR/css-values-3/>
 - HTTP Semantics（RFC 9110）与 HTTP/1.1（RFC 9112）；TLS 1.2/1.3（RFC 5246/RFC 8446）
-- OpenSSL 文档（M9 已批准依赖，尚未链接）：<https://docs.openssl.org/>
+- OpenSSL 文档（M9 已批准依赖，自 M9 起链接）：<https://docs.openssl.org/>
 - PNG（第三版）：<https://www.w3.org/TR/png-3/> 与 libpng 手册（M8a 已批准依赖）：<https://www.libpng.org/pub/png/libpng.html>
 - FreeType、HarfBuzz 与 fontconfig 文档（M8b 已链接依赖）：<https://freetype.org/>、<https://harfbuzz.github.io/>、<https://fontconfig.pages.freedesktop.org/fontconfig/>
 - Web Platform Tests：<https://github.com/web-platform-tests/wpt>

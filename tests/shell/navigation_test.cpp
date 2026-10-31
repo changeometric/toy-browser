@@ -25,15 +25,15 @@ constexpr int kViewportHeight = 200;
 //   <p> block x=8 y=152 ... <a> inline ... text "About" x=8 y=152 width=40 height=16
 //   <p> block x=8 y=200 ... <a> inline ... text "Docs" x=8 y=200 width=32 height=16
 //   <p> block x=8 y=248 ... <a> inline ... text "Missing" x=8 y=248 width=56 height=16
-//   <p> block x=8 y=296 ... <a> inline ... text "Secure" x=8 y=296 width=48 height=16
+//   <p> block x=8 y=296 ... <a> inline ... text "Unsupported" x=8 y=296 width=88 height=16
 constexpr int kAboutLinkX = 10;
 constexpr int kAboutLinkY = 158;
 constexpr int kDocsLinkX = 10;
 constexpr int kDocsLinkY = 206;
 constexpr int kMissingLinkX = 10;
 constexpr int kMissingLinkY = 254;
-constexpr int kSecureLinkX = 10;
-constexpr int kSecureLinkY = 302;
+constexpr int kUnsupportedSchemeLinkX = 10;
+constexpr int kUnsupportedSchemeLinkY = 302;
 // A word in the first paragraph, not inside a link.
 constexpr int kBodyTextX = 10;
 constexpr int kBodyTextY = 94;
@@ -209,12 +209,20 @@ int main(int argc, char** argv) {
         browser.CanGoBack() == could_go_back && browser.CanGoForward() == could_go_forward,
         "a failed click keeps the history");
 
-    // An https link resolves to an unsupported scheme: error, page unchanged.
-    toy_test::Check(!browser.Click(kSecureLinkX, kSecureLinkY, &error),
-                    "clicking the https link fails");
-    toy_test::Check(!error.empty(), "the https link reports an error");
+    // A link with an unsupported scheme ("ftp") is rejected before any fetch:
+    // an error naming the scheme, and the page, title and history stay unchanged.
+    // (https links navigate since M9; the https end-to-end path is covered by
+    // shell.https against an in-process TLS server, never the public network.)
+    toy_test::Check(!browser.Click(kUnsupportedSchemeLinkX, kUnsupportedSchemeLinkY, &error),
+                    "clicking the unsupported-scheme link fails");
+    toy_test::Check(!error.empty(), "the unsupported-scheme link reports an error");
+    toy_test::Check(error.find("ftp") != std::string::npos,
+                    "the unsupported-scheme link error names the scheme");
     toy_test::Check(PathIs(browser.current_url(), "index.html") && browser.title() == title_before,
-                    "the failed https click keeps the current page");
+                    "the failed unsupported-scheme click keeps the current page");
+    toy_test::Check(
+        browser.CanGoBack() == could_go_back && browser.CanGoForward() == could_go_forward,
+        "the failed unsupported-scheme click keeps the history");
 
     // An unresolvable URL keeps the page too.
     toy_test::Check(!browser.Open("not a url", &error), "Open() rejects an invalid URL");

@@ -43,7 +43,7 @@ void LoadOneImage(const dom::Document& document, const net::Url& page_url, dom::
   }
   std::string error;
   // ResolveUrl also rejects references with an unsupported scheme (anything but
-  // http/file), so no unsupported fetch is ever attempted.
+  // http/https/file), so no unsupported fetch is ever attempted.
   const std::optional<net::Url> resolved = net::ResolveUrl(page_url, src->value, &error);
   if (!resolved) {
     return;

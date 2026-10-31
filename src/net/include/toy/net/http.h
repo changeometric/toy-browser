@@ -30,18 +30,22 @@ struct Response {
 struct FetchOptions {
   // Time allowed for the TCP connect.
   int connect_timeout_ms = 5000;
-  // Time allowed for each socket read (also used when sending the request).
+  // Time allowed for each socket read (also used when sending the request and for
+  // the TLS handshake).
   int read_timeout_ms = 10000;
   // Number of redirects to follow before failing.
   int max_redirects = 5;
-  // Upper bound on the decoded body size, for both HTTP and file bodies;
+  // Upper bound on the decoded body size, for HTTP, HTTPS and file bodies;
   // larger content is an error.
   std::size_t max_body_bytes = 16u * 1024 * 1024;
 };
 
-// Fetches an http or file URL and stores the result in `out`.
-// - http: blocking HTTP/1.1 GET over TCP, one request per connection, following
-//   301/302/303/307/308 redirects (absolute or root-relative Location only).
+// Fetches an http, https or file URL and stores the result in `out`.
+// - http: blocking HTTP/1.1 GET over TCP; https: the same request/response code over
+//   a verified TLS connection (SNI and hostname checks, system trust store, no
+//   insecure mode). One request per connection, following 301/302/303/307/308
+//   redirects resolved with net::ResolveUrl (relative and protocol-relative
+//   Location supported; targets may switch between http and https).
 // - file: reads the file at the decoded absolute path; the response status is 200.
 //   Files larger than FetchOptions::max_body_bytes are rejected before reading.
 // Returns true on success and false on failure. On failure `error` (when not null)

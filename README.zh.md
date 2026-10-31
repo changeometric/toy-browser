@@ -2,15 +2,19 @@
 
 一个从零实现的玩具网页浏览器：C++20、CMake，不使用现成的浏览器组件。
 
-**状态：M8b —— 真实字体与 PNG 图片。** 窗口与 `--headless --screenshot` 渲染可选 URL 指定的
-页面，包括通过已批准的 libpng 依赖抓取并解码的 `<img src="...png">` 图片，以及在用
-`--font PATH` 或 `--font-family NAME`（已批准的 freetype/harfbuzz/fontconfig）选择真实字体时
-绘制的抗锯齿 TTF 文本；不传字体标志时仍使用内置位图字体，M8b 之前的输出逐字节不变。在窗口中
-链接可点击、滚轮与键盘可滚动、Alt+Left/Right 在历史中前进后退，窗口标题跟随 `<title>`。仓库中的
-演示站点：[`tests/fixtures/font_site/`](tests/fixtures/font_site/)（真实字体 + 图片）、
-[`tests/fixtures/img_site/`](tests/fixtures/img_site/)（图片）与
-[`tests/fixtures/nav_site/`](tests/fixtures/nav_site/)（导航）。`--dump-*` 模式仍是主要的 headless
-调试路径。详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
+**状态：M9 —— 最基础 HTTPS。** 浏览器可抓取 `http://`、`https://` 与 `file://` 页面；`https://`
+使用已批准的 OpenSSL，证书与主机名校验始终开启，没有 insecure 模式。窗口与
+`--headless --screenshot` 渲染可选 URL 指定的页面，包括通过已批准的 libpng 依赖抓取并解码的
+`<img src="...png">` 图片，以及在用 `--font PATH` 或 `--font-family NAME`（已批准的
+freetype/harfbuzz/fontconfig）选择真实字体时绘制的抗锯齿 TTF 文本；不传字体标志时仍使用内置位图
+字体，M8b 之前的输出逐字节不变。在窗口中链接可点击、滚轮与键盘可滚动、Alt+Left/Right 在历史中
+前进后退，窗口标题跟随 `<title>`。**下一计划里程碑：M10 —— HTTP 代理**（设计草案见
+[路线图](docs/zh/roadmap.md)）。仓库中的演示站点：
+[`tests/fixtures/font_site/`](tests/fixtures/font_site/)（真实字体 + 图片）、
+[`tests/fixtures/img_site/`](tests/fixtures/img_site/)（图片）、
+[`tests/fixtures/nav_site/`](tests/fixtures/nav_site/)（导航）与
+[`tests/fixtures/https_site/`](tests/fixtures/https_site/)（HTTPS pipeline）。`--dump-*` 模式仍是
+主要的 headless 调试路径。详见[路线图](docs/zh/roadmap.md)。英文原版：[README.md](README.md)。
 
 **新团队 / 新 agent？** 先读[接管指南](docs/zh/handoff.md)（当前状态与接手方式），再看
 [文档索引](docs/zh/README.md)。
@@ -36,6 +40,9 @@ ctest --test-dir build --output-on-failure
     "file://$PWD/tests/fixtures/nav_site/index.html"   # 任意已安装字体族
 ./build/toybrowser --size 320x600 "file://$PWD/tests/fixtures/img_site/index.html"   # 图片演示
 ./build/toybrowser "file://$PWD/tests/fixtures/nav_site/index.html"  # 提交的导航演示站点
+./build/toybrowser --dump-body https://example.com/   # 抓取 https URL（TLS，始终校验）
+./build/toybrowser --dump-dom  https://example.com/   # 抓取并解析真实 https 页面
+./build/toybrowser --size 1024x768 --screenshot out.ppm https://example.com/  # 绘制 https 页面
 ./build/toybrowser --dump-body file:///etc/hostname  # 抓取 URL，原始字节输出到 stdout
 ./build/toybrowser --dump-dom  file:///etc/hostname  # 抓取并输出解析后的 DOM 树
 ./build/toybrowser --dump-style file:///etc/hostname # 抓取、计算样式并输出样式树
@@ -43,8 +50,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 窗口后端链接 libX11，图片解码链接 libpng，真实字体渲染链接 freetype 与 harfbuzz，字体族查找链接
-fontconfig（全部已批准，见[依赖说明](docs/zh/dependencies.md)），因此即使只用 headless 模式，构建
-时仍然需要这些开发头文件。headless 运行不需要显示器，
+fontconfig，`https://` 链接 OpenSSL（全部已批准，见[依赖说明](docs/zh/dependencies.md)），因此即使
+只用 headless 模式，构建时仍然需要这些开发头文件。headless 运行不需要显示器，
 是测试和调试的主要模式：所有渲染结果都能不开窗口检查。
 
 CMake 3.20 或更新版本与任何 C++20 编译器都能构建；仓库不依赖某台机器的路径、工具链版本或
@@ -70,8 +77,8 @@ CMake 3.20 或更新版本与任何 C++20 编译器都能构建；仓库不依�
 
 ## 依赖
 
-目前链接了五个第三方包（libX11、libpng + zlib、freetype、harfbuzz、fontconfig）；浏览器引擎
-本身没有任何现成组件（没有 HTML 解析器、CSS 引擎、JS 引擎、布局或渲染引擎）。
+目前链接了六个第三方包（libX11、libpng + zlib、freetype、harfbuzz、fontconfig、OpenSSL）；
+浏览器引擎本身没有任何现成组件（没有 HTML 解析器、CSS 引擎、JS 引擎、布局或渲染引擎）。
 
 | 组件 | 用途 | 许可证 | 状态 |
 | --- | --- | --- | --- |
@@ -81,6 +88,7 @@ CMake 3.20 或更新版本与任何 C++20 编译器都能构建；仓库不依�
 | freetype | 字体度量与字形光栅化 | FreeType 许可证 | 自 M8b 起链接 |
 | harfbuzz | OpenType 文本整形 | MIT | 自 M8b 起链接 |
 | fontconfig | 已安装字体的发现与匹配 | MIT 风格 | 自 M8b 起链接 |
+| OpenSSL | `https://` 的 TLS | Apache-2.0 | 自 M9 起链接 |
 
 依赖策略、审批记录与自写替代方案见 [dependencies.md](docs/zh/dependencies.md)。
 

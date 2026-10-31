@@ -1,4 +1,4 @@
-// URL parsing and serialization for the supported http and file schemes.
+// URL parsing and serialization for the supported http, https and file schemes.
 
 #include "toy/net/url.h"
 
@@ -44,6 +44,23 @@ std::string ToLowerAscii(std::string_view text) {
     character = ToLowerAscii(character);
   }
   return result;
+}
+
+// The schemes that follow the RFC 3986 authority/port/path rules shared by
+// http and https; file URLs have their own rules.
+bool IsHttpScheme(std::string_view scheme) { return scheme == "http" || scheme == "https"; }
+
+std::uint16_t DefaultPort(std::string_view scheme) { return scheme == "https" ? 443 : 80; }
+
+// "HTTP"/"HTTPS" for the scheme-specific error messages below.
+std::string SchemeLabel(std::string_view scheme) {
+  std::string label(scheme);
+  for (char& character : label) {
+    if (character >= 'a' && character <= 'z') {
+      character = static_cast<char>(character - 'a' + 'A');
+    }
+  }
+  return label;
 }
 
 bool EqualsIgnoreCase(std::string_view left, std::string_view right) {
@@ -169,7 +186,7 @@ struct ReferenceParts {
   std::string_view query;
   bool has_fragment = false;
   std::string_view fragment;
-  // A scheme was written without the "//" our http/file subset requires.
+  // A scheme was written without the "//" our http/https/file subset requires.
   bool unsupported_form = false;
 };
 
@@ -293,14 +310,14 @@ std::string MergePaths(std::string_view base_path, std::string_view reference_pa
   return std::string(base_path.substr(0, slash + 1)) + std::string(reference_path);
 }
 
-// The authority of `base` as it appears in URL text ("host[:port]" for http,
-// empty for file URLs, which carry no authority).
+// The authority of `base` as it appears in URL text ("host[:port]" for http and
+// https, empty for file URLs, which carry no authority).
 std::string BaseAuthority(const Url& base) {
-  if (base.scheme != "http") {
+  if (!IsHttpScheme(base.scheme)) {
     return std::string();
   }
   std::string authority = base.host;
-  if (base.port != 80) {
+  if (base.port != DefaultPort(base.scheme)) {
     authority += ':';
     authority += std::to_string(base.port);
   }
@@ -355,7 +372,7 @@ std::optional<Url> ParseUrl(std::string_view text, std::string* error) {
 
   Url url;
   url.scheme = ToLowerAscii(scheme_text);
-  if (url.scheme != "http" && url.scheme != "file") {
+  if (!IsHttpScheme(url.scheme) && url.scheme != "file") {
     SetError(error, "unsupported URL scheme '" + url.scheme + "'");
     return std::nullopt;
   }
@@ -376,31 +393,32 @@ std::optional<Url> ParseUrl(std::string_view text, std::string* error) {
   std::string_view encoded_fragment;
   SplitTarget(target, &encoded_path, &encoded_query, &encoded_fragment);
 
-  if (url.scheme == "http") {
+  if (IsHttpScheme(url.scheme)) {
+    const std::string scheme_label = SchemeLabel(url.scheme);
     if (authority.empty()) {
-      SetError(error, "HTTP URL requires a host");
+      SetError(error, scheme_label + " URL requires a host");
       return std::nullopt;
     }
     const std::size_t port_separator = authority.find(':');
     const std::string_view host =
         port_separator == kNotFound ? authority : authority.substr(0, port_separator);
     if (host.empty()) {
-      SetError(error, "HTTP URL requires a host");
+      SetError(error, scheme_label + " URL requires a host");
       return std::nullopt;
     }
     url.host = ToLowerAscii(host);
     if (port_separator == kNotFound) {
-      url.port = 80;
+      url.port = DefaultPort(url.scheme);
     } else {
       const std::string_view port_text = authority.substr(port_separator + 1);
       if (port_text.empty()) {
-        SetError(error, "HTTP URL has an empty port");
+        SetError(error, scheme_label + " URL has an empty port");
         return std::nullopt;
       }
       std::uint32_t port = 0;
       for (const char character : port_text) {
         if (!IsAsciiDigit(character)) {
-          SetError(error, "invalid HTTP port '" + std::string(port_text) + "'");
+          SetError(error, "invalid " + scheme_label + " port '" + std::string(port_text) + "'");
           return std::nullopt;
         }
         port = port * 10 + static_cast<std::uint32_t>(character - '0');
@@ -409,7 +427,7 @@ std::optional<Url> ParseUrl(std::string_view text, std::string* error) {
         }
       }
       if (port == 0 || port > 65535) {
-        SetError(error, "HTTP port out of range '" + std::string(port_text) + "'");
+        SetError(error, scheme_label + " port out of range '" + std::string(port_text) + "'");
         return std::nullopt;
       }
       url.port = static_cast<std::uint16_t>(port);
@@ -447,7 +465,7 @@ std::optional<Url> ResolveUrl(const Url& base, std::string_view reference, std::
       parts.has_scheme ? ToLowerAscii(parts.scheme) : std::string();
   const std::string base_scheme = ToLowerAscii(base.scheme);
   const std::string& scheme = parts.has_scheme ? reference_scheme : base_scheme;
-  if (scheme != "http" && scheme != "file") {
+  if (!IsHttpScheme(scheme) && scheme != "file") {
     SetError(error, "unsupported URL scheme '" + scheme + "' in reference");
     return std::nullopt;
   }
@@ -498,12 +516,12 @@ std::optional<Url> ResolveUrl(const Url& base, std::string_view reference, std::
 
   // Rebuild URL text and let ParseUrl do the final validation and decoding. File
   // URLs cannot carry a query or a fragment in this MVP, so those components are
-  // deliberately left out of the text; http keeps both.
+  // deliberately left out of the text; http and https keep both.
   std::string text = scheme;
   text += "://";
   text += authority;
   text += path;
-  if (scheme == "http") {
+  if (scheme != "file") {
     if (!query.empty()) {
       text += '?';
       text += query;
@@ -522,7 +540,7 @@ std::string SerializeUrl(const Url& url) {
   text += "://";
   if (url.scheme != "file") {
     text += url.host;
-    if (url.port != 80) {
+    if (url.port != DefaultPort(url.scheme)) {
       text += ':';
       text += std::to_string(url.port);
     }

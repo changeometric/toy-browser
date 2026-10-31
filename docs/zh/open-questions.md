@@ -4,8 +4,9 @@
 
 仍需用户决定的事项。目前所有已批准内容记录在 [dependencies.md](dependencies.md) 和 [roadmap.md](roadmap.md)。
 
-HTTPS/TLS 问题已于 2026-10-31 解决：用户批准 OpenSSL 用于计划中的 M9 HTTPS 里程碑（见
-[dependencies.md](dependencies.md) 与 [roadmap.md](roadmap.md)）；HTTP 代理计划为 M10，不需要新依赖。
+HTTPS/TLS 问题已于 2026-10-31 解决：用户批准 OpenSSL，M9（最基础 HTTPS）已随之交付（见
+[dependencies.md](dependencies.md) 与 [roadmap.md](roadmap.md)）。下一里程碑是 M10（HTTP 代理），
+不需要新依赖。
 
 ## 1. 外部测试语料 —— 可选，目前不需要
 

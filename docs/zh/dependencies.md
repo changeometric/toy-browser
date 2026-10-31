@@ -6,7 +6,7 @@
 
 ## 当前清单
 
-**目前链接了五个第三方包：**
+**目前链接了六个第三方包：**
 
 - **libX11（MIT/X11）**，用于 X11 窗口后端（M1）。
 - **libpng + zlib（libpng 许可证 / zlib 许可证）**，由 `render` 用于解码 PNG 图片（M8a）。
@@ -17,8 +17,9 @@
   `find_package(harfbuzz CONFIG REQUIRED)` 发现。
 - **fontconfig（MIT 风格）**，由 `shell` 在 `--font-family` 渲染时用于已安装字体的发现与匹配
   （M8b）。通过 `find_package(Fontconfig REQUIRED)` 发现。
-
-**还有一个已批准但尚未链接的库：OpenSSL**，用于计划中 M9 里程碑的 TLS/`https://`。
+- **OpenSSL（libssl + libcrypto，Apache-2.0）**，由 `net` 用于 TLS/`https://` 抓取（M9）。通过
+  `find_package(OpenSSL REQUIRED)` 发现并 PRIVATE 链接到 `toy_net`；证书校验始终开启并基于默认
+  信任库，没有 insecure 模式。
 
 其他一切都是 C++20 标准库和标准 POSIX 接口。没有使用 HTML 解析器、CSS 引擎、JS 引擎、布局引擎或
 浏览器引擎——那些都在本仓库中编写。
@@ -46,8 +47,9 @@
 用户于 2026-10-31 批准，用于计划中的 M9 HTTPS 里程碑：
 
 - **OpenSSL（libssl + libcrypto）**——`https://` 抓取所需的 TLS 1.2/1.3。许可证：Apache-2.0
-  （OpenSSL 3.x）。将通过 CMake 的 `find_package(OpenSSL REQUIRED)` 发现并 PRIVATE 链接到 `net`；
-  不做 vendoring。尚未链接。使用时保持证书校验开启、使用系统/默认信任库，且没有 insecure 模式。
+  （OpenSSL 3.x）。通过 CMake 的 `find_package(OpenSSL REQUIRED)` 发现并 PRIVATE 链接到
+  `toy_net`；不做 vendoring。使用时证书与主机名校验始终开启，使用 OpenSSL 默认/系统信任库（标准
+  `SSL_CERT_FILE`/`SSL_CERT_DIR` 覆盖仍有效），且没有 insecure 模式。
 
 其他什么都没链接。C++20 标准库和标准 OS/POSIX 接口仍是默认。所有已批准的候选库都使用与项目
 MIT 许可证兼容的宽松许可证。
@@ -73,11 +75,11 @@ JavaScript——而不包括底层编解码与字体机制。因此图片解码�
 | freetype | TTF 字形光栅化与度量 | 自写子集 TTF 加载器（cmap/glyf/hmtx，无 hinting） | 中等 | **已批准，自 M8b 起链接**（由 `render::Font` 使用） |
 | harfbuzz | OpenType 整形（连字、字形选择、定位） | 只做基础拉丁整形 | 高 | **已批准，自 M8b 起链接**（由 `render::Font` 使用） |
 | fontconfig | 已安装字体的发现与匹配 | 硬编码字体路径 / 不做发现 | 中等 | **已批准，自 M8b 起链接**（shell 的 `--font-family` 使用） |
-| OpenSSL | TLS，即 `https://` | 从零实现不现实 | 高 | **2026-10-31 已批准，尚未链接——计划 M9**（始终校验证书、使用系统信任库） |
+| OpenSSL | TLS，即 `https://` | 从零实现不现实 | 高 | **2026-10-31 已批准，自 M9 起链接**（始终校验证书与主机名、使用默认信任库） |
 | stb_truetype / stb_image | 单头文件即插即用实现 | 自写实现 | 低 | **未批准**——与本项目的精神冲突 |
 | icu | Unicode 数据与完整国际化 | 先做小型 ASCII/拉丁子集 | 高 | **不计划** |
 
-今天只链接了上面列出的五个包。任何其他行都需要先完成下面的流程。
+今天只链接了上面列出的六个包。任何其他行都需要先完成下面的流程。
 
 ## 审批流程
 

@@ -10,7 +10,7 @@ speculative — abstractions are added when a real slice needs them.
 | `base` | Small shared utilities (geometry, logging, UTF-8), only when a need appears | — | when first needed |
 | `platform` | Window, input events, event loop, presenting pixel surfaces | `base` | M1 |
 | `render` | Display list, software rasterizer, built-in bitmap font (metrics and glyphs), PNG image decoding (approved libpng), real-font engine (approved freetype + harfbuzz) | `base` | M1 |
-| `net` | URL parsing, sockets, HTTP/1.1 fetch, TLS via approved OpenSSL (planned M9) | `base` | M2 |
+| `net` | URL parsing, sockets, HTTP/1.1 fetch over plain TCP or verified TLS (approved OpenSSL), `file://` reader | `base` | M2 |
 | `dom` | HTML tokenizer, tree builder, DOM arena | `base` | M3 |
 | `css` | CSS tokenizer, rule/declaration parser, selectors | `base` | M4 |
 | `style` | Cascade and computed styles, default stylesheet | `dom`, `css` | M4 |
@@ -48,23 +48,32 @@ frozen interfaces.
 MVP keeps the whole chain synchronous and single-threaded. Every stage takes plain data and
 returns plain data, so each one can be exercised through a `--dump-*` command in tests.
 
-Networking (M2): `net` owns URLs, sockets and HTTP. Fetching is a blocking HTTP/1.1 GET — one
-request per connection, connect and read timeouts, `Content-Length` or chunked bodies, redirects,
-no TLS yet and no keep-alive — behind `Fetch()`, so it can become non-blocking later without
-changing callers. `net` is the only module allowed to touch sockets; page code never sees them.
-Proxy support (HTTP proxy first) is planned as M10 behind `FetchOptions` and stays inside `net`; it
-needs no new dependency.
+Networking (M2, TLS in M9): `net` owns URLs, sockets and HTTP. Fetching is a blocking HTTP/1.1 GET
+— one request per connection, connect and read timeouts, `Content-Length` or chunked bodies,
+redirects (resolved with `net::ResolveUrl` since M9, so relative and protocol-relative `Location`
+values work) and `Connection: close` — behind `Fetch()`, so it can become non-blocking later
+without changing callers. `net` is the only module allowed to touch sockets; page code never sees
+them. Proxy support (HTTP proxy first) is planned as M10 behind `FetchOptions` and stays inside
+`net`; it needs no new dependency.
 
-TLS / HTTPS (M9, planned; no code yet): `net` will accept the `https` scheme (default port 443) and
-wrap the same HTTP/1.1 request/response code around a small byte-stream abstraction, so plain
-sockets and TLS share one HTTP implementation. TLS uses the approved OpenSSL library behind
-`Fetch()`: an `SSL_CTX` initialised once from OpenSSL's default trust store, per-connection SNI and
-hostname verification, always-on certificate verification, and a handshake/read loop driven by the
-existing non-blocking socket + `poll` timeouts (TCP connect uses `connect_timeout_ms`, the TLS
-handshake and reads use `read_timeout_ms`). Redirects will be resolved with `net::ResolveUrl` and
-may switch between http and https. No ALPN/HTTP/2, compression, cookies, HSTS, client certificates
-or insecure mode is planned for M9; the shell should need no API or CLI change because it already
-goes through `ParseUrl`/`ResolveUrl`/`Fetch`.
+TLS / HTTPS (M9): `net` accepts `https` URLs (default port 443) and fetches them through the
+approved OpenSSL library behind the unchanged blocking `Fetch()`. Plain TCP and TLS share one
+HTTP/1.1 implementation: `src/net/http.cpp` builds requests and parses responses over a private
+`internal::Stream` interface (`write all` + `read some` until EOF), implemented by a plain
+`SocketStream` and a `TlsStream`; the transport is chosen by the URL scheme in one place
+(`src/net/stream_internal.h`, `socket_internal.h`, `tls_internal.h` — all private, no OpenSSL type
+in a public header). A process-wide `SSL_CTX` is created lazily on the first https fetch from
+OpenSSL's default verify paths (the standard `SSL_CERT_FILE`/`SSL_CERT_DIR` overrides apply at that
+moment), with `SSL_VERIFY_PEER` always on, per-connection SNI for DNS hosts, and chain + hostname
+verification (`SSL_set1_host` for DNS names, IP-SAN verification for IPv4 literals). There is no
+insecure mode. TCP connect uses `connect_timeout_ms`; the TLS handshake and all TLS I/O use
+`read_timeout_ms` and run over the existing non-blocking socket + `poll` loops; timeouts,
+certificate and hostname failures are ordinary readable `Fetch` errors. A clean `close_notify` and
+an unclean EOF both end the stream (truncation is still caught by Content-Length/chunked), and the
+TLS path ignores `SIGPIPE` once so a dead peer cannot kill the browser. No ALPN/HTTP/2,
+compression, cookies, HSTS, client certificates, TLS session reuse or caching is implemented; the
+shell needs no API or CLI change because it already goes through
+`ParseUrl`/`ResolveUrl`/`Fetch`.
 
 HTML and DOM (M3): `dom` owns the tokenizer, the simplified tree builder and the arena DOM. Parsing
 is error-tolerant and always produces one `html` element with `head` and `body` children; the
@@ -114,7 +123,7 @@ dependency is wrapped in `src/render/image.cpp`, pixels are converted to straigh
 appears in a public header. `shell` owns the page-level policy in a private loader
 (`src/shell/page.h`): after fetching, parsing and styling the page and before layout, it resolves
 each `<img src>` against the page's final URL, fetches it with the same `net::Fetch` used for pages
-(http/file only), decodes it, and keeps a `paint::ImageMap` plus a `layout::ReplacedSizes` map keyed
+(http/https/file), decodes it, and keeps a `paint::ImageMap` plus a `layout::ReplacedSizes` map keyed
 by the img DOM node id.
 Missing or failed images are skipped silently and the element lays out as an empty inline (MVP
 limit). `paint` turns an inline replaced box with a decoded image into a `DrawImage` command; the
@@ -148,7 +157,7 @@ painting. The history is a vector of URLs plus an index; every successful load a
 offset and history unchanged. A click is converted to page space with the scroll offset, hit-tested
 against the box tree (`layout::HitTest` returns the last box in paint order containing the point),
 mapped to the nearest DOM ancestor element with an `href` attribute, resolved with
-`net::ResolveUrl` against the page's final URL and loaded. Only `http`/`file` references navigate; a
+`net::ResolveUrl` against the page's final URL and loaded. Only `http`/`https`/`file` references navigate; a
 reference that only changes the fragment is a no-op. Scrolling is vertical and in integer device
 pixels, clamped to `[0, content_height - viewport_height]` by `layout::ContentHeight`; `paint` wraps
 the page in a viewport clip and translates it by `-scroll_y`, and `render` executes the frozen clip
@@ -281,11 +290,15 @@ can't form ownership cycles. Revisit only if it actually hurts.
   `render.paint` covers AA coverage/clip/baseline/no-ops, `shell.fonts` covers the end-to-end
   real-font page, and CLI checks cover `--font`, `--font-family` (with a test-local
   `FONTCONFIG_FILE`), error exit codes and screenshot output.
-- M9 (planned) TLS tests will use a committed self-signed test CA plus a `localhost` leaf
-  certificate/key and an in-process TLS loopback server; `net.tls` will cover handshake success,
-  untrusted certificate, hostname mismatch, timeout and http<->https redirects, and a shell test
-  will serve a committed HTML+PNG page over TLS to prove the render pipeline. No test will use the
-  public network or public CAs.
+- M9 TLS tests use committed test-only certificates in `tests/fixtures/tls/` (a CA, a `localhost`
+  leaf and an unrelated untrusted leaf; the README documents regeneration) and the header-only
+  in-process TLS loopback server `tests/support/tls_server.h`. Trust is supplied only through the
+  CTest `ENVIRONMENT` property (`SSL_CERT_FILE=<test CA>`), so the normal verification path is
+  exercised. `net.tls` covers a successful GET, untrusted certificate, hostname mismatch, handshake
+  timeout, http<->https redirects and the body cap; `shell.https` serves the committed HTML+PNG page
+  (`tests/fixtures/https_site/`) over TLS through `shell::Browser` and asserts the rendered pixels
+  plus the untrusted-certificate failure. No test uses the public network or a public CA, and the
+  M7 nav fixture uses an offline `ftp://` link for its unsupported-scheme case.
 - M8a image tests use hand-generated PNG fixtures with documented pixel content
   (`tests/fixtures/images/`) and a committed image demo site (`tests/fixtures/img_site/`): the
   decoder is exercised directly, layout with fake replaced sizes, and the shell end to end through
@@ -304,7 +317,7 @@ only — their code is never copied:
 - CSS Cascading and Inheritance Level 4: <https://www.w3.org/TR/css-cascade-4/>
 - CSS Values and Units Level 3: <https://www.w3.org/TR/css-values-3/>
 - HTTP Semantics (RFC 9110) and HTTP/1.1 (RFC 9112); TLS 1.2/1.3 (RFC 5246/RFC 8446)
-- OpenSSL documentation (approved M9 dependency, not linked yet): <https://docs.openssl.org/>
+- OpenSSL documentation (approved M9 dependency, linked since M9): <https://docs.openssl.org/>
 - PNG (Third Edition): <https://www.w3.org/TR/png-3/> and the libpng manual (approved M8a
   dependency): <https://www.libpng.org/pub/png/libpng.html>
 - FreeType, HarfBuzz and fontconfig documentation (linked M8b dependencies):

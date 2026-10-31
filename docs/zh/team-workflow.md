@@ -274,3 +274,23 @@ Lead 从不只信一份报告。审查：
   null font 参数。
 - M8b：shell owner 在 render 实现落地前用独立的 scratch 布局程序推导出 real-font dump 几何（与
   M5/M6 相同做法），集成时只需确认；任务描述里的契约数字再次得到回报。
+- M9：Lead 在 kickoff 前先建好跨任务共用的测试基础设施（提交的仅测试用证书 + header-only 的进程内
+  TLS loopback 服务器），用 `openssl s_client` 与 `.tmp` 里的临时冒烟程序验证后，把冻结的 API 交给两位
+  实现者；这消除了“谁来写共享测试服务器”的协商，让 net 与 shell 两个任务真正并行。
+- M9：一个冻结的 M7 假设在 https 可用后变成了真实失败：导航 fixture 链接到 `https://example.com/`，
+  而测试期望“不支持 scheme”错误，因此全量测试会访问公网并失败。Lead 把 fixture 链接改成 `ftp://`
+  并扩展了 shell owner 的写范围，保住了失败用例覆盖的确定性。每当某个 scheme 从“不支持”变为“支持”，
+  都要重新审查旧的“不支持”测试。
+- M9：TLS 测试的确定性来自提交证书加标准环境变量覆盖：CTest `ENVIRONMENT` 设置
+  `SSL_CERT_FILE=<测试 CA>`，走的是真实校验路径（同一二进制不设该环境变量就会失败），而不是在代码里
+  加“信任此 CA”的后门。这样测试专用信任不会进入生产代码，也证明了校验始终开启。
+- M9：net owner 明确处理了 OpenSSL 的坑：一个首次 https 抓取时惰性创建的进程级 `SSL_CTX`（信任环境
+  只读一次）、`WANT_READ`/`WANT_WRITE` 的非阻塞握手/读取 poll 循环、用相同参数重试
+  `SSL_read`/`SSL_write`、把干净 `close_notify` 与非干净 EOF 都视为流结束、
+  `SSL_OP_IGNORE_UNEXPECTED_EOF` 加 reason-code 回退，以及每个进程一次 `SIGPIPE` 忽略（因为 OpenSSL
+  写路径不使用 `MSG_NOSIGNAL`）。这些应写进契约，而不只是完成报告。
+- M9：字节兼容门禁用一个 `.tmp` 脚本机械化：对 12 个 http/file 用例比较上一提交 `git worktree` 与
+  新构建的 stdout、stderr、退出码与 PPM 字节，并比较 GCC 与 Clang；结果全部相同，因此这一轮能证明
+  net 重构对既有页面没有任何影响。
+- M9：对文档站点与公网 `badssl` 测试域名的手工检查端到端验证了安全行为（过期/自签/主机名错误页面
+  给出可读错误并以 1 退出；正常页面可抓取、dump 与截图）。这类检查保持手工，其网络细节永不进入仓库。

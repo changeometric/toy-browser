@@ -3,9 +3,9 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M8 are done (M8a images, M8b real fonts). M9 (most-basic HTTPS) is planned
-and documented but not started; M10 (HTTP proxy) follows; the JavaScript subset is deferred.** For
-a snapshot and takeover guide, read [handoff.md](handoff.md).
+**Current status: M0–M9 are done (M9 = most-basic HTTPS). M10 (HTTP proxy) is the next planned
+milestone; the JavaScript subset is deferred.** For a snapshot and takeover guide, read
+[handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
 
@@ -164,7 +164,7 @@ a snapshot and takeover guide, read [handoff.md](handoff.md).
   its background and before its children; empty image maps keep the M7 list.
 - `shell`: a private page loader (final URL, DOM, styles, boxes, replaced sizes and image map)
   resolves each `<img src>` against the page's final URL, fetches it with the existing
-  `net::Fetch` (http/file only), decodes it with `render::DecodePng`, and skips failed/missing
+  `net::Fetch` (http/file at M8a; https since M9), decodes it with `render::DecodePng`, and skips failed/missing
   images silently (no broken-image UI, no error output, no image cache). `shell::Browser` owns the
   page and its images, paints them, and re-lays-out on resize without refetching; `--dump-boxes`
   uses the same loader, so reserved image boxes appear in the box dump. The CLI is unchanged.
@@ -180,7 +180,7 @@ a snapshot and takeover guide, read [handoff.md](handoff.md).
   `display:block` replaced elements and margins/padding on replaced elements are unsupported,
   replaced boxes are top-aligned (no baseline alignment, as in M5), scaling is nearest-neighbour
   without anti-aliasing, images are fetched even when their element is not visible (no lazy
-  loading), only `http`/`file` image URLs work at M8a (M9 plans to lift this), and
+  loading), only `http`/`file` image URLs work at M8a (https arrived in M9), and
   `--dump-dom`/`--dump-style` do not fetch images.
 
 ## M8b — Real fonts ✅ (done)
@@ -221,44 +221,52 @@ a snapshot and takeover guide, read [handoff.md](handoff.md).
   above 4096 px behave like 4096 px, and anti-aliased subpixel positioning/kerning beyond the
   shaped advances is not implemented. The bitmap fallback stays ASCII-only.
 
-## M9 — Most-basic HTTPS (planned; OpenSSL approved, not started)
+## M9 — Most-basic HTTPS ✅ (done)
 
-- Goal: fetch absolute `https://` URLs so pages and images from HTTPS sites render through the
-  existing pipeline. The MVP definition is deliberately small: **connect and issue the request** —
-  do not over-build.
-- MVP scope:
-  - `net` URL layer: `https` scheme (default port 443), parsing/serialization/base resolution;
-    links, navigation, redirects and image loading reuse it automatically.
-  - `net` TLS: an OpenSSL-backed client behind the existing blocking `Fetch()`, sharing the HTTP/1.1
-    request/response code with plain HTTP through a small byte-stream abstraction. SNI, hostname
-    verification and certificate verification against OpenSSL's default trust store (system CAs;
-    the standard `SSL_CERT_FILE`/`SSL_CERT_DIR` overrides keep working for special cases).
-    Certificates are always verified; there is no insecure mode.
-  - Timeouts: TCP connect keeps `connect_timeout_ms`; the TLS handshake and TLS reads use the
-    existing `read_timeout_ms`. No new `FetchOptions` fields in M9.
-  - `shell`: no public API or CLI change expected — `--dump-body`, `--dump-*`, `--screenshot`,
-    window mode and navigation accept `https://` through the existing code paths.
-  - Tests (deterministic, no public network): a committed self-signed test CA plus a `localhost`
-    leaf certificate/key (test-only, README documents regeneration) and an in-process TLS loopback
-    server; `net` tests cover success, untrusted certificate, hostname mismatch, timeout and
-    http<->https redirects; a shell test serves a committed HTML+PNG page over TLS and asserts the
-    rendered pixels.
-- Frozen design decisions (frozen before kickoff, recorded in [decisions.md](decisions.md)):
-  - Scheme set is `file`, `http`, `https`; `https` default port 443; `ResolveUrl`/`SerializeUrl`
-    follow the same RFC 3986 subset as http.
-  - Redirects are resolved with `net::ResolveUrl` (relative and protocol-relative `Location`
-    supported); redirect targets must be http/https and may switch between them; file targets are
-    rejected.
-  - No ALPN/HTTP/2: keep HTTP/1.1 with `Connection: close`; no compression, cookies, sessions,
-    HSTS, mixed-content blocking, client certificates, TLS session reuse or HTTP caching.
-  - `FetchOptions` stays unchanged in M9; failures are readable fetch errors (CLI exit 1).
-- Acceptance: all 55 existing tests plus the new URL/TLS/https tests pass under GCC and Clang with
-  warnings as errors; a local HTTPS page with an image renders headlessly; certificate, hostname
-  and timeout failures produce explicit errors; `http://`/`file://` dumps and screenshots stay
-  byte-identical; a direct real-site check is manual and depends on the network (restricted
-  networks need the M10 proxy).
-- Known limits after M9: no HTTP/2, compression, cookies, proxies (M10), JS-dependent sites or
-  HSTS; real-world rendering stays limited by the existing HTML/CSS subset.
+- Goal met: fetch absolute `https://` URLs so pages and images from HTTPS sites render through the
+  existing pipeline. The MVP bar stayed "connect and issue the request".
+- `net` URL layer: `https` scheme with default port 443 and the same RFC 3986 authority/port/path
+  rules as http; `ParseUrl`/`ResolveUrl`/`SerializeUrl` accept and round-trip it; scheme-relative
+  references inherit the base scheme and explicit http<->https references are allowed.
+- `net` transport: OpenSSL behind the unchanged blocking `Fetch()` (`find_package(OpenSSL REQUIRED)`
+  linked PRIVATE to `toy_net`), sharing the HTTP/1.1 request/response code with plain HTTP through a
+  private byte-stream abstraction (`Stream`, plain `SocketStream`, `TlsStream`) so body caps,
+  header/chunked parsing and timeouts live in one place. One process-wide `SSL_CTX` is created
+  lazily on the first https fetch from OpenSSL's default verify paths; `SSL_VERIFY_PEER` is always
+  on, SNI is sent for DNS hosts (not for IPv4 literals), chain + hostname verification cover DNS
+  names and IPv4 literals, and there is no insecure mode. TCP connect uses `connect_timeout_ms`;
+  the TLS handshake and all TLS I/O use `read_timeout_ms`; a clean and an unclean EOF are both end
+  of stream (truncation is still caught by Content-Length/chunked); the TLS path ignores `SIGPIPE`
+  once process-wide so a dead peer cannot terminate the browser.
+- Redirects: `Location` is resolved with `net::ResolveUrl` (absolute, relative, root-relative,
+  protocol-relative, scheme-relative); http<->https targets are allowed, `file` targets are
+  rejected, and `max_redirects` is unchanged.
+- `shell`: no API or CLI change — page fetches, link navigation (https links now navigate),
+  redirects and image loading all reuse the existing `net` calls; the page loader, `--dump-*` modes,
+  `--screenshot`, window mode and navigation accept `https://` automatically.
+- Tests: committed test-only TLS fixtures (`tests/fixtures/tls/`: CA, `localhost` leaf, unrelated
+  untrusted leaf; README documents regeneration) and a header-only in-process TLS loopback server
+  (`tests/support/tls_server.h`). `net.tls` covers a successful GET, untrusted certificate,
+  hostname mismatch, handshake timeout, https->https / http->https / https->http redirects and the
+  body cap; `net.http` gains relative and protocol-relative redirect coverage and drops the obsolete
+  "https redirect is an error" case; `net.url`/`net.url_resolution` cover https parsing,
+  serialization and resolution; `shell.https` serves the committed HTML+PNG page
+  (`tests/fixtures/https_site/`) over TLS and asserts URL/title/content height, text and image
+  pixels, the request sequence and the untrusted-certificate failure. The M7 nav fixture's
+  "Unsupported page" link is now deliberately `ftp://` so no test can reach the public network.
+- Acceptance reached: all 55 pre-M9 tests plus the new URL/TLS/https tests pass under GCC and Clang
+  with warnings as errors (57 tests total); a local HTTPS page with an image renders headlessly; the
+  certificate, hostname and timeout failures are explicit errors; every pre-M9 `http`/`file` dump
+  and screenshot is byte-identical to the M8b baseline and GCC/Clang PPMs are identical; manual
+  public-site checks (raw body, DOM dump, screenshot) work. Real-site checking is manual and
+  network-dependent; restricted networks still need the M10 proxy.
+- Known M9 limits: HTTP/1.1 only (no ALPN/HTTP/2), no compression (no `Accept-Encoding` is sent), no
+  cookies/sessions, HSTS, mixed-content blocking, client certificates, TLS session reuse or HTTP
+  caching; no proxy (M10); IPv6 literal https URLs are still unsupported by the URL parser; the
+  trust policy is exactly OpenSSL's default store plus the standard env overrides (no pinning, no
+  insecure mode); the TLS context is created lazily once per process; real-world rendering stays
+  limited by the existing HTML/CSS subset; public-network details are never committed and real-site
+  checks stay manual.
 
 ## M10 — HTTP proxy (planned after M9)
 
