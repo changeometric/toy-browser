@@ -1,0 +1,8 @@
+/* Linked twice from duplicate.html on purpose: the shell must fetch it once per
+   <link> occurrence (no deduplication) and the two identical applications must
+   produce one stable set of computed values. */
+#dup {
+  color: #0f0f0f;
+  font-size: 20px;
+  margin-left: 7px;
+}

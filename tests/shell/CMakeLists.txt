@@ -309,6 +309,43 @@ add_test(NAME shell.https
 set_tests_properties(shell.https PROPERTIES
   ENVIRONMENT "SSL_CERT_FILE=${shell_tls_fixtures}/test_ca.pem")
 
+# M12 external stylesheets: the shell private styled-document path discovers,
+# filters and fetches <link rel="stylesheet"> sheets in document order, resolves
+# their href against the page's final URL and cascades them with inline <style>
+# and style attributes. The committed fixture site is file:// only and the C++
+# test additionally uses the in-process loopback HTTP server for redirect/absolute
+# URL/failure cases; no public network, display or installed font is involved.
+set(shell_css_site "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/css_site")
+
+add_executable(shell_external_css_test external_css_test.cpp)
+# The test includes the shell-private page loader header on purpose (like
+# shell.cjk_layout and shell.page_language).
+target_include_directories(shell_external_css_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../src/shell")
+target_link_libraries(shell_external_css_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(shell_external_css_test)
+add_test(NAME shell.external_css
+  COMMAND shell_external_css_test "${shell_css_site}")
+
+# --dump-style uses the same styled-document path: the external sheet of
+# index.html must be applied (the .external rule's color/background/font-size and
+# margins come only from styles/site.css).
+add_test(NAME shell.dump_style_external
+  COMMAND $<TARGET_FILE:toybrowser> --dump-style
+          "file://${shell_css_site}/index.html")
+set_tests_properties(shell.dump_style_external PROPERTIES
+  PASS_REGULAR_EXPRESSION
+    "<p> display=block color=#123456 background-color=#abcdef font-size=24px.*margin-top=6px margin-right=10px margin-bottom=12px margin-left=14px")
+
+# A page whose every <link> is filtered out or failing still dumps successfully
+# and keeps the default style: stylesheet problems never fail the page.
+add_test(NAME shell.dump_style_filtered_only
+  COMMAND $<TARGET_FILE:toybrowser> --dump-style
+          "file://${shell_css_site}/filtered_only.html")
+set_tests_properties(shell.dump_style_filtered_only PROPERTIES
+  PASS_REGULAR_EXPRESSION
+    "<p> display=block color=#000000 background-color=transparent font-size=16px.*margin-top=16px")
+
 # M10: every pre-M10 test that runs toybrowser or a Browser through the automatic
 # system-font selection uses the empty config, which forces the built-in bitmap
 # font. Their outputs are the pre-M10 goldens, so they must stay byte-identical.
@@ -338,6 +375,9 @@ foreach(shell_bitmap_font_test IN ITEMS
     shell.images_dump_boxes
     shell.images_dump_boxes_missing_image
     shell.images_screenshot
+    shell.external_css
+    shell.dump_style_external
+    shell.dump_style_filtered_only
     shell.fonts
     shell.fonts_dump_boxes
     shell.fonts_missing_file

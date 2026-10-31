@@ -1,5 +1,7 @@
-// Cascade: embedded user-agent sheet -> author <style> sheets -> inline
-// styles, followed by inheritance for the inherited properties.
+// Cascade: embedded user-agent sheet -> author style sheets in document order
+// (<style> elements and caller-supplied external sheets at their <link>
+// elements) -> inline styles, followed by inheritance for the inherited
+// properties.
 
 #include <algorithm>
 #include <cstddef>
@@ -107,16 +109,50 @@ std::string CollectElementText(const dom::Document& document, dom::NodeId id) {
   return text;
 }
 
-std::vector<std::string> CollectAuthorStyleSheets(const dom::Document& document) {
+// Author sheet texts in document order: <style> text interleaved with the
+// external sheets registered at their <link> elements. External texts are
+// already fetched by the caller; style never does I/O.
+std::vector<std::string> CollectAuthorStyleSheets(
+    const dom::Document& document, const std::vector<LinkedStyleSheet>& linked_sheets) {
   std::vector<std::string> texts;
+  if (linked_sheets.empty()) {
+    // Pre-M12 fast path: a document without external sheets pays no extra
+    // per-element work.
+    VisitPreOrder(document, [&](dom::NodeId id) {
+      const dom::Node& node = document.Get(id);
+      if (node.type != dom::NodeType::kElement || node.name != "style") {
+        return;
+      }
+      std::string text = CollectElementText(document, id);
+      if (!text.empty()) {
+        texts.push_back(std::move(text));
+      }
+    });
+    return texts;
+  }
   VisitPreOrder(document, [&](dom::NodeId id) {
     const dom::Node& node = document.Get(id);
-    if (node.type != dom::NodeType::kElement || node.name != "style") {
+    if (node.type != dom::NodeType::kElement) {
       return;
     }
-    std::string text = CollectElementText(document, id);
-    if (!text.empty()) {
-      texts.push_back(std::move(text));
+    if (node.name == "style") {
+      std::string text = CollectElementText(document, id);
+      if (!text.empty()) {
+        texts.push_back(std::move(text));
+      }
+      return;
+    }
+    if (node.name != "link") {
+      return;
+    }
+    // Entries that name another node (or a missing/invalid one) never match a
+    // walked <link>, so they are ignored without a validation pass. Matching
+    // entries keep their input order, and empty texts contribute no rules.
+    for (const LinkedStyleSheet& linked : linked_sheets) {
+      if (linked.link_node != id || linked.text.empty()) {
+        continue;
+      }
+      texts.push_back(linked.text);
     }
   });
   return texts;
@@ -158,7 +194,8 @@ bool MatchRuleSelector(const css::Rule& rule, const dom::Document& document, dom
 
 }  // namespace
 
-StyleTree ComputeStyles(const dom::Document& document) {
+StyleTree ComputeStyles(const dom::Document& document,
+                        const std::vector<LinkedStyleSheet>& linked_sheets) {
   StyleTree tree;
   tree.styles_.resize(document.size());
 
@@ -166,7 +203,7 @@ StyleTree ComputeStyles(const dom::Document& document) {
   std::size_t declaration_order = 0;
   RegisterStyleSheet(css::ParseStyleSheet(detail::UserAgentStyleSheet()), Origin::kUserAgent,
                      &rules, &declaration_order);
-  for (const std::string& sheet_text : CollectAuthorStyleSheets(document)) {
+  for (const std::string& sheet_text : CollectAuthorStyleSheets(document, linked_sheets)) {
     RegisterStyleSheet(css::ParseStyleSheet(sheet_text), Origin::kAuthor, &rules,
                        &declaration_order);
   }
@@ -242,6 +279,12 @@ StyleTree ComputeStyles(const dom::Document& document) {
   });
 
   return tree;
+}
+
+// One-argument overload: no external author sheets, so it is exactly the
+// pre-M12 behavior.
+StyleTree ComputeStyles(const dom::Document& document) {
+  return ComputeStyles(document, {});
 }
 
 }  // namespace toy::style

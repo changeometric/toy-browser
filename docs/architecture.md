@@ -13,7 +13,7 @@ speculative — abstractions are added when a real slice needs them.
 | `net` | URL parsing, sockets, HTTP/1.1 fetch over plain TCP or verified TLS (approved OpenSSL), `file://` reader | `base` | M2 |
 | `dom` | HTML tokenizer, tree builder, DOM arena | `base` | M3 |
 | `css` | CSS tokenizer, rule/declaration parser, selectors | `base` | M4 |
-| `style` | Cascade and computed styles, default stylesheet | `dom`, `css` | M4 |
+| `style` | Cascade and computed styles, default stylesheet; author `<style>` rules plus caller-supplied external linked sheets (M12) in document order | `dom`, `css` | M4 |
 | `layout` | Box tree, block/inline layout, line breaking (word units plus CJK break units) | `dom`, `style`, a text-measurement callback from `shell` | M5 |
 | `paint` | Display list construction from the box tree (element backgrounds and text) | `dom`, `style`, `layout`, `render` | M6 |
 | `js` | Small JavaScript engine and DOM bindings (optional, deferred by the user) | `dom`, `base` | deferred |
@@ -35,8 +35,11 @@ frozen interfaces.
 2. `net` fetches it: bytes, final URL, status.
 3. Bytes are decoded to UTF-8 (MVP: assume UTF-8, strip a BOM; other encodings later).
 4. `dom` parses the HTML into a `Document`.
-5. `css` parses style sheets (`<style>` and `style=` attributes first; external CSS later).
-6. `style` resolves the cascade into a style tree.
+5. `shell` discovers the page's author stylesheets: the document's `<style>` elements (parsed by
+   `css`) plus every applicable `<link rel="stylesheet">`, whose `href` is resolved against the
+   page's final URL, fetched with `net::Fetch` and skipped silently on failure (M12).
+6. `style` resolves the cascade into a style tree: UA rules, then author `<style>` and linked
+   sheets in document order, then inline `style` declarations.
 7. `shell` walks the DOM for `<img>` elements and, for each first `src`, resolves it against the
    page's final URL, fetches it and decodes it with `render::DecodePng`; failures are skipped (M8a).
 8. `layout` turns the style tree into a box tree with geometry, using the shell-supplied intrinsic
@@ -53,7 +56,7 @@ Networking (M2, TLS in M9): `net` owns URLs, sockets and HTTP. Fetching is a blo
 redirects (resolved with `net::ResolveUrl` since M9, so relative and protocol-relative `Location`
 values work) and `Connection: close` — behind `Fetch()`, so it can become non-blocking later
 without changing callers. `net` is the only module allowed to touch sockets; page code never sees
-them. Proxy support (HTTP proxy first) is planned as M10 behind `FetchOptions` and stays inside
+them. Proxy support (HTTP proxy first) is planned as M16 behind `FetchOptions` and stays inside
 `net`; it needs no new dependency.
 
 TLS / HTTPS (M9): `net` accepts `https` URLs (default port 443) and fetches them through the
@@ -86,8 +89,25 @@ Style (M4): `css` parses stylesheets and declaration lists into plain structures
 about the DOM. `style` matches those selectors against the DOM, applies the UA/author/inline
 cascade (specificity, `!important`, inheritance) and produces a `ComputedStyle` per element; the
 embedded UA stylesheet is itself CSS parsed by our parser. `DumpStyleTree()` is the deterministic
-text form behind `--dump-style` and the style tests. Layout will consume the style tree only, never
-the raw CSS.
+text form behind `--dump-style` and the style tests. Layout consumes the style tree only, never the
+raw CSS. Since M12 the author cascade also includes external linked sheets supplied by the shell:
+`style::LinkedStyleSheet` names a `<link>` DOM node and the fetched CSS text, and the two-arg
+`ComputeStyles(document, linked_sheets)` inserts each sheet at that element's document position
+(one pre-order walk interleaves it with the document's `<style>` elements). `style` stays free of
+I/O and network code; the one-arg overload keeps the pre-M12 behavior exactly.
+
+External stylesheets (M12): `shell`'s private `LoadStyledDocument()` (in `src/shell/page.h`) owns the
+whole resource policy: after fetching and parsing the page it walks the DOM once in document order,
+filters `<link>` elements (`rel` token list containing `stylesheet` without `alternate`, no
+`disabled` attribute, `media` empty/`all`/`screen`, `type` empty/`text/css`), resolves each `href`
+against the page's final URL after redirects with `net::ResolveUrl`, fetches it with the same
+`net::Fetch` used for pages (default timeouts and 16 MiB body cap), accepts only 200..299 bodies,
+fetches every applicable occurrence once (no deduplication or cache, like images) and skips every
+filtered, failed or non-2xx sheet silently. The resulting `style::LinkedStyleSheet` list is passed
+to `style::ComputeStyles`, and the same path is shared by normal page loading (window,
+`--screenshot`, `--dump-boxes`) and `--dump-style`; `--dump-dom` and `--dump-body` still fetch no
+sheets. Only a page fetch can fail the load. Media queries, `@import`, alternate/disabled sheets,
+parameterised `type` values and CSS images are deliberately out of scope for this round.
 
 Layout (M5): `layout` turns the style tree into a `BoxTree` with absolute CSS-pixel geometry.
 Line breaking needs text metrics, so `LayoutDocument()` takes a `MeasureText` callback (standard
@@ -145,7 +165,8 @@ display list keeps a `shared_ptr<const Image>`, so a list may outlive the page d
 from. `render` executes images with a frozen nearest-neighbour integer source mapping and the same
 SrcOver formula and clip stack as fills. `shell::Browser` stores the images with the page, paints
 them, and re-lays-out on resize without refetching; `--dump-boxes` uses the same loader so image
-geometry is part of the dump, while `--dump-dom`/`--dump-style` stay image-free.
+geometry is part of the dump, while `--dump-dom` stays image-free and `--dump-style` applies
+external stylesheets but fetches no images.
 
 Real fonts (M8b): `render::Font` wraps the approved freetype and harfbuzz dependencies behind a
 pimpl: the public header names no freetype/harfbuzz type, loading failures are ordinary errors,
@@ -220,9 +241,10 @@ the page in a viewport clip and translates it by `-scroll_y`, and `render` execu
 stack. The window event loop forwards clicks, wheel notches and keys (Alt+Left/Right for
 back/forward, arrows/PageUp/PageDown/Home/End for scrolling) to the session and repaints on demand;
 the window title follows the first `<title>` text, falling back to the URL. Loading is synchronous
-inside the handler, keeping the single-threaded MVP model. The page loader and image maps are
-private shell implementation details: `toy/shell/browser.h` keeps the same public methods and hides
-the page data behind a forward declaration and an out-of-line destructor.
+inside the handler, keeping the single-threaded MVP model. The page loader, external-sheet
+discovery/fetching and image maps are private shell implementation details: `toy/shell/browser.h`
+keeps the same public methods and hides the page data behind a forward declaration and an
+out-of-line destructor.
 
 ## Data model
 
@@ -377,6 +399,14 @@ can't form ownership cycles. Revisit only if it actually hurts.
   (`tests/fixtures/images/`) and a committed image demo site (`tests/fixtures/img_site/`): the
   decoder is exercised directly, layout with fake replaced sizes, and the shell end to end through
   `shell::Browser` plus the CLI `--dump-boxes`/`--screenshot` checks.
+- M12 external-stylesheet tests use the committed `tests/fixtures/css_site/` site (relative
+  subdirectory sheet, document-order ordering, filtered/failing/duplicate links, no-sheet and
+  filtered-only pages, documented expected computed values, geometry and pixels) plus the
+  header-only in-process loopback HTTP server `tests/support/http_server.h` for redirect,
+  absolute-URL, final-URL-relative-resolution, failure and no-dedup request-count cases.
+  `style.external_sheets` covers the cascade API directly, `shell.external_css` covers the shell
+  end to end (including `Browser`/paint pixels), and CLI checks cover `--dump-style` with external
+  sheets. No test uses the public network.
 
 ## Reference material
 

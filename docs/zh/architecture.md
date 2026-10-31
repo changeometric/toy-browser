@@ -14,7 +14,7 @@
 | `net` | URL 解析、socket、HTTP/1.1 抓取（纯 TCP 或经校验的 TLS，已批准 OpenSSL）、`file://` 读取 | `base` | M2 |
 | `dom` | HTML tokenizer（词法分析器）、树构建器、DOM arena（区域分配器） | `base` | M3 |
 | `css` | CSS tokenizer、规则/声明解析器、选择器 | `base` | M4 |
-| `style` | 层叠与计算样式、默认样式表 | `dom`、`css` | M4 |
+| `style` | 层叠与计算样式、默认样式表；作者 `<style>` 规则加调用方提供的按文档顺序的外部链接样式表（M12） | `dom`、`css` | M4 |
 | `layout` | 盒树、块级/行内布局、换行（词单元加 CJK 断行单元） | `dom`、`style`、来自 `shell` 的文本度量回调 | M5 |
 | `paint` | 从盒树构建显示列表（元素背景与文本） | `dom`、`style`、`layout`、`render` | M6 |
 | `js` | 小型 JavaScript 引擎与 DOM 绑定（可选，用户已暂缓） | `dom`、`base` | 暂缓 |
@@ -30,8 +30,11 @@
 2. `net` 抓取它：字节、最终 URL、状态。
 3. 字节被解码成 UTF-8（MVP：假定 UTF-8，剥掉 BOM；其他编码以后再说）。
 4. `dom` 把 HTML 解析成 `Document`。
-5. `css` 解析样式表（先支持 `<style>` 和 `style=` 属性；外部 CSS 以后再加）。
-6. `style` 把层叠解析成样式树。
+5. `shell` 发现页面的作者样式表：文档自己的 `<style>` 元素（由 `css` 解析）以及每个适用的
+   `<link rel="stylesheet">`，其 `href` 相对页面最终 URL 解析、用 `net::Fetch` 抓取，失败时静默
+   跳过（M12）。
+6. `style` 把层叠解析成样式树：先 UA 规则，再按文档顺序应用作者 `<style>` 与链接样式表，最后是
+   内联 `style` 声明。
 7. `shell` 遍历 DOM 中的 `<img>` 元素，对每个首个 `src` 相对页面最终 URL 解析、抓取，并用
    `render::DecodePng` 解码；失败被跳过（M8a）。
 8. `layout` 把样式树变成带几何信息的盒树，replaced 元素使用 shell 提供的固有尺寸。
@@ -40,13 +43,15 @@
 
 MVP 保持整条链路同步、单线程。每个阶段接收普通数据并返回普通数据，因此每个阶段都能在测试中通过 `--dump-*` 命令单独驱动。
 
-网络（M2，TLS 在 M9）：`net` 拥有 URL、socket 和 HTTP。抓取是阻塞式 HTTP/1.1 GET——每个连接一个请求、连接与读取超时、`Content-Length` 或 chunked body、重定向（M9 起用 `net::ResolveUrl` 解析，因此相对与协议相对 `Location` 可用）与 `Connection: close`——封装在 `Fetch()` 之后，因此以后可以改成非阻塞而不改调用方。`net` 是唯一允许触碰 socket 的模块；页面代码永远看不到 socket。代理支持（先支持 HTTP 代理）计划为 M11，放在 `FetchOptions` 后面并保持在 `net` 内部；它不需要新依赖。
+网络（M2，TLS 在 M9）：`net` 拥有 URL、socket 和 HTTP。抓取是阻塞式 HTTP/1.1 GET——每个连接一个请求、连接与读取超时、`Content-Length` 或 chunked body、重定向（M9 起用 `net::ResolveUrl` 解析，因此相对与协议相对 `Location` 可用）与 `Connection: close`——封装在 `Fetch()` 之后，因此以后可以改成非阻塞而不改调用方。`net` 是唯一允许触碰 socket 的模块；页面代码永远看不到 socket。代理支持（先支持 HTTP 代理）计划为 M16，放在 `FetchOptions` 后面并保持在 `net` 内部；它不需要新依赖。
 
 TLS / HTTPS（M9）：`net` 接受 `https` URL（默认端口 443），通过已批准的 OpenSSL 库在保持不变的阻塞 `Fetch()` 之后抓取。纯 TCP 与 TLS 共享同一份 HTTP/1.1 实现：`src/net/http.cpp` 在一个私有的 `internal::Stream` 接口（“写入全部字节” + “读若干字节直到 EOF”）之上构建请求、解析响应，接口由纯 `SocketStream` 与 `TlsStream` 实现；传输层按 URL scheme 在一处选择（`src/net/stream_internal.h`、`socket_internal.h`、`tls_internal.h` 均为私有，公开头文件中没有 OpenSSL 类型）。进程级 `SSL_CTX` 在第一次 https 抓取时从 OpenSSL 默认校验路径惰性创建（标准 `SSL_CERT_FILE`/`SSL_CERT_DIR` 覆盖在该时刻生效），`SSL_VERIFY_PEER` 始终开启，DNS 主机每连接发送 SNI，证书链 + 主机名校验（DNS 名用 `SSL_set1_host`，IPv4 字面量用 IP SAN 校验）。没有 insecure 模式。TCP 连接用 `connect_timeout_ms`；TLS 握手与所有 TLS I/O 用 `read_timeout_ms`，运行在现有非阻塞 socket + `poll` 循环上；超时、证书与主机名失败都是普通可读的 `Fetch` 错误。干净的 `close_notify` 与非干净 EOF 都结束流（截断仍由 Content-Length/chunked 捕获），TLS 路径忽略一次 `SIGPIPE`，坏掉的对端无法杀死浏览器。未实现 ALPN/HTTP/2、压缩、cookie、HSTS、客户端证书、TLS 会话复用或缓存；由于 shell 已经全部经过 `ParseUrl`/`ResolveUrl`/`Fetch`，无需改动其 API 或 CLI。
 
 HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM。解析是容错的，且总是产生一个带 `head` 和 `body` 子节点的 `html` 元素；tokenizer 覆盖支持的子集（元素与属性、注释、doctype、raw-text 与 RCDATA 元素、少量实体），遇到畸形输入也永不失败。`DumpDocument()` 是确定性的文本形式，供 `--dump-dom` 与解析器测试使用。节点用整数 id 寻址（没有持有指针、没有环）；DOM 完全不了解 CSS、布局或脚本。
 
-样式（M4）：`css` 把样式表与声明列表解析成普通结构，完全不了解 DOM。`style` 在 DOM 上匹配这些选择器，应用 UA/作者/行内层叠——依据 specificity（优先级）、`!important` 与继承——并为每个元素生成一个 `ComputedStyle`；内置的 UA 样式表本身就是由我们的解析器解析的 CSS。`DumpStyleTree()` 是 `--dump-style` 与样式测试背后的确定性文本形式。布局只会消费样式树，永远不会消费原始 CSS。
+样式（M4）：`css` 把样式表与声明列表解析成普通结构，完全不了解 DOM。`style` 在 DOM 上匹配这些选择器，应用 UA/作者/行内层叠——依据 specificity（优先级）、`!important` 与继承——并为每个元素生成一个 `ComputedStyle`；内置的 UA 样式表本身就是由我们的解析器解析的 CSS。`DumpStyleTree()` 是 `--dump-style` 与样式测试背后的确定性文本形式。布局只消费样式树，永远不会消费原始 CSS。自 M12 起作者层叠还包含 shell 提供的外部链接样式表：`style::LinkedStyleSheet` 指定一个 `<link>` DOM 节点与抓取到的 CSS 文本，双参数 `ComputeStyles(document, linked_sheets)` 把每个样式表插到该元素的文档位置（一次前序遍历把它与文档自己的 `<style>` 元素交错）。`style` 保持无 I/O、无网络代码；单参数重载精确保留 M12 之前的行为。
+
+外部样式表（M12）：`shell` 的私有 `LoadStyledDocument()`（位于 `src/shell/page.h`）拥有全部资源策略：抓取并解析页面后，它按文档顺序遍历一次 DOM，过滤 `<link>` 元素（`rel` token 含 `stylesheet` 且不含 `alternate`、无 `disabled` 属性、`media` 为空/`all`/`screen`、`type` 为空/`text/css`），用 `net::ResolveUrl` 把每个 `href` 相对重定向后的最终页面 URL 解析，用与页面相同的 `net::Fetch` 抓取（默认超时与 16 MiB body 上限），只接受 200..299 的 body，每个适用出现抓取一次（不去重、无缓存，和图片一样），并静默跳过所有被过滤、失败或非 2xx 的样式表。得到的 `style::LinkedStyleSheet` 列表交给 `style::ComputeStyles`，同一条路径由正常页面加载（窗口、`--screenshot`、`--dump-boxes`）与 `--dump-style` 共享；`--dump-dom` 与 `--dump-body` 仍不抓取样式表。只有页面抓取可以让加载失败。媒体查询、`@import`、alternate/disabled 样式表、带参数的 `type` 值与 CSS 图片在本轮刻意不实现。
 
 布局（M5）：`layout` 把样式树转换成带绝对 CSS 像素几何的 `BoxTree`。换行需要文本度量，因此 `LayoutDocument()` 接受一个由 `shell` 提供的 `MeasureText` 回调（只用标准类型加 `style::ComputedStyle`）；内置等宽位图字体度量位于 `render`，由 `shell` 适配——若为真实字体，则适配该字体的整形 advance、行高与 ascent（M8b/M10），布局本身仍然完全不了解字体。这样保持依赖方向不变：没有 `layout` → `render` 的边，`layout` 中也不重复字体代码。M10 起回调会收到文本的计算样式，因此 shell 能按样式选字体；`TextMetrics` 携带 ascent，布局把该行最大的 ascent 写进每个文本盒的 `Box::baseline_offset_px`（同一行不同字体因此在绘制时共享基线）。文本被切成断行单元（`src/layout/text_break.cpp`）：空白分隔单词，非 CJK 文本保持最长词，CJK 字符各自成为断行机会并带简化的标点禁则，因此没有空格的中文也能正常换行。每个单元仍是普通的可度量 word 级文本盒，复用 M5 的适配、行高与基线机制。`DumpBoxTree()` 是 `--dump-boxes` 与布局测试背后的确定性文本形式。布局只消费样式树：它从不读取原始 CSS，也从不绘制。几何是输入的纯函数；MVP 简化的摘要见 [roadmap.md](roadmap.md) 的 known-limits 列表。M8a 把 replaced 元素加入同一套布局：`LayoutOptions::replaced_sizes` 把 DOM 节点 id 映射到 shell 提供的固有 CSS 像素尺寸；有条目的行内元素成为原子行内级盒（CSS width/height px 覆盖、只给一侧时保持固有宽高比、整体换行、顶部对齐、抬高行高），而 `layout` 仍然从不读取图片、也不依赖 `render`。M10 的断行单元模型是对 Unicode 断行的简化（没有完整 UAX#14、没有泰语/高棉语/老挝语词典断行、没有连字符断行、不做跨文本节点标点粘连）；拉丁词永不拆开。
 
@@ -62,7 +67,7 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 `shared_ptr<const Image>`，因此列表可以比构建它的页面数据活得更久。`render` 用冻结的最近邻整数
 源映射、与填充相同的 SrcOver 公式和裁剪栈执行图片。`shell::Browser` 随页面保存图片并绘制它们，
 resize 时重新布局而不重新抓取；`--dump-boxes` 使用同一加载器，因此图片几何出现在 dump 中，而
-`--dump-dom`/`--dump-style` 保持无图片。
+`--dump-dom` 保持无图片、`--dump-style` 应用外部样式表但不抓取图片。
 
 真实字体（M8b）：`render::Font` 在 pimpl 之后封装已批准的 freetype 与 harfbuzz 依赖：公开头文件不出现
 freetype/harfbuzz 类型，加载失败是普通错误，字体自己持有 face 字节与 freetype library。度量来自
@@ -114,7 +119,7 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
 由 `layout::ContentHeight` 钳制在 `[0, content_height - viewport_height]`；`paint` 用视口裁剪
 包裹页面并按 `-scroll_y` 平移，`render` 执行冻结的裁剪栈。窗口事件循环把点击、滚轮格数与按键
 （Alt+Left/Right 前进后退，方向键/PageUp/PageDown/Home/End 滚动）转发给会话并按需重绘；窗口
-标题跟随第一个 `<title>` 文本，没有时回退到 URL。加载在处理函数内同步执行，保持单线程 MVP 模型。页面加载器与图片映射是 shell 的私有实现细节：`toy/shell/browser.h` 保持相同的公开方法，并用前向声明与 out-of-line 析构函数隐藏页面数据。
+标题跟随第一个 `<title>` 文本，没有时回退到 URL。加载在处理函数内同步执行，保持单线程 MVP 模型。页面加载器、外部样式表发现/抓取与图片映射是 shell 的私有实现细节：`toy/shell/browser.h` 保持相同的公开方法，并用前向声明与 out-of-line 析构函数隐藏页面数据。
 
 ## 数据模型
 
@@ -202,6 +207,12 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
   `shell.font_selection`、`shell.page_language`、`shell.cjk_*`（逐单元文本盒、换行、绘制像素）与
   更新后的 `shell.fonts*` 覆盖该特性；测试从不使用已安装字体或机器字体配置。
 - M8a 图片测试使用像素内容有文档的手工生成 PNG fixtures（`tests/fixtures/images/`）与提交的图片演示站点（`tests/fixtures/img_site/`）：解码器被直接测试，布局用假 replaced 尺寸测试，shell 端到端通过 `shell::Browser` 以及 CLI 的 `--dump-boxes`/`--screenshot` 检查。
+- M12 外部样式表测试使用提交的 `tests/fixtures/css_site/` 站点（子目录相对样式表、文档序排序、
+  被过滤/失败/重复链接、无样式表与全被过滤页面，以及有文档的期望计算值、几何与像素），并加上
+  header-only 进程内 loopback HTTP 服务器 `tests/support/http_server.h` 覆盖重定向、绝对 URL、
+  相对最终 URL 解析、失败与不去重请求数等用例。`style.external_sheets` 直接覆盖级联 API，
+  `shell.external_css` 覆盖 shell 端到端（含 `Browser`/绘制像素），CLI 检查覆盖带外部样式表的
+  `--dump-style`。没有测试使用公网。
 
 ## 参考资料
 

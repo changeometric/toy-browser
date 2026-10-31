@@ -4,8 +4,8 @@
 
 toybrowser is an experimental learning project, not a hardened browser. It implements a small
 subset of HTML/CSS and rendering, has no JavaScript engine and no sandbox, and should not be used to
-browse untrusted pages or to enter sensitive information. Treat any fetched page, image or font as
-untrusted input.
+browse untrusted pages or to enter sensitive information. Treat any fetched page, image, font or
+external stylesheet as untrusted input.
 
 The one deliberate security feature is HTTPS: certificate-chain and hostname verification are always
 on, there is no insecure mode and no way to disable verification. HTTP responses are bounded by a

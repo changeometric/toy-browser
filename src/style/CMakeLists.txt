@@ -1,5 +1,6 @@
 # CSS cascade and computed styles. The UA style sheet is embedded; external CSS
-# is not fetched yet.
+# text is fetched by the caller and supplied to the cascade at its <link>
+# element.
 
 add_library(toy_style STATIC
   compute_styles.cpp

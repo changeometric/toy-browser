@@ -1,0 +1,6 @@
+/* Linked from filter.html's body: proves the discovery walk covers the whole DOM
+   (head or body alike), not just the head. */
+#body-sheet {
+  color: #445566;
+  font-size: 14px;
+}

@@ -1,0 +1,15 @@
+/* The only applicable sheet of filter.html. The page also links sheets that must
+   be filtered out (print media, text/plain type, disabled, alternate), an
+   unsupported ftp: URL, an empty href and a missing local file; none of their
+   rules may reach the page, while these rules must apply. */
+
+#good {
+  color: #336699;
+  background-color: #cccccc;
+  font-size: 18px;
+  margin-top: 4px;
+  margin-left: 5px;
+}
+
+/* filter.html's second paragraph has no rule of its own; it keeps the UA/initial
+   values, so the filtered sheets provably contributed nothing. */

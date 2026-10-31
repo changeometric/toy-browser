@@ -43,6 +43,21 @@ struct ComputedStyle {
   std::optional<float> height;
 };
 
+// One external author style sheet fetched from a `<link rel="stylesheet">`
+// element (M12). The shell owns discovery, filtering and fetching; this type
+// only tells the cascade where the fetched text belongs. `link_node` must name
+// a `<link>` element of the document passed to ComputeStyles; the sheet then
+// joins the author cascade exactly at that element's position in document
+// order, interleaved with the document's own `<style>` elements. Entries whose
+// node is not a `<link>` element (or is absent) are ignored, and an empty
+// `text` contributes no rules. The shell supplies at most one entry per link
+// element; if several entries name the same element they apply in input order
+// at that position. `text` is parsed exactly like `<style>` content.
+struct LinkedStyleSheet {
+  dom::NodeId link_node = dom::kInvalidNode;
+  std::string text;
+};
+
 // Computed styles for a document, addressed like the DOM arena. The tree is
 // flat: an element's style is stored under its own node id. Non-element nodes
 // report the style of their nearest element ancestor (the default style when
@@ -53,6 +68,8 @@ class StyleTree {
 
  private:
   friend StyleTree ComputeStyles(const dom::Document& document);
+  friend StyleTree ComputeStyles(const dom::Document& document,
+                                 const std::vector<LinkedStyleSheet>& linked_sheets);
   std::vector<ComputedStyle> styles_;
 };
 
@@ -60,6 +77,14 @@ class StyleTree {
 // tree for every node of `document`. `document` must outlive the returned tree
 // only while ComputeStyles runs; the tree does not keep a reference to it.
 StyleTree ComputeStyles(const dom::Document& document);
+
+// Like the one-argument overload, and additionally applies the external author
+// sheets in `linked_sheets`, each at its `<link>` element's document position.
+// This overload never fetches anything: the caller resolves `href`s and fetches
+// the CSS text before calling. `document` and the `text`s must stay alive only
+// while ComputeStyles runs.
+StyleTree ComputeStyles(const dom::Document& document,
+                        const std::vector<LinkedStyleSheet>& linked_sheets);
 
 // Deterministic text dump of the computed styles, one line per element node:
 // indent + "<tag> display=... color=... background-color=... ... width=...".

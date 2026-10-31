@@ -25,22 +25,27 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M9 | `https://` fetching: `net` URL layer accepts https (default port 443), OpenSSL-backed TLS transport behind the unchanged blocking `Fetch()` sharing the HTTP/1.1 code through a private byte-stream abstraction, always-on certificate + hostname verification against OpenSSL's default trust store (no insecure mode), SNI, existing timeouts, redirects resolved with `net::ResolveUrl` (relative/protocol-relative, http<->https), committed test CA/leaf certs, in-process TLS loopback server, `net.tls` + `shell.https` end-to-end tests, 57 tests; http/file output stayed byte-identical |
 | M10 | Automatic font selection: CSS `font-family`/`font-weight`/`font-style` matched through the approved fontconfig library with initial family `serif`, per-code-point character-coverage fallback runs (Han text on Latin pages and vice versa), root `<html lang>` as a fontconfig language hint; a shared `shell::Fonts` object drives layout measurement and painting (`TextMetrics::ascent_px`, `Box::baseline_offset_px`, `paint::FontRunsProvider`); simplified CJK break units in layout so Chinese paragraphs wrap; committed regular/bold/italic/Han fixture fonts and deterministic fixture/empty fontconfig test configs; `--font`/`--font-family` overrides kept; bitmap path remains the byte-identical degradation path; 66 tests |
 | M11 | Performance: default RelWithDebInfo build with `-ffp-contract=off`; render text caches (one reusable hb_font/hb_buffer per font, bounded shaped-run and glyph-coverage LRU caches); shell font caches (allocation-free resolved-style fast path, metrics and run LRUs); paint viewport culling with a conservative text margin; window loop fixes (Expose without relayout, resize only on actual change, coalesced X11 Expose/ConfigureNotify bursts, reused surface); byte-identical rendering; 66 tests |
+| M12 | External stylesheets: public `style::LinkedStyleSheet` + two-arg `ComputeStyles(document, linked_sheets)` merging linked sheets and `<style>` elements by document order (one-arg overload byte-identical to M11); shell-private `LoadStyledDocument()` sharing one fetch/parse/discover/filter/fetch-sheets/style path between page loading and `--dump-style`; `rel`/`disabled`/`media`/`type` filtering, `href` resolved against the final page URL after redirects, 200..299 bodies only, failed/filtered sheets skipped silently, one fetch per `<link>` occurrence (no dedup); `--dump-dom`/`--dump-body` still fetch no sheets; committed `tests/fixtures/css_site/`, header-only `tests/support/http_server.h` loopback server, `style.external_sheets` + `shell.external_css` + CLI tests; 70 tests; byte-compat and GCC/Clang gates green |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-**Next planned milestone: M12 — External stylesheets (planned, not started).**
-M11 (performance) shipped and the repository is prepared for public sharing. M12 makes
-`<link rel="stylesheet">` work: sheets are discovered in document order, resolved against the page's
-final URL, fetched, parsed and cascaded with inline `<style>` and `style` attributes. M13 (resource
-loading pipeline), M14 (CSS compatibility batch 1) and M15 (flexbox/position/float subset) follow;
-the HTTP proxy (M16) and the JavaScript subset remain deferred.
+**Next planned milestone: M13 — Resource loading pipeline (planned, not started).**
+M12 (external stylesheets) shipped and real pages now apply their external CSS. M13 makes pages
+with many assets load in time proportional to bytes rather than to the number of connections:
+reusable HTTP/1.1 connections per host, gzip, and page-level resource deduplication/caching (image
+URLs first; serial stylesheet fetches benefit from keep-alive as well). M14 (CSS compatibility
+batch 1) and M15 (flexbox/position/float subset) follow; the HTTP proxy (M16) and the JavaScript
+subset remain deferred.
 
-Not implemented yet: external stylesheets (next, M12), resource loading (keep-alive/gzip/parallel
-resource loading and image cache/lazy loading, M13), CSS compatibility and modern layout (M14/M15),
-proxies (M16), JavaScript (deferred), borders, horizontal scrolling/scrollbars, hover/active link
-styling and form controls, `@font-face`/webfont downloads, XShm/dirty-rect presentation, and GPU
-rendering (a deliberate decision, see roadmap M11). Font selection works automatically since M10 (CSS
-families/weight/style through fontconfig, character-coverage fallback, CJK line breaking); other
-scripts are best-effort and bidi/RTL plus full Unicode line breaking are not implemented. PNG
+Not implemented yet: resource loading (keep-alive/gzip/parallel resource loading and image
+cache/lazy loading, M13), CSS compatibility and modern layout (M14/M15), proxies (M16), JavaScript
+(deferred), borders, horizontal scrolling/scrollbars, hover/active link styling and form controls,
+`@font-face`/webfont downloads, XShm/dirty-rect presentation, and GPU rendering (a deliberate
+decision, see roadmap M11). External `<link rel="stylesheet">` sheets work since M12 (discovered in
+document order, filtered, resolved against the final URL, fetched and cascaded with `<style>` and
+`style` attributes; no `@import`, media queries, alternate/disabled sheet selection or CSS images
+yet); pages without links are byte-identical to M11. Font selection works automatically since M10
+(CSS families/weight/style through fontconfig, character-coverage fallback, CJK line breaking);
+other scripts are best-effort and bidi/RTL plus full Unicode line breaking are not implemented. PNG
 images work since M8a, real fonts since M8b and `https://` since M9 (see the known limits in
 [roadmap.md](roadmap.md)); `http://` and `file://` remain supported. The window and `--screenshot`
 paint a real page when a URL is given and the M1 placeholder page otherwise; with a page URL the
@@ -68,7 +73,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 66/66 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 70/70 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
 or newer is required; building needs the X11, libpng, freetype, harfbuzz, fontconfig and OpenSSL
@@ -80,6 +85,29 @@ the same commands as `default`/`dev` presets, and `.github/workflows/ci.yml` run
 build, test and install-smoke sequence with both GCC and Clang.
 
 ```sh
+# External stylesheets (M12): the committed fixture site links a subdirectory sheet
+# between two inline <style> elements and has filtered, failing and duplicate links.
+"$BUILD"/toybrowser --dump-style \
+    "file://$PWD/tests/fixtures/css_site/index.html" | grep -E '#(external|before|after|inline)'
+"$BUILD"/toybrowser --size 320x200 --dump-boxes \
+    "file://$PWD/tests/fixtures/css_site/index.html" | head
+"$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-css.ppm \
+    "file://$PWD/tests/fixtures/css_site/index.html" && file /tmp/toybrowser-css.ppm
+```
+
+Expected: the external rule applies (`#external` gets `color=#123456 background-color=#abcdef
+font-size=24px` and its 6/10/12/14 px margins only from `styles/site.css`), document order decides
+the same-specificity ties (`#before` green from the linked sheet that follows the first `<style>`,
+`#after` blue from the second `<style>`), and the inline `style` attribute still wins (`#inline`
+green). The box dump shows the frozen external-rule geometry (`<p>` at x=22 y=14 width=280
+height=24, page height 202). `--dump-style` fetches the sheets; `--dump-dom`/`--dump-body` do not.
+The tests are offline: committed `file://` fixtures plus an in-process loopback HTTP server
+(`tests/support/http_server.h`), never the public network. `style.external_sheets`,
+`shell.external_css`, `shell.dump_style_external` and `shell.dump_style_filtered_only` cover
+ordering, filtering, redirects, absolute URLs, failure skips and no-dedup request counts.
+
+```sh
+# Images (M8a): the committed PNG fixtures render end to end.
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
     "file://$PWD/tests/fixtures/img_site/index.html" && file /tmp/toybrowser-img.ppm
 "$BUILD"/toybrowser --size 320x200 --dump-boxes \
@@ -154,42 +182,46 @@ Window demo (needs a display):
 # history; the title follows <title>.
 ```
 
-## Next round: M12 — External stylesheets (planned; starts only on the maintainer's go-ahead)
+## Next round: M13 — Resource loading pipeline (planned; starts only on the maintainer's go-ahead)
 
-**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M12 code exists. M11 is complete and
-green, so the starting point is the current HEAD. M13–M15 are the following planned rounds; the
-HTTP proxy moved to M16 and the JavaScript subset stays deferred. Contracts are frozen when the
-round starts.
+**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M13 code exists. M12 is complete and
+green, so the starting point is the current HEAD. M14–M15 are the following planned rounds; the
+HTTP proxy stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when the round
+starts.
 
-- Goal: render pages that ship their styling as external files. Discover `<link rel="stylesheet"
-  href="...">` in document order, resolve `href` against the page's final URL after redirects,
-  fetch with the existing `net::Fetch` (16 MiB body cap), parse with the existing CSS parser and
-  apply the author sheets in document order interleaved with `<style>` and `style` attributes.
-  Missing, failed and unsupported sheets are skipped silently, like images today.
-- Expected shape (freeze before spawning): filter on `rel`/`href`/`media`/`type`/`disabled`;
-  only empty/`all`/`screen` media and empty/`text/css` types apply; document-order cascade with the
-  current specificity/inheritance/`!important` rules; pages without `<link>` keep byte-identical
-  dumps and pixels. No new dependency.
-- Out of scope until re-scoped: `@import`, alternate/disabled sheets, media queries, `url(...)`
-  resources, CSS `@charset`, cross-origin restrictions.
-- Tests: offline fixture site with an external sheet in a subdirectory, relative/absolute `href`s,
-  `link`/`style` ordering, duplicate/failing links, a redirecting stylesheet URL on the loopback
-  server, and pre-M12 byte-compatibility; no public network in tests.
-- Acceptance: all tests pass on GCC and Clang; the fixture proves ordering and failure behavior; a
-  manual real-site check (a standards/documentation page that needs no JavaScript) visibly applies
-  its typography and colors; docs updated.
-- After M12: M13 resource loading (keep-alive, gzip, image cache/dedup; measured parallelism only if
-  needed), then M14 CSS compatibility batch 1 and M15 the flexbox/position/float subset. The proxy
-  (M16) and JavaScript stay deferred until the maintainer prioritises them.
+- Goal: make pages with many assets load in time proportional to bytes rather than to the number of
+  connections. Measured start point: image-heavy real pages spend ~20 s wall while the process uses
+  ~0.1 s CPU, because every `<img>` and stylesheet is fetched serially on a fresh connection (no
+  keep-alive, no compression, no image cache; external stylesheets since M12 are serial too).
+- Expected shape (freeze before spawning): a `net` session/client owning reusable HTTP/1.1
+  connections per host (keep-alive, `Connection: close`/EOF handling, chunked and Content-Length
+  bodies, timeouts), gzip decoding with the already-approved zlib, and per-page resource
+  deduplication/caching (image URLs first; stylesheet requests also reuse connections). The public
+  `net::Fetch` stays as the one-shot convenience wrapper; rendered pixels and dumps must not change.
+- Out of scope until re-scoped: HTTP/2, cookies, HTTP caching headers, the proxy (M16), lazy
+  loading beyond the dedup cache; whether to add limited parallel prefetch (and therefore threads)
+  is decided from measurements, not assumed.
+- Tests: loopback HTTP/HTTPS servers asserting connection reuse, gzip bodies, body caps, redirects
+  and duplicate resource requests; no public network and no wall-time assertions in CTest.
+- Acceptance: a measured before/after load-time drop on image-heavy real pages; connection/request
+  counts asserted by tests; every existing dump and screenshot byte-identical; GCC and Clang green.
+- After M13: M14 CSS compatibility batch 1 (line-height, text-align, borders, `rgb()`, units, ...),
+  then M15 the flexbox/position/float subset. The proxy (M16) and JavaScript stay deferred until
+  the maintainer prioritises them.
 
-## Map of the repository## Map of the repository
+## Map of the repository
 
 - `src/<module>/` — one CMake library target per module (`base` does not exist yet; see
   [architecture.md](architecture.md) for the module map and dependency direction).
 - `src/main.cpp` — CLI parsing only; `shell` orchestrates fetch → parse → style → images → layout →
   paint → dump/present, and `toy/shell/browser.h` owns one browser session (history, scroll, clicks,
   title).
-- `src/shell/page.h` — shell-private page loader (final URL, DOM, styles, box tree, decoded images);
+- `src/shell/page.h` — shell-private page loader (final URL, DOM, styles, box tree, decoded images)
+  plus the M12 `LoadStyledDocument()` path that fetches and filters the page's external
+  `<link rel="stylesheet">` sheets before styling and is shared by `LoadPage` and `--dump-style`;
+  `src/style/` matches selectors and resolves the wrapper cascade (UA, author `<style>` and linked
+  sheets in document order, inline `style`), with `style::LinkedStyleSheet` entries supplied by the
+  shell so `style` never fetches anything;
   `src/render/include/toy/render/image.h` — `Image` and the libpng-backed `DecodePng`;
   `src/render/include/toy/render/font.h` — bitmap-font metrics plus the real `Font` API (load,
   metrics, shaped advances; no freetype/harfbuzz types in the header), implemented by
@@ -216,14 +248,18 @@ round starts.
   PNGs with documented pixel content), `tests/fixtures/fonts/` (self-authored minimal TTFs:
   regular, bold, italic and a tiny Han face, all with documented metrics/family; the tests never
   use installed fonts), `tests/fixtures/cjk_site/` (Chinese page served from disk, asserting
-  per-unit boxes, wrapping and painted ink), `tests/fixtures/https_site/`
+  per-unit boxes, wrapping and painted ink), `tests/fixtures/css_site/` (M12 external-stylesheet
+  fixture site: relative subdirectory sheet, ordering, filtered/failing/duplicate links and a
+  documented expected style/geometry/pixel table), `tests/fixtures/https_site/`
   (HTML+PNG page served over TLS by the shell test) and `tests/fixtures/tls/` (committed test-only
   CA, `localhost` leaf and untrusted leaf certificates/keys; see its README for regeneration).
   The binary fixtures ship their generators next to them: `tests/fixtures/fonts/generate_toy_test.py`,
   `tests/fixtures/fonts/generate_variants.py` and `tests/fixtures/images/generate.py` (stdlib-only,
   deterministic; see the fixture READMEs).
   `tests/support/tls_server.h` is the header-only in-process TLS loopback server shared by
-  `net.tls`/`net.http`/`shell.https`; no test ever contacts the public network.
+  `net.tls`/`net.http`/`shell.https`, and `tests/support/http_server.h` (M12) is the header-only
+  plain-HTTP loopback server (request recording, redirect/absolute-URL/failure cases for external
+  stylesheets); no test ever contacts the public network.
 - Root public files — `README.md`/`README.zh.md` (user-facing entry points), `AI-DISCLOSURE.md`,
   `CONTRIBUTING.md`, `SECURITY.md`, `CMakePresets.json`, `.github/workflows/ci.yml` and
   `docs/assets/` screenshots.
@@ -376,6 +412,30 @@ round starts.
   lays out as an empty inline); there is no image cache (one fetch per occurrence) and images are
   fetched even if the element would not be visible. `--dump-boxes` uses the same loader;
   `--dump-dom`/`--dump-style` do not fetch images.
+- External stylesheet contract (M12): public `style::LinkedStyleSheet { dom::NodeId link_node;
+  std::string text; }` and a two-arg `style::ComputeStyles(document, linked_sheets)`. The style
+  module does no I/O: it walks the document once and inserts each caller-supplied sheet at its
+  `<link>` element's document position, interleaved with the document's `<style>` elements, so
+  equal-specificity ties resolve by document order exactly like the pre-M12 `<style>` handling;
+  specificity, `!important`, inheritance and inline `style` declarations are unchanged. The
+  one-arg overload stays exactly pre-M12 (empty list, no extra per-element work). The shell owns
+  everything else: one iterative pre-order DOM walk discovers `<link>` elements in head or body in
+  document order; the first occurrence of each attribute is used; `rel` is split on ASCII
+  whitespace and ASCII-lowercased, and a sheet applies only when a `stylesheet` token is present
+  and no `alternate` token is present; any `disabled` attribute (any value) skips the link;
+  `media` (trimmed, lowercased) applies only when empty/`all`/`screen`; `type` applies only when
+  empty/`text/css`; `href` is trimmed, must be non-empty, and is resolved with `net::ResolveUrl`
+  against the page's final URL after redirects. Sheets are fetched with `net::Fetch` default
+  options (5 s connect / 10 s read / 16 MiB body cap), serially, once per applicable occurrence
+  (no deduplication or cache, like images); only status 200..299 bodies are parsed. Every filtered,
+  unresolvable, failed or non-2xx sheet is skipped silently: no stderr, no page-load failure, no
+  broken-styles UI. The private `shell::LoadStyledDocument()` performs fetch → parse → sheet
+  discovery/filtering/fetching → `ComputeStyles`, and is shared by `LoadPage` (window,
+  `--screenshot`, `--dump-boxes`) and `--dump-style`; only its page fetch can fail (the out
+  parameters are untouched on failure and the caller adds the message prefix). `--dump-body` and
+  `--dump-dom` keep their old code paths and fetch no sheets. No CLI flags, exit codes or dump
+  formats changed, and a page without `<link>` (or whose links are all skipped) keeps
+  byte-identical dumps, exit status and PPM pixels to M11.
 - Navigation/session contract (`toy/shell/browser.h`): one history entry per successful load,
   failed loads change nothing, every successful load resets the scroll offset to 0, a reference
   that only changes the fragment is a no-op, the title is the first `<title>` text (collapsed,
@@ -621,6 +681,35 @@ round starts.
   (system-font raster time was identical at 800x600 and 1600x1000); revisit only if rasterization
   still exceeds the frame budget after the caches/culling, and treat any GPU/XShm work as a new
   dependency decision requiring the user's approval.
+- M12 external stylesheets are fetched on the page-load path (window, `--screenshot`,
+  `--dump-boxes`) and by `--dump-style`, so a page with `<link rel="stylesheet">` can now make extra
+  network or `file://` requests during a test or demo. Tests must use the committed `file://`
+  fixtures or the in-process `tests/support/http_server.h` loopback server, never the public
+  network; `--dump-dom`/`--dump-body` must keep fetching no sheets (verify when touching
+  `application.cpp`).
+- The M12 link filter is deliberately tiny: first attribute occurrences only, `rel` token list with
+  `stylesheet` and without `alternate`, no `disabled`, `media` only empty/`all`/`screen`, `type` only
+  empty/`text/css`, `href` trimmed and resolved against the final page URL, only 200..299 bodies,
+  every skipped sheet silent, one fetch per occurrence (no dedup/cache). Do not add `@import`,
+  media queries, alternate/disabled selection, parameterised `type` values, `url(...)` resources or
+  a stylesheet cache without a contract change: `media="not print, ..."` (used by real sites such as
+  python.org) being skipped is a documented MVP limit, not a bug.
+- `style` must stay free of I/O: it only parses the texts the shell supplies and orders them by
+  `<link>` DOM node id (`style::LinkedStyleSheet`, two-arg `ComputeStyles`). The one-arg overload
+  must stay byte-identical to M11, including the no-links fast path; the shell keeps the
+  discovery/filter/fetch policy in `LoadStyledDocument`, and only a page fetch may fail the load
+  (out parameters stay untouched on failure; sheet problems never fail it).
+- Stylesheet fetches are serial with the default `FetchOptions` (5 s connect / 10 s read, 16 MiB
+  body cap), so a page with many slow or dead sheets can delay the load; that is M13's resource
+  pipeline problem — do not add ad-hoc parallel/threaded fetching in the shell.
+- `tests/fixtures/css_site/` freezes expected computed values, box geometry and painted pixel counts
+  in its README and in `shell.external_css`/`shell.dump_style_*`; changing the fixture, the filter
+  rules or the style dump output means updating the fixture README, the style tests and the shell
+  tests together (same rule as the nav/img/font fixtures). Keep one external sheet in a
+  subdirectory, one `<link>` inside `<body>`, and the document-order ordering page when editing it.
+- `tests/support/http_server.h` is test-only header-only infrastructure (one request per
+  connection, requests recorded for sequence assertions). Keep production code out of it, never
+  use it from the browser, and assert request counts rather than wall time.
 - Fixture generators are committed next to the fixtures they produce (`tests/fixtures/fonts/generate_toy_test.py`,
   `tests/fixtures/fonts/generate_variants.py`, `tests/fixtures/images/generate.py`). The font
   generators reproduce the committed TTFs byte for byte; the PNG generator reproduces the documented

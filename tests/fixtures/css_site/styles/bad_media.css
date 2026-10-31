@@ -1,0 +1,4 @@
+/* Would recolor #good if the media="print" filter were ignored. */
+#good {
+  color: #aa0000;
+}

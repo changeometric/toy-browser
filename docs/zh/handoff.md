@@ -26,17 +26,21 @@
 | M9 | `https://` 抓取：`net` URL 层接受 https（默认端口 443）；保持阻塞 `Fetch()` 不变，内部接入 OpenSSL TLS 传输，并通过私有字节流抽象与 HTTP/1.1 代码共用；证书与主机名校验始终开启并使用 OpenSSL 默认信任库（无 insecure 模式）、SNI、沿用现有超时；重定向改用 `net::ResolveUrl`（相对/协议相对、http<->https）；提交测试 CA/叶证书、进程内 TLS loopback 服务器、`net.tls` + `shell.https` 端到端测试、57 个测试；http/file 输出逐字节不变 |
 | M10 | 自动字体选择：CSS `font-family`/`font-weight`/`font-style` 通过已批准的 fontconfig 匹配，初始字体族 `serif`，按码点字符覆盖切分 run 实现回退（拉丁页面上的汉字，反之亦然），根 `<html lang>` 作为 fontconfig 语言提示；共享的 `shell::Fonts` 对象同时驱动布局度量与绘制（`TextMetrics::ascent_px`、`Box::baseline_offset_px`、`paint::FontRunsProvider`）；layout 中加入简化的 CJK 断行单元，使中文段落可换行；提交了常规/粗体/斜体/汉字 fixture 字体与确定性的 fixture/空 fontconfig 测试配置；保留 `--font`/`--font-family` 覆盖；位图路径仍是逐字节相同的退化路径；66 个测试 |
 | M11 | 性能：默认 RelWithDebInfo 构建 + `-ffp-contract=off`；render 文本缓存（每个字体复用一个 hb_font/hb_buffer，有界 shaped-run 与 glyph 覆盖率 LRU）；shell 字体缓存（无分配的解析样式快速路径、度量与 run LRU）；paint 视口裁剪（文本保守余量）；窗口循环修正（Expose 不重排、resize 仅尺寸变化时重排、合并 X11 Expose/ConfigureNotify burst、复用 surface）；渲染逐字节不变；66 个测试 |
+| M12 | 外部样式表：公开 `style::LinkedStyleSheet` 与双参数 `ComputeStyles(document, linked_sheets)`，按文档顺序合并没有链接的样式表与 `<style>`（单参数重载与 M11 逐字节相同）；shell 私有 `LoadStyledDocument()` 在页面加载与 `--dump-style` 之间共享一条 抓取/解析/发现/过滤/抓取样式表/计算样式 路径；`rel`/`disabled`/`media`/`type` 过滤，`href` 相对重定向后的最终页面 URL 解析，只接受 200..299 body，失败/被过滤样式表静默跳过，每个 `<link>` 出现抓取一次（不去重）；`--dump-dom`/`--dump-body` 仍不抓取样式表；提交 `tests/fixtures/css_site/`、header-only `tests/support/http_server.h` loopback 服务器、`style.external_sheets` + `shell.external_css` + CLI 测试；70 个测试；字节兼容与 GCC/Clang 门禁全绿 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-**下一计划里程碑：M12 —— 外部样式表（已计划，尚未开始）。** M11（性能）已交付，仓库已做好公开
-分享准备。M12 让 `<link rel="stylesheet">` 生效：按文档顺序发现样式表，相对最终 URL 解析、抓取、
-解析，并与内联 `<style>`、`style` 属性一起级联。随后是 M13（资源加载管线）、M14（CSS 兼容批次 1）
-与 M15（flexbox/position/float 子集）；HTTP 代理（M16）与 JavaScript 子集保持延后。
+**下一计划里程碑：M13 —— 资源加载管线（已计划，尚未开始）。** M12（外部样式表）已交付，真实页面
+现在会应用其外部 CSS。M13 让含大量资源的页面加载时间与字节数成正比，而不是与连接数成正比：按 host
+复用 HTTP/1.1 连接、gzip，以及按页面去重/缓存资源（先做图片 URL；串行的样式表抓取也会受益于
+keep-alive）。随后是 M14（CSS 兼容批次 1）与 M15（flexbox/position/float 子集）；HTTP 代理（M16）与
+JavaScript 子集保持延后。
 
-尚未实现：外部样式表（下一步 M12）、资源加载（keep-alive/gzip/并行资源加载与图片缓存/懒加载，
-M13）、CSS 兼容与现代布局（M14/M15）、代理（M16）、JavaScript（已延后）、border、水平滚动/滚动条、
-hover/active 链接样式与表单控件、`@font-face`/webfont 下载、XShm/dirty-rect 呈现与 GPU 渲染
-（刻意决策，见 roadmap M11）。字体选择自 M10 起自动完成
+尚未实现：资源加载（keep-alive/gzip/并行资源加载与图片缓存/懒加载，M13）、CSS 兼容与现代布局
+（M14/M15）、代理（M16）、JavaScript（已延后）、border、水平滚动/滚动条、hover/active 链接样式与
+表单控件、`@font-face`/webfont 下载、XShm/dirty-rect 呈现与 GPU 渲染（刻意决策，见 roadmap M11）。
+外部 `<link rel="stylesheet">` 样式表自 M12 起可用（按文档顺序发现、过滤、相对最终 URL 解析、抓取，
+并与 `<style>`、`style` 属性一起级联；还没有 `@import`、media queries、alternate/disabled 样式表
+选择或 CSS 图片）；不带链接的页面与 M11 逐字节相同。字体选择自 M10 起自动完成
 （CSS 字体族/weight/style 经 fontconfig、字符覆盖回退、CJK 断行）；其他语言尽力支持，bidi/RTL 与
 完整 Unicode 断行尚未实现。PNG 图片自 M8a 起可用、真实字体自 M8b 起可用、`https://` 自 M9 起可用
 （已知限制见 [roadmap.md](roadmap.md)）；`http://` 与 `file://` 仍受支持。窗口与 `--screenshot` 在
@@ -64,7 +68,27 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-预期：66/66 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。`CMakePresets.json` 把同样的命令封装为 `default`/`dev` presets，`.github/workflows/ci.yml` 用 GCC 与 Clang 运行 configure、build、test 与安装冒烟步骤。
+预期：70/70 测试通过；使用 `-DTOYBROWSER_WERROR=ON` 构建在 GCC 和 Clang 上无警告；dump 输出确定性的树；截图写出二进制 PPM（带 URL 的形式绘制真实页面，不带 URL 的形式保留占位页）。所有 headless 模式都不需要显示器。需要 CMake 3.20 或更新版本；构建需要 X11、libpng、freetype、harfbuzz、fontconfig 与 OpenSSL 开发头文件（均为已批准的依赖）；只有窗口模式需要运行中的显示服务器。未指定 `CMAKE_BUILD_TYPE` 时默认 `RelWithDebInfo`（M11）；调试可传 `-DCMAKE_BUILD_TYPE=Debug`。`-ffp-contract=off` 是刻意加的，保证布局几何在不同构建类型与编译器间逐字节一致。`CMakePresets.json` 把同样的命令封装为 `default`/`dev` presets，`.github/workflows/ci.yml` 用 GCC 与 Clang 运行 configure、build、test 与安装冒烟步骤。
+
+```sh
+# 外部样式表（M12）：提交的 fixture 站点在两个内联 <style> 之间链接子目录样式表，并包含
+# 被过滤、失败与重复的链接。
+"$BUILD"/toybrowser --dump-style \
+    "file://$PWD/tests/fixtures/css_site/index.html" | grep -E '#(external|before|after|inline)'
+"$BUILD"/toybrowser --size 320x200 --dump-boxes \
+    "file://$PWD/tests/fixtures/css_site/index.html" | head
+"$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-css.ppm \
+    "file://$PWD/tests/fixtures/css_site/index.html" && file /tmp/toybrowser-css.ppm
+```
+
+预期：外部规则生效（`#external` 从 `styles/site.css` 得到 `color=#123456 background-color=#abcdef
+font-size=24px` 与 6/10/12/14 px 的 margin），文档序决定同特异性的 tie（`#before` 由第一个
+`<style>` 之后的链接样式表决定为绿色，`#after` 由第二个 `<style>` 决定为蓝色），内联 `style` 属性
+仍然胜出（`#inline` 绿色）。盒 dump 显示冻结的外部规则几何（`<p>` 位于 x=22 y=14 width=280
+height=24，页面高度 202）。`--dump-style` 会抓取样式表；`--dump-dom`/`--dump-body` 不会。测试完全
+离线：提交的 `file://` fixtures 加进程内 loopback HTTP 服务器（`tests/support/http_server.h`），
+从不访问公网。`style.external_sheets`、`shell.external_css`、`shell.dump_style_external` 与
+`shell.dump_style_filtered_only` 覆盖顺序、过滤、重定向、绝对 URL、失败跳过与不去重请求数。
 
 ```sh
 "$BUILD"/toybrowser --size 320x200 --screenshot /tmp/toybrowser-img.ppm \
@@ -133,30 +157,29 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 # 方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right 前进后退；窗口标题跟随 <title>。
 ```
 
-## 下一轮：M12 —— 外部样式表（已计划；等维护者确认后开始）
+## 下一轮：M13 —— 资源加载管线（已计划；等维护者确认后开始）
 
-**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M12 代码。M11 已完成且全绿，因此
-起点就是当前 HEAD。M13–M15 是后续计划轮次；HTTP 代理移到 M16，JavaScript 子集保持延后。契约在该轮
+**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M13 代码。M12 已完成且全绿，因此
+起点就是当前 HEAD。M14–M15 是后续计划轮次；HTTP 代理仍在 M16，JavaScript 子集保持延后。契约在该轮
 开始时冻结。
 
-- 目标：渲染把样式放在外部文件里的页面。按文档顺序发现 `<link rel="stylesheet" href="...">`，
-  `href` 相对重定向后的最终 URL 解析，用现有 `net::Fetch` 抓取（16 MiB body 上限），用现有 CSS
-  parser 解析，并按文档顺序把 author 样式表与 `<style>`、`style` 属性交错应用。缺失、失败与不支持的
-  样式表像今天的图片一样静默跳过。
-- 预期形态（spawn 前冻结）：按 `rel`/`href`/`media`/`type`/`disabled` 过滤；只应用空/`all`/`screen`
-  media 与空/`text/css` type；沿用当前的 specificity/继承/`!important` 级联规则；不带 `<link>` 的
-  页面保持逐字节相同的 dump 与像素。不引入新依赖。
-- 在重新划范围之前不做：`@import`、alternate/disabled 样式表、media queries、`url(...)` 资源、
-  CSS `@charset`、跨域限制。
-- 测试：离线 fixture 站点（子目录中的外部样式表、相对/绝对 `href`、`link`/`style` 顺序、重复/失败
-  链接、loopback server 上的重定向样式表 URL），以及 M12 之前的字节兼容；测试不访问公网。
-- 验收：所有测试在 GCC 与 Clang 下通过；fixture 证明顺序与失败行为；手工真实站点检查（一个不依赖
-  JavaScript 的标准/文档页面）能明显应用其排版与颜色；文档更新。
-- M12 之后：M13 资源加载（keep-alive、gzip、图片缓存/去重；只有实测需要时才并行），然后 M14 CSS
-  兼容批次 1 与 M15 flexbox/position/float 子集。代理（M16）与 JavaScript 在维护者重新确认优先级
-  之前保持延后。
+- 目标：让含大量资源的页面加载时间与字节数成正比，而不是与连接数成正比。实测起点：图片较多的真实
+  页面墙体时间约 20 s，而进程只用约 0.1 s CPU，因为每个 `<img>` 与样式表都用新连接串行抓取（没有
+  keep-alive、没有压缩、没有图片缓存；M12 起外部样式表也是串行的）。
+- 预期形态（spawn 前冻结）：一个 net session/client，按 host 复用 HTTP/1.1 连接（keep-alive、
+  `Connection: close`/EOF 处理、chunked 与 `Content-Length` body、超时）；用已批准的 zlib 解码 gzip；
+  按页面去重/缓存资源（先做图片 URL；样式表请求也复用连接）。公开的 `net::Fetch` 保留为一次性便捷
+  包装；渲染像素与 dump 不得改变。
+- 在重新划范围之前不做：HTTP/2、cookie、HTTP 缓存头、代理（M16）；去重缓存之外的懒加载；是否增加
+  有限并行预取（以及因此引入线程）由实测决定，而不是预先假设。
+- 测试：loopback HTTP/HTTPS server 断言连接复用、gzip body、body 上限、重定向与重复资源请求；不访问
+  公网；不断言耗时。
+- 验收：图片较多的真实页面有实测 before/after 加载时间下降；连接/请求数由测试断言；所有既有 dump 与
+  截图逐字节不变；GCC 与 Clang 全绿。
+- M13 之后：M14 CSS 兼容批次 1（line-height、text-align、border、`rgb()`、单位……），然后 M15
+  flexbox/position/float 子集。代理（M16）与 JavaScript 在维护者重新确认优先级之前保持延后。
 
-## 仓库地图## 仓库地图
+## 仓库地图
 
 - `src/<module>/` —— 每个模块一个 CMake 库目标（`base` 尚不存在；模块图与依赖方向见 [architecture.md](architecture.md)）。
 - `src/main.cpp` —— 只做 CLI 解析；`shell` 编排 fetch → parse → style → images → layout → paint →
@@ -166,7 +189,11 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
   （私有 `Stream` 接口、纯 `SocketStream` 与 `ReadUntilEof`）、`tls_internal.h`/`tls.cpp`
   （OpenSSL 实现的 `TlsStream`、进程级 `SSL_CTX`、校验/握手循环、SIGPIPE 保护）。OpenSSL 类型不出现在
   公开的 `include/` 头文件中；`net` 唯一的公开 API 是 `toy/net/url.h` + `toy/net/http.h`。
-- `src/shell/page.h` —— shell 私有的页面加载器（最终 URL、DOM、样式、盒树、解码后的图片）；
+- `src/shell/page.h` —— shell 私有的页面加载器（最终 URL、DOM、样式、盒树、解码后的图片），以及
+  M12 的 `LoadStyledDocument()`：在计算样式之前抓取并过滤页面的外部 `<link rel="stylesheet">`
+  样式表，由 `LoadPage` 与 `--dump-style` 共享；`src/style/` 负责选择器匹配与级联（UA、作者
+  `<style>` 与按文档顺序的链接样式表、内联 `style`），外部样式表以 `style::LinkedStyleSheet`
+  条目由 shell 提供，因此 `style` 从不抓取任何东西；
   `src/render/include/toy/render/image.h` —— `Image` 与基于 libpng 的 `DecodePng`；
   `src/render/include/toy/render/font.h` —— 位图字体度量加真实 `Font` API（加载、度量、整形 advance；
   公开头文件不含 freetype/harfbuzz 类型），实现位于 `src/render/font_ttf.cpp`；显示列表与光栅化器在
@@ -184,12 +211,15 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
   `tests/fixtures/images/`（像素内容有文档的手工 PNG）、`tests/fixtures/fonts/`（自造最小 TTF：
   常规、粗体、斜体与一个小汉字 face，度量/字体族有文档；测试从不使用已安装字体）、
   `tests/fixtures/cjk_site/`（从磁盘加载的中文页面，断言逐单元文本盒、换行与绘制像素）、
+  `tests/fixtures/css_site/`（M12 外部样式表 fixture 站点：子目录相对样式表、顺序、被过滤/失败/
+  重复链接，以及有文档的期望样式/几何/像素表）、
   `tests/fixtures/https_site/`（shell 测试通过 TLS 提供的 HTML+PNG 页面）与 `tests/fixtures/tls/`（提交的仅测试用 CA、`localhost` 叶证书与不受信任叶
   证书/私钥；重新生成方法见其 README）。二进制 fixture 的生成器与 fixture 一起提交：
   `tests/fixtures/fonts/generate_toy_test.py`、`tests/fixtures/fonts/generate_variants.py` 与
   `tests/fixtures/images/generate.py`（只用标准库、输出确定；见各 fixture README）。
   `tests/support/tls_server.h` 是 `net.tls`/`net.http`/`shell.https` 共用的 header-only 进程内 TLS
-  loopback 服务器；没有任何测试访问公网。
+  loopback 服务器，`tests/support/http_server.h`（M12）是 header-only 的纯 HTTP loopback 服务器
+  （记录请求，用于外部样式表的重定向/绝对 URL/失败用例）；没有任何测试访问公网。
 - 根目录公开文件 —— `README.md`/`README.zh.md`（面向使用者的入口）、`AI-DISCLOSURE.md`、
   `CONTRIBUTING.md`、`SECURITY.md`、`CMakePresets.json`、`.github/workflows/ci.yml` 与
   `docs/assets/` 截图。
@@ -273,6 +303,23 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
   （没有 broken-image UI、没有 stderr、页面加载仍成功，元素按空行内布局）；没有图片缓存（每次出现各
   抓取一次），即使元素不可见也会抓取。`--dump-boxes` 使用同一加载器；`--dump-dom`/`--dump-style`
   不抓取图片。
+- 外部样式表契约（M12）：公开 `style::LinkedStyleSheet { dom::NodeId link_node; std::string text; }`
+  与双参数 `style::ComputeStyles(document, linked_sheets)`。`style` 模块不做任何 I/O：它遍历文档一次，
+  把每个调用方提供的样式表插到其 `<link>` 元素的文档位置，与文档自己的 `<style>` 元素交错，因此
+  同特异性 tie 与 M12 之前 `<style>` 的处理一样按文档序决定；specificity、`!important`、继承与内联
+  `style` 声明不变。单参数重载保持 M12 之前完全一致（空列表，无额外逐元素开销）。其余全部由 shell
+  负责：一次迭代式前序遍历按文档顺序发现 head 或 body 中的 `<link>`；每个属性取第一次出现；`rel` 按
+  ASCII 空白分词并转小写，只有含 `stylesheet` token 且不含 `alternate` token 时才应用；任何
+  `disabled` 属性（任意值）都跳过该 link；`media`（去空白、小写）只在空/`all`/`screen` 时应用；
+  `type` 只在空/`text/css` 时应用；`href` 去空白后必须非空，并用 `net::ResolveUrl` 相对重定向后的
+  最终页面 URL 解析。样式表用 `net::Fetch` 默认参数（5 s 连接 / 10 s 读取 / 16 MiB body 上限）串行
+  抓取，每个适用出现一次（不去重、无缓存，和图片一样）；只解析状态码 200..299 的 body。所有被过滤、
+  无法解析、失败或非 2xx 的样式表都静默跳过：不写 stderr、不让页面加载失败、没有坏样式 UI。私有
+  `shell::LoadStyledDocument()` 执行 抓取 → 解析 → 样式表发现/过滤/抓取 → `ComputeStyles`，由
+  `LoadPage`（窗口、`--screenshot`、`--dump-boxes`）与 `--dump-style` 共享；只有页面抓取会失败
+  （失败时输出参数不变，调用方加消息前缀）。`--dump-body` 与 `--dump-dom` 保持旧代码路径，不抓取
+  样式表。没有 CLI 标志、退出码或 dump 格式改动；不带 `<link>`（或其链接全部被跳过）的页面在 dump、
+  退出码与 PPM 像素上与 M11 逐字节相同。
 - 导航/会话契约（`toy/shell/browser.h`）：每次成功加载一条历史，加载失败不改变任何东西，每次
   成功加载把滚动偏移重置为 0，只改变 fragment 的引用是 no-op，标题是第一个 `<title>` 文本
   （折叠空白，没有时回退到序列化最终 URL），只有 `http`/`https`/`file` 引用会导航。M8a 保持公开方法完全
@@ -446,6 +493,30 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 - M11 刻意没有加 GPU 后端：实测填充率不是瓶颈（系统字体光栅化在 800×600 与 1600×1000 下耗时
   相同）；只有在缓存/裁剪之后光栅化仍超帧预算时才重新评估，且 GPU/XShm 工作都算新依赖决策，需要
   用户批准。
+- M12 外部样式表会在页面加载路径（窗口、`--screenshot`、`--dump-boxes`）以及 `--dump-style` 中
+  被抓取，因此带 `<link rel="stylesheet">` 的页面现在可能在测试或演示中产生额外的网络或 `file://`
+  请求。测试必须使用提交的 `file://` fixtures 或进程内 `tests/support/http_server.h` loopback
+  服务器，绝不访问公网；`--dump-dom`/`--dump-body` 必须继续不抓取样式表（改 `application.cpp`
+  时要检查）。
+- M12 的 link 过滤刻意很小：只取每个属性的第一次出现、`rel` token 含 `stylesheet` 且不含
+  `alternate`、无 `disabled`、`media` 只允许空/`all`/`screen`、`type` 只允许空/`text/css`、
+  `href` 去空白并相对最终页面 URL 解析、只解析 200..299 body、所有被跳过样式表静默、每次出现
+  抓取一次（不去重/缓存）。没有契约变更不要加 `@import`、media queries、alternate/disabled
+  选择、带参数 `type`、`url(...)` 资源或样式表缓存：真实站点（如 python.org）使用的
+  `media="not print, ..."` 被跳过是有文档的 MVP 限制，不是 bug。
+- `style` 必须保持无 I/O：它只解析 shell 提供的文本，并按 `<link>` DOM 节点 id 排序
+  （`style::LinkedStyleSheet`、双参数 `ComputeStyles`）。单参数重载必须与 M11 逐字节一致（包括
+  无链接快速路径）；发现/过滤/抓取策略留在 shell 的 `LoadStyledDocument`，只有页面抓取可以让加载
+  失败（失败时输出参数不变；样式表问题永不失败）。
+- 样式表抓取是串行的并使用默认 `FetchOptions`（5 s 连接 / 10 s 读取、16 MiB body 上限），因此
+  很多慢或坏链接的页面可能拖慢加载；这是 M13 资源管线的问题——不要在 shell 里加入临时的并行/线程
+  抓取。
+- `tests/fixtures/css_site/` 在其 README 与 `shell.external_css`/`shell.dump_style_*` 中冻结了
+  期望计算值、盒几何与绘制像素数；改 fixture、过滤规则或 style dump 输出时，要同时更新 fixture
+  README、style 测试与 shell 测试（与 nav/img/font fixtures 规则相同）。编辑时保留一个子目录
+  外部样式表、一个 `<body>` 内的 `<link>` 与文档序 ordering 页面。
+- `tests/support/http_server.h` 是仅测试用的 header-only 基础设施（每个连接一个请求、记录请求
+  以断言顺序）。不要把生产代码放进去、不要从浏览器使用它，并断言请求数而不是耗时。
 - fixture 生成器与它们生成的 fixture 一起提交（`tests/fixtures/fonts/generate_toy_test.py`、
   `tests/fixtures/fonts/generate_variants.py`、`tests/fixtures/images/generate.py`）。字体生成器逐字节
   复现已提交 TTF；PNG 生成器复现有文档的像素内容（精确 PNG 字节可能随本地 zlib 版本变化）。不要手工

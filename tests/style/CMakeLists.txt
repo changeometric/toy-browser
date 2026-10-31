@@ -14,3 +14,8 @@ add_executable(style_parser_test parser_test.cpp)
 toybrowser_set_warnings(style_parser_test)
 target_link_libraries(style_parser_test PRIVATE toy_style toy_test_support)
 add_test(NAME style.parser COMMAND style_parser_test)
+
+add_executable(style_external_sheet_test external_sheet_test.cpp)
+toybrowser_set_warnings(style_external_sheet_test)
+target_link_libraries(style_external_sheet_test PRIVATE toy_style toy_test_support)
+add_test(NAME style.external_sheets COMMAND style_external_sheet_test)

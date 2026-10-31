@@ -1,0 +1,18 @@
+/* Sheet for ordering.html: its rules are applied at the <link> position between
+   the page's first and second inline <style> elements. All three rules have the
+   same specificity (one id), so the winner is decided purely by document order. */
+
+/* The first inline sheet sets this red; the link comes later and wins. */
+#first {
+  color: #00ff00;
+}
+
+/* The link comes before the second inline sheet; that sheet wins. */
+#second {
+  color: #ff8800;
+}
+
+/* Both inline sheets and this link target #third; the last one wins. */
+#third {
+  color: #00ff00;
+}

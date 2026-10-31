@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+  <title>Filtered stylesheet links</title>
+  <!-- None of the first seven links may apply a sheet: print media, text/plain
+       type, the disabled attribute, an alternate sheet, an unsupported ftp:
+       scheme, an empty href and a missing local file are all skipped silently.
+       Only the last link, a good text/css sheet, applies. -->
+  <link rel="stylesheet" href="styles/bad_media.css" media="print">
+  <link rel="stylesheet" href="styles/bad_type.css" type="text/plain">
+  <link rel="stylesheet" href="styles/bad_disabled.css" disabled>
+  <link rel="alternate stylesheet" href="styles/bad_alternate.css">
+  <link rel="stylesheet" href="ftp://example.com/bad.css">
+  <link rel="stylesheet" href="  ">
+  <link rel="stylesheet" href="styles/missing.css">
+  <link rel="stylesheet" href="styles/good.css">
+</head>
+<body>
+  <p id="good">Good sheet</p>
+  <p id="bad">Bad sheets</p>
+  <!-- A <link> in the body is discovered too: the CSS walk covers the whole DOM,
+       head or body alike, in document order. -->
+  <link rel="stylesheet" href="styles/body.css">
+  <p id="body-sheet">Body link</p>
+</body>
+</html>

@@ -1,0 +1,32 @@
+/* The external author sheet of the M12 fixture site, loaded through
+   <link rel="stylesheet" href="styles/site.css"> from index.html. The link sits
+   between two inline <style> elements, so its rules participate in the author
+   cascade at that exact document position (equal specificity: later wins). */
+
+.external {
+  color: #123456;
+  background-color: #abcdef;
+  font-size: 24px;
+  margin-top: 6px;
+  margin-right: 10px;
+  margin-bottom: 12px;
+  margin-left: 14px;
+}
+
+/* index.html's first inline sheet sets #before red; this rule comes after it in
+   document order and wins, so #before is green. */
+#before {
+  color: #00ff00;
+}
+
+/* index.html's second inline sheet sets #after blue after this link and wins, so
+   #after is blue. */
+#after {
+  color: #ff8800;
+}
+
+/* index.html gives #inline an inline style declaration, which is more specific
+   than this sheet rule and wins, so #inline is #00aa00. */
+#inline {
+  color: #ff00ff;
+}

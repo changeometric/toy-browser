@@ -25,13 +25,17 @@ well-understood subset of the web and grows one minimal vertical slice at a time
 - A hand-written HTML parser and CSS parser. The style engine covers the selectors, cascade and
   computed values that the supported pages need; layout is block/inline flow with line breaking,
   replaced `<img>` elements and integer-pixel device rectangles.
+- External author stylesheets (M12): `<link rel="stylesheet">` sheets are discovered in document
+  order, filtered on `rel`/`disabled`/`media`/`type`, resolved against the page's final URL after
+  redirects, fetched and cascaded with inline `<style>` and `style` attributes; missing, failed and
+  unsupported sheets are skipped silently. This is what makes most real pages look styled.
 - Real text: freetype rasterization and harfbuzz shaping, automatic font selection through
   fontconfig (computed `font-family`/`font-weight`/`font-style`, character-coverage fallback,
   CJK break units) and a built-in bitmap font as the last-resort deterministic fallback.
 - PNG images decoded with libpng and drawn with nearest-neighbour scaling.
 - A navigable X11 window (clickable links, wheel/keyboard scrolling, Alt+Left/Right history, window
   title) and fully headless `--dump-*`/`--screenshot` modes for debugging and tests.
-- A small, deterministic test suite (66 CTest cases) and CI that builds it warning-free with GCC
+- A small, deterministic test suite (70 CTest cases) and CI that builds it warning-free with GCC
   and Clang.
 
 Chinese text is rendered with automatic font fallback and wraps without spaces:
@@ -96,6 +100,10 @@ The repository contains small offline demo pages so nothing here needs the publi
 # PNG image pipeline.
 ./build/toybrowser --size 480x400 --screenshot img.ppm \
     "file://$PWD/tests/fixtures/img_site/index.html"
+
+# External stylesheets: the sheet in styles/ is fetched and cascaded.
+./build/toybrowser --size 480x300 --dump-style \
+    "file://$PWD/tests/fixtures/css_site/index.html"
 ```
 
 | Fixture | What it demonstrates |
@@ -104,6 +112,7 @@ The repository contains small offline demo pages so nothing here needs the publi
 | [`tests/fixtures/font_site/`](tests/fixtures/font_site/) | Real TTF text (regular/bold/italic fixtures) and images |
 | [`tests/fixtures/cjk_site/`](tests/fixtures/cjk_site/) | Automatic font fallback, CJK line breaking and wrapping |
 | [`tests/fixtures/img_site/`](tests/fixtures/img_site/) | PNG decoding and inline replaced elements |
+| [`tests/fixtures/css_site/`](tests/fixtures/css_site/) | External `<link rel="stylesheet">` loading, filtering and document-order cascade |
 | [`tests/fixtures/https_site/`](tests/fixtures/https_site/) | HTTPS end-to-end through the loopback TLS test server |
 
 Headless inspection is the primary debugging path. Every stage has a dump mode:
@@ -145,20 +154,21 @@ nothing about HTML/CSS and the platform layer knows nothing about page content.
 
 ## Status and limitations
 
-Milestones M0–M11 are complete: the browser renders real pages, supports real fonts and images,
-speaks HTTPS and has a navigable window. The next planned milestone is external stylesheet support
-(M12), followed by a resource loading pipeline (M13), CSS compatibility batch 1 (M14) and a
+Milestones M0–M12 are complete: the browser renders real pages with their external stylesheets,
+supports real fonts and images, speaks HTTPS and has a navigable window. The next planned milestone
+is a resource loading pipeline (M13), followed by CSS compatibility batch 1 (M14) and a
 flexbox/position/float subset (M15). HTTP proxy support (M16) and the JavaScript subset are
 deferred.
 
 Known limits, by design of the current milestone set:
 
-- HTML/CSS support is a small subset: no external stylesheets yet (M12), no JavaScript, forms,
-  tables, floats, flexbox/grid, borders, horizontal scrolling or scrollbars.
+- HTML/CSS support is a small subset: no JavaScript, forms, tables, floats, flexbox/grid, borders,
+  horizontal scrolling or scrollbars; external stylesheets work their subset only (no `@import`,
+  media queries, webfonts or CSS images yet, M14/M15).
 - Text support is best-effort for scripts beyond Latin and Chinese; no bidi/RTL ordering and no
   full Unicode line breaking.
 - No proxy support (M16) and no HTTP keep-alive, compression, parallel resource loading or image
-  cache yet (M13).
+  cache yet (M13); stylesheet and image requests are serial.
 - Rendering is software-only and single-threaded; there is no GPU backend, and presentation sends
   the whole frame to the X server.
 - Not security-hardened: treat fetched pages as untrusted input, do not enter secrets into it.

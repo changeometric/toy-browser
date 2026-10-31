@@ -1,0 +1,4 @@
+/* Would give #good a blue background if the `alternate` rel token were ignored. */
+#good {
+  background-color: #0000aa;
+}

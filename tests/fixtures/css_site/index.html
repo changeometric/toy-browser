@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <title>External stylesheet site</title>
+  <style>
+    /* Inline author sheet BEFORE the external <link>. Its #before rule loses to
+       the equal-specificity external rule that comes later in document order. */
+    #before { color: #ff0000; }
+  </style>
+  <link rel="stylesheet" href="styles/site.css">
+  <style>
+    /* Inline author sheet AFTER the external <link>: its #after rule wins over
+       the external one. */
+    #after { color: #0000ff; }
+  </style>
+</head>
+<body>
+  <p class="external" id="external">External rules</p>
+  <p id="before">Before</p>
+  <p id="after">After</p>
+  <p id="inline" style="color: #00aa00">Inline</p>
+</body>
+</html>

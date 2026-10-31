@@ -449,3 +449,24 @@ the round when possible. Clean up stale build directories and stray files.
   (uncommitted); the delivery gates were full GCC/Clang WERROR tests, the bitmap byte-compat gate,
   and a 33-frame scrolled-screenshot comparison against the pre-M11 binaries. Do not add wall-time
   assertions to CTest; performance evidence belongs in the round report.
+- M12: the Lead froze the `style` header delta and wrote/validated the shared header-only loopback
+  HTTP server *before* spawning, so the shell implementer could assert exact request sequences
+  (`/page.html`, `/redirect.css`, `/real.css`) instead of sleeping or touching the network. Validate
+  shared test infrastructure with a throwaway `.tmp` smoke (here: a real `net::Fetch` redirect
+  through the server) before handing it to implementers; the same pattern as M9's TLS fixtures.
+- M12: two implementers worked in parallel against the frozen header even though the shell needed
+  the style symbol at final link time; the kickoff prompts said "build your own targets, report if
+  the symbol is missing", which avoided wasted debugging. The Lead still re-ran the full GCC and
+  Clang gates from fresh build trees rather than trusting the reports.
+- M12: the byte-compat gate needed explicit negative fixtures — a page with no `<link>` and a page
+  whose links are all filtered/failing — to prove the new page-triggered resource requests changed
+  nothing for pages without applicable sheets. Add such "no-op feature input" fixtures whenever a
+  round makes pages request more resources, and keep them in the gate case list.
+- M12: the manual real-site check (`--dump-style`/`--screenshot https://www.python.org/`) was the
+  highest-value acceptance evidence: it proved external CSS actually applies, and it also exposed
+  the deliberate media-filter limit (`media="not print, ..."` skipped). Keep one documented manual
+  real-site check per real-page-facing round; transient conditions are acceptable as long as the
+  result is reported honestly.
+- M12: request-count assertions (one fetch per `<link>` occurrence, no dedup) are the deterministic
+  way to freeze resource-loading behavior; do not assert wall time. Loopback servers are test-only
+  infrastructure and must not leak into production code.

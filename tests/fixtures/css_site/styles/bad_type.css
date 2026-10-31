@@ -1,0 +1,4 @@
+/* Would shrink #good if the type="text/plain" filter were ignored. */
+#good {
+  font-size: 11px;
+}

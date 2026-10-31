@@ -4,8 +4,8 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M11 已完成（M11 = 性能）。M12（外部样式表）是下一个计划里程碑；M13（资源加载
-管线）、M14（CSS 兼容批次 1）与 M15（flexbox/position/float 子集）随后进行。HTTP 代理（M16）与
+**当前状态：M0–M12 已完成（M12 = 外部样式表）。M13（资源加载管线）是下一个计划里程碑；M14
+（CSS 兼容批次 1）与 M15（flexbox/position/float 子集）随后进行。HTTP 代理（M16）与
 JavaScript 子集已延后。**
 快照与接管指南见 [handoff.md](handoff.md)。
 
@@ -254,28 +254,41 @@ JavaScript 子集已延后。**
   （XShm/dirty-rect 留待后续，需要新依赖审批）；GPU 渲染刻意不使用（实测填充率不是瓶颈，成本在
   CPU 算法；是否重新评估见 decisions）。
 
-## M12 — 外部样式表（计划中；下一个里程碑）
+## M12 — 外部样式表 ✅（已完成）
 
-- 目标：通过 `<link rel="stylesheet" href="...">` 引用 CSS 的页面，能把这些规则与内联 `<style>`、
-  `style` 属性放进同一套级联后应用。这是当前引擎与真实页面之间最大的功能性缺口：M4 刻意留下它，
-  而大多数真实站点把样式放在外部文件里。
-- 为什么现在做：它是真实页面样式的最小功能前提，不需要新依赖或架构改动，也能让 M14/M15 的工作在
-  真实站点上得到验证。2026-10-31 的真实站点实测表明：外部 CSS 目前被忽略，而加载时间另受串行图片
-  抓取支配，后者由 M13 解决。
-- 预期形态（契约在该轮开始时冻结）：按文档顺序发现 `<link>`，按 `rel`/`href`/`media`/`type`/
-  `disabled` 过滤，`href` 相对重定向后的最终 URL 解析，用现有 `net::Fetch` 抓取（16 MiB body 上限；
-  测试使用 `file://` 与 loopback server），用现有 CSS parser 解析，并按文档顺序把 author 样式表与
-  `<style>` 交错应用。缺失、失败或不支持的样式表像今天的图片一样静默跳过。预计不需要新依赖。
-- 在重新划范围之前不做：`@import`、alternate/disabled 样式表、media queries、`url(...)` 资源、CSS
-  `@charset` 处理与跨域限制。
-- 测试必须离线且确定：fixture 站点包含子目录中的外部样式表、相对与绝对 `href`、`link`/`style` 顺序、
-  重复与失败链接、由 loopback server 提供的重定向样式表 URL，以及不带 link 的页面逐字节兼容。
-- 验收：所有 M12 之前测试加新的 style/shell 测试在 GCC 与 Clang 下通过；手工真实站点检查（一个不依赖
-  JavaScript 的标准/文档页面）能明显应用其排版与颜色；任何不带 `<link>` 的页面像素或 dump 不变。
-- 本轮之后的已知限制：许多真实样式表仍使用不支持的 selector/属性与布局特性（M14/M15）；样式表抓取
-  仍是串行的（M13）；没有 `@import`、media queries、webfont 或 CSS 图片。
+- 目标已达成：通过 `<link rel="stylesheet" href="...">` 引用 CSS 的页面，能把这些规则与内联
+  `<style>`、`style` 属性放进同一套级联后应用。这是当前引擎与真实页面之间最大的功能性缺口：M4 刻意
+  留下它，而大多数真实站点把样式放在外部文件里。对照 `https://www.python.org/` 的手工检查现在会应用
+  站点的排版与深色配色，而不是渲染未套样式的文本。
+- `style`：公开 `LinkedStyleSheet { dom::NodeId link_node; std::string text; }` 与双参数
+  `ComputeStyles(document, linked_sheets)`。一次前序遍历把文档自己的 `<style>` 元素与每个调用方提供
+  的外部样式表合并到其 `<link>` 元素的文档位置，因此同优先级的文档序 tie-break 与浏览器一致；
+  specificity、`!important`、继承与内联 `style` 规则不变。单参数重载传入空列表委托，保持 M12 之前的
+  输出与每页开销；`style` 仍然没有任何 I/O 或网络代码。
+- `shell`：新的私有 `LoadStyledDocument()` 在正常页面加载（窗口、`--screenshot`、`--dump-boxes`）与
+  `--dump-style` 之间共享同一条“抓取 → 解析 → 发现/过滤/抓取样式表 → 计算样式”路径；
+  `--dump-dom`/`--dump-body` 不变且不抓取样式表。一次迭代式前序遍历（head 或 body 都算）发现
+  `<link>`；MVP 过滤规则是：`rel` 分词后含 `stylesheet` 且不含 `alternate`、没有 `disabled` 属性、
+  `media` 为空/`all`/`screen`、`type` 为空/`text/css`、非空 `href` 用 `net::ResolveUrl` 相对重定向后
+  的最终 URL 解析。每个适用的 link 每次出现抓取一次（不去重/缓存），使用 `net::Fetch` 默认参数
+  （16 MiB body 上限、连接/读取超时），只解析状态码 200..299 的 body；所有被过滤/无法解析/失败/
+  非 2xx 的样式表都静默跳过（不写 stderr，页面仍成功加载），与 M8a 起缺失图片的处理完全一致。
+- Fixtures/测试：提交的 `tests/fixtures/css_site/`（子目录相对样式表、文档序交错、过滤、失败/
+  disabled/alternate/media/type/ftp/空 href 链接、重复链接、head 与 body 链接、无样式表与全被过滤
+  页面）及其有文档的期望计算值/几何/颜色；`style.external_sheets`、`shell.external_css`（含进程内
+  loopback HTTP 重定向、绝对 URL、相对最终 URL 解析、失败与不去重请求数等用例，使用新的 header-only
+  `tests/support/http_server.h`）与 `--dump-style` CLI 检查；共 70 个测试。
+- 已达成验收：所有 66 个 M12 之前测试加 4 个新测试在 GCC 与 Clang 下、警告视为错误时通过（共 70 个
+  测试）；不带 `<link>` 的页面在 dump、退出码与 PPM 像素上与 M12 之前逐字节相同（20 个用例的
+  byte-compat 门禁）；GCC 与 Clang 输出逐字节相同；手工真实站点检查（`https://www.python.org/`）
+  显示外部排版与颜色生效；没有新依赖。
+- 本轮之后的已知限制：没有 `@import`、media queries（包括真实站点常用的 `media="not print, ..."`
+  这类逗号列表，本 MVP 会跳过）、alternate/disabled 样式表选择、带参数的 `type` 值、`url(...)`
+  资源、CSS `@charset` 或跨域规则；样式表仍由 M4 的 CSS 子集解析，因此大量真实规则被忽略
+  （M14/M15）；所有样式表加载仍是串行的并使用默认超时（M13 的 keep-alive 会降低连接开销）；每次
+  出现单独抓取，还没有样式表缓存。
 
-## M13 — 资源加载管线（计划中）
+## M13 — 资源加载管线（计划中；下一个里程碑）
 
 - 目标：让含大量资源的页面加载时间与字节数成正比，而不是与 TLS 握手次数成正比。本项目的实测起点：
   图片较多的真实页面墙体时间约 20 s，而进程只用约 0.1 s CPU，因为每个 `<img>` 都用新连接串行抓取

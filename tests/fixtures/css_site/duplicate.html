@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+<head>
+  <title>Duplicate stylesheet links</title>
+  <!-- The same sheet URL twice: the shell fetches one sheet per occurrence (no
+       deduplication/cache, like images) and the cascade applies both at their
+       document positions. The rules are identical, so the result is stable. -->
+  <link rel="stylesheet" href="styles/duplicate.css">
+  <link rel="stylesheet" href="styles/duplicate.css">
+</head>
+<body>
+  <p id="dup">Duplicate</p>
+</body>
+</html>

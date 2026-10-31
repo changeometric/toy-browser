@@ -3,10 +3,10 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M11 are done (M11 = performance). M12 (external stylesheets) is the next
-planned milestone; M13 (resource loading pipeline), M14 (CSS compatibility batch 1) and M15
-(flexbox/position/float subset) follow it. The HTTP proxy (M16) and the JavaScript subset are
-deferred.** For a snapshot and takeover guide, read [handoff.md](handoff.md).
+**Current status: M0–M12 are done (M12 = external stylesheets). M13 (resource loading pipeline) is
+the next planned milestone; M14 (CSS compatibility batch 1) and M15 (flexbox/position/float subset)
+follow it. The HTTP proxy (M16) and the JavaScript subset are deferred.** For a snapshot and
+takeover guide, read [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
 
@@ -361,36 +361,49 @@ deferred.** For a snapshot and takeover guide, read [handoff.md](handoff.md).
   deliberately not used (measurements show fill rate is not the bottleneck; the costs are
   algorithmic CPU work).
 
-## M12 — External stylesheets (planned; next milestone)
+## M12 — External stylesheets ✅ (done)
 
-- Goal: a page that references its CSS with `<link rel="stylesheet" href="...">` renders with those
-  rules applied, in the same cascade as inline `<style>` and `style` attributes. This is the single
-  largest functional gap between the current engine and real pages: M4 deliberately left it out and
-  most real sites ship their styling as external files.
-- Why now: it is the smallest functional prerequisite for real-page styling, needs no new dependency
-  or architecture change, and lets the M14/M15 work be validated against real sites. Real-site
-  measurements on 2026-10-31 showed external CSS is ignored today while load time is separately
-  dominated by serial image fetches, which M13 addresses.
-- Expected shape (contracts are frozen at the start of the round): discover `<link>` elements in
-  document order, filter on `rel`/`href`/`media`/`type`/`disabled`, resolve `href` against the
-  page's final URL after redirects, fetch with the existing `net::Fetch` (16 MiB body cap; tests use
-  `file://` and the loopback server), parse with the existing CSS parser, and apply author sheets in
-  document order interleaved with `<style>`. Missing, failed or unsupported sheets are skipped
-  silently, like images today. No new dependency is expected.
-- Out of scope until re-scoped: `@import`, alternate/disabled stylesheets, media queries,
-  `url(...)` resources, CSS `@charset` handling and cross-origin restrictions.
-- Tests must be offline and deterministic: a fixture site with an external sheet in a
-  subdirectory, relative and absolute `href`s, `link`/`style` ordering, duplicate and failing
-  links, a redirecting stylesheet URL served by the loopback server, and byte-compatibility for
-  pages without links.
-- Acceptance: all pre-M12 tests plus the new style/shell tests pass on GCC and Clang; a manual
-  real-site check (a standards/documentation page that does not require JavaScript) visibly applies
-  its typography and colors; no page without `<link>` changes a pixel or a dump.
-- Known limits after this round: many real stylesheets still use unsupported selectors/properties
-  and layout features (M14/M15); stylesheet fetches are still serial (M13); no `@import`, media
-  queries, webfonts or CSS images.
+- Goal met: pages that reference their CSS with `<link rel="stylesheet" href="...">` render with
+  those rules applied, in the same cascade as inline `<style>` and `style` attributes. This was the
+  single largest functional gap between the engine and real pages: most real sites ship their
+  styling as external files, and a manual check against `https://www.python.org/` now applies the
+  site's typography and dark color scheme instead of rendering unstyled text.
+- `style`: public `LinkedStyleSheet { dom::NodeId link_node; std::string text; }` plus a two-arg
+  `ComputeStyles(document, linked_sheets)`. One pre-order walk merges the document's `<style>`
+  elements and each caller-supplied external sheet at its `<link>` element's position, so
+  document-order ties resolve exactly like browser cascade order; specificity, `!important`,
+  inheritance and inline `style` declarations are unchanged. The one-arg overload delegates with an
+  empty list and keeps pre-M12 output and per-page cost; `style` stays free of I/O and network code.
+- `shell`: a new private `LoadStyledDocument()` shares one fetch → parse → discover/filter/fetch
+  sheets → style path between normal page loading (window, `--screenshot`, `--dump-boxes`) and
+  `--dump-style`; `--dump-dom`/`--dump-body` are unchanged and fetch no sheets. One iterative
+  pre-order DOM walk discovers `<link>` elements in head or body; the exact MVP filter is: `rel`
+  token list containing `stylesheet` without `alternate`, no `disabled` attribute, `media` empty/
+  `all`/`screen`, `type` empty/`text/css`, and a non-empty `href` resolved with `net::ResolveUrl`
+  against the page's final URL after redirects. Every applicable link is fetched once per
+  occurrence (no deduplication/cache), `net::Fetch` defaults apply (16 MiB body cap, connect/read
+  timeouts), only 200..299 bodies are parsed, and every filtered/unresolvable/failed/non-2xx sheet
+  is skipped silently (no stderr, page load still succeeds), exactly like missing images since M8a.
+- Fixtures/tests: committed `tests/fixtures/css_site/` (relative subdirectory sheet, document-order
+  interleaving, filter, failed/disabled/alternate/media/type/ftp/empty-href links, duplicate links,
+  head and body links, no-sheet and filtered-only pages) with documented expected computed values,
+  geometry and colors; `style.external_sheets`, `shell.external_css` (including in-process loopback
+  HTTP redirect, absolute URL, relative resolution against the final URL, failure and no-dedup
+  request-count cases via the new header-only `tests/support/http_server.h`) and the CLI
+  `--dump-style` checks; 70 tests total.
+- Acceptance reached: all 66 pre-M12 tests plus the 4 new tests pass under GCC and Clang with
+  warnings as errors (70 tests); pages without `<link>` are byte-identical to pre-M12 in dumps,
+  exit status and PPM pixels (20-case byte-compat gate); GCC and Clang output is byte-identical; a
+  manual real-site check (`https://www.python.org/`) shows external typography and colors applied;
+  no new dependency.
+- Known limits after this round: no `@import`, media queries (including comma lists such as
+  `media="not print, ..."`, which real sites use and this MVP skips), alternate/disabled sheet
+  selection, parameterised `type` values, `url(...)` resources, CSS `@charset` or cross-origin
+  rules; sheets are still parsed by the M4 CSS subset, so many real rules are ignored (M14/M15);
+  all sheet loads are serial with the default timeouts (M13 keep-alive reduces connection overhead);
+  each occurrence is fetched separately and there is no stylesheet cache yet.
 
-## M13 — Resource loading pipeline (planned)
+## M13 — Resource loading pipeline (planned; next milestone)
 
 - Goal: make pages with many assets load in time proportional to bytes, not to the number of TLS
   handshakes. Measured start point on this project: image-heavy real pages spend ~20 s wall while

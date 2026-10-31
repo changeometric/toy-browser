@@ -20,13 +20,16 @@ PNG 图片，可 headless 运行，也可在小型 X11 窗口中浏览。浏览�
   OpenSSL，证书与主机名校验始终开启，没有 insecure 模式。
 - 手写 HTML 解析器与 CSS 解析器；样式引擎覆盖受支持页面所需的 selector、级联与计算值；布局是
   块级/行内流，支持换行、替换元素 `<img>` 与整数像素设备矩形。
+- 外部作者样式表（M12）：按文档顺序发现 `<link rel="stylesheet">`，按 `rel`/`disabled`/`media`/
+  `type` 过滤，相对重定向后的最终 URL 解析并抓取，再与内联 `<style>`、`style` 属性一起级联；
+  缺失、失败与不支持的样式表会静默跳过。这是大多数真实页面看起来有样式的关键。
 - 真实文本：freetype 光栅化 + harfbuzz 整形，通过 fontconfig 自动选择字体（计算出的
   `font-family`/`font-weight`/`font-style`、字符覆盖回退、CJK 断行单元），并以内置位图字体作为
   最后的确定性回退。
 - 用 libpng 解码 PNG 图片，最近邻缩放绘制。
 - 可导航的 X11 窗口（链接可点击、滚轮/键盘滚动、Alt+Left/Right 历史、窗口标题）与完整的
   headless `--dump-*`/`--screenshot` 调试模式。
-- 一套小而有确定性的测试（66 个 CTest 用例），CI 用 GCC 与 Clang 无警告构建并运行。
+- 一套小而有确定性的测试（70 个 CTest 用例），CI 用 GCC 与 Clang 无警告构建并运行。
 
 中文文本会通过自动字体回退渲染，并在没有空格时正常换行：
 
@@ -88,6 +91,10 @@ ctest --test-dir build-dev --output-on-failure
 # PNG 图片管线。
 ./build/toybrowser --size 480x400 --screenshot img.ppm \
     "file://$PWD/tests/fixtures/img_site/index.html"
+
+# 外部样式表：styles/ 下的样式表会被抓取并级联。
+./build/toybrowser --size 480x300 --dump-style \
+    "file://$PWD/tests/fixtures/css_site/index.html"
 ```
 
 | Fixture | 演示内容 |
@@ -96,6 +103,7 @@ ctest --test-dir build-dev --output-on-failure
 | [`tests/fixtures/font_site/`](tests/fixtures/font_site/) | 真实 TTF 文本（常规/粗体/斜体 fixture）与图片 |
 | [`tests/fixtures/cjk_site/`](tests/fixtures/cjk_site/) | 自动字体回退、CJK 断行与换行 |
 | [`tests/fixtures/img_site/`](tests/fixtures/img_site/) | PNG 解码与行内替换元素 |
+| [`tests/fixtures/css_site/`](tests/fixtures/css_site/) | 外部 `<link rel="stylesheet">` 加载、过滤与文档序级联 |
 | [`tests/fixtures/https_site/`](tests/fixtures/https_site/) | 通过 loopback TLS 测试服务器的 HTTPS 端到端流程 |
 
 Headless 检查是主要调试路径，每个阶段都有 dump 模式：
@@ -135,16 +143,17 @@ docs/               架构、路线图、决策、约定、接管笔记
 
 ## 状态与限制
 
-里程碑 M0–M11 已完成：浏览器能渲染真实页面、支持真实字体与图片、支持 HTTPS，并有可导航窗口。
-下一个计划里程碑是外部样式表（M12），随后是资源加载管线（M13）、CSS 兼容批次 1（M14）与
+里程碑 M0–M12 已完成：浏览器能渲染真实页面及其外部样式表、支持真实字体与图片、支持 HTTPS，并有
+可导航窗口。下一个计划里程碑是资源加载管线（M13），随后是 CSS 兼容批次 1（M14）与
 flexbox/position/float 子集（M15）。HTTP 代理（M16）与 JavaScript 子集已延后。
 
 当前里程碑集刻意保留的限制：
 
-- HTML/CSS 只支持一个小子集：外部样式表尚未支持（M12）；也没有 JavaScript、表单、表格、float、
-  flexbox/grid、border、水平滚动或滚动条。
+- HTML/CSS 只支持一个小子集：没有 JavaScript、表单、表格、float、flexbox/grid、border、水平滚动
+  或滚动条；外部样式表只覆盖这个子集（还没有 `@import`、媒体查询、webfont 或 CSS 图片，M14/M15）。
 - 拉丁与中文之外的文字是尽力支持；没有 bidi/RTL 排序，也没有完整的 Unicode 断行。
-- 还没有代理（M16），也没有 HTTP keep-alive、压缩、并行资源加载或图片缓存（M13）。
+- 还没有代理（M16），也没有 HTTP keep-alive、压缩、并行资源加载或图片缓存（M13）；样式表与图片
+  请求仍是串行的。
 - 渲染是纯软件、单线程；没有 GPU 后端，呈现时整帧发送给 X server。
 - 没有做安全加固：把抓取到的页面当作不可信输入，不要在其中输入敏感信息。
 

@@ -148,16 +148,20 @@ int RunDumpStyle(const Options& options) {
     return 1;
   }
 
-  net::Response response;
-  if (!net::Fetch(*url, net::FetchOptions{}, &response, &error)) {
+  // Same styled-document path as the normal page load: fetch the page, parse it
+  // and apply its external author stylesheets (linked <link> sheets included).
+  // Only a page fetch failure is reported; stylesheet failures are skipped by the
+  // loader, so a page with broken links still dumps.
+  dom::Document document;
+  style::StyleTree styles;
+  net::Url final_url;
+  if (!LoadStyledDocument(*url, &document, &styles, &final_url, &error)) {
     std::fprintf(stderr, "toybrowser: cannot fetch '%s': %s\n", options.dump_style_url.c_str(),
                  error.c_str());
     return 1;
   }
 
-  // HTML and CSS parsing are error-tolerant: malformed input still yields a tree.
-  const dom::Document document = dom::ParseDocument(response.body);
-  const style::StyleTree styles = style::ComputeStyles(document);
+  // CSS parsing is error-tolerant: malformed input still yields a tree.
   const std::string dump = style::DumpStyleTree(document, styles);
   if (std::fwrite(dump.data(), 1, dump.size(), stdout) != dump.size()) {
     std::fprintf(stderr, "toybrowser: cannot write the style dump to stdout\n");

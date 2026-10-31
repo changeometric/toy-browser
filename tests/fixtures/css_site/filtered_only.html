@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+  <title>Filtered stylesheet links only</title>
+  <!-- Every link of this page is filtered out or fails, and no good sheet
+       applies: print media, text/plain type, the disabled attribute, an
+       alternate sheet, an unsupported ftp: scheme, an empty href and a missing
+       local file. The page must therefore render exactly like no_sheet.html. -->
+  <link rel="stylesheet" href="styles/bad_media.css" media="print">
+  <link rel="stylesheet" href="styles/bad_type.css" type="text/plain">
+  <link rel="stylesheet" href="styles/bad_disabled.css" disabled>
+  <link rel="alternate stylesheet" href="styles/bad_alternate.css">
+  <link rel="stylesheet" href="ftp://example.com/bad.css">
+  <link rel="stylesheet" href="  ">
+  <link rel="stylesheet" href="styles/missing.css">
+</head>
+<body>
+  <p id="plain">No linked sheet</p>
+</body>
+</html>
