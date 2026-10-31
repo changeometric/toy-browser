@@ -346,6 +346,20 @@ set_tests_properties(shell.dump_style_filtered_only PROPERTIES
   PASS_REGULAR_EXPRESSION
     "<p> display=block color=#000000 background-color=transparent font-size=16px.*margin-top=16px")
 
+# M13 resource loading: one net::Client per page load (keep-alive for the page, its
+# stylesheets and its images) plus a per-load image URL cache. The loopback HTTP
+# server keeps connections alive and counts connections/requests, so the test
+# asserts reuse and deduplication deterministically; the committed image fixture
+# supplies the decoded PNG bytes. No public network, display or installed font.
+add_executable(shell_resource_loading_test resource_loading_test.cpp)
+# The test includes the shell-private page loader header on purpose.
+target_include_directories(shell_resource_loading_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../src/shell")
+target_link_libraries(shell_resource_loading_test PRIVATE toy_shell toy_test_support)
+toybrowser_set_warnings(shell_resource_loading_test)
+add_test(NAME shell.resource_loading
+  COMMAND shell_resource_loading_test "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/images")
+
 # M10: every pre-M10 test that runs toybrowser or a Browser through the automatic
 # system-font selection uses the empty config, which forces the built-in bitmap
 # font. Their outputs are the pre-M10 goldens, so they must stay byte-identical.
@@ -378,6 +392,7 @@ foreach(shell_bitmap_font_test IN ITEMS
     shell.external_css
     shell.dump_style_external
     shell.dump_style_filtered_only
+    shell.resource_loading
     shell.fonts
     shell.fonts_dump_boxes
     shell.fonts_missing_file

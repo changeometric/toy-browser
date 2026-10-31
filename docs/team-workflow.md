@@ -470,3 +470,22 @@ the round when possible. Clean up stale build directories and stray files.
 - M12: request-count assertions (one fetch per `<link>` occurrence, no dedup) are the deterministic
   way to freeze resource-loading behavior; do not assert wall time. Loopback servers are test-only
   infrastructure and must not leak into production code.
+- M13: the Lead froze the `net::Client` header, extended the shared loopback HTTP/TLS test servers
+  with persistent-connection modes and connection/request counters, and validated them with a
+  throwaway `.tmp` smoke before spawning. That let both implementers assert connection reuse and
+  request counts immediately instead of inventing their own servers. For any networking round, put
+  the counting test infrastructure in place first.
+- M13: the serial dependency between module halves was handled by freezing the header and letting
+  the shell implementer write against it while the net implementer developed behind it; the shell
+  reported "compiled, blocked on link symbols" without wasted debugging, and the Lead messaged it
+  as soon as the net symbol landed. Keep that explicit "compiled / waiting for symbol" checkpoint.
+- M13: byte-compatibility had to cover the new transport transparently: the 23-case gate compared
+  the pre-M13 binary with the new one (dumps, exit status, PPMs, including the M12 css_site pages)
+  and GCC/Clang outputs; all were identical. When a round changes how bytes are fetched, the
+  no-output-change gate is the primary safety net, not only the unit tests.
+- M13: the acceptance measurement is manual and environment-dependent: run the old and new binaries
+  back-to-back on the same page and report medians/ranges (python.org 800x600: 2.07 s -> 0.99 s
+  median; w3.org: 3.88 s -> 1.79 s, with byte-identical screenshots). Never put these numbers in
+  CTest; record them in the round report and docs.
+- M13: both implementers stress-ran the counter-based tests (15-20 repeats) to check determinism
+  before delivery; keep that habit for any test that observes connection/request counts.

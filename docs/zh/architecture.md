@@ -11,7 +11,7 @@
 | `base` | 小型共享工具（几何、日志、UTF-8），只在出现需要时才存在 | — | 首次需要时 |
 | `platform` | 窗口、输入事件、事件循环、呈现像素表面 | `base` | M1 |
 | `render` | 显示列表、软件光栅化器、内置位图字体（度量与字形）、PNG 图片解码（已批准的 libpng）、真实字体引擎（已批准的 freetype + harfbuzz） | `base` | M1 |
-| `net` | URL 解析、socket、HTTP/1.1 抓取（纯 TCP 或经校验的 TLS，已批准 OpenSSL）、`file://` 读取 | `base` | M2 |
+| `net` | URL 解析、socket、HTTP/1.1 抓取（纯 TCP 或经校验的 TLS，已批准 OpenSSL）、keep-alive `Client` 与 gzip（已批准 zlib）、`file://` 读取 | `base` | M2 |
 | `dom` | HTML tokenizer（词法分析器）、树构建器、DOM arena（区域分配器） | `base` | M3 |
 | `css` | CSS tokenizer、规则/声明解析器、选择器 | `base` | M4 |
 | `style` | 层叠与计算样式、默认样式表；作者 `<style>` 规则加调用方提供的按文档顺序的外部链接样式表（M12） | `dom`、`css` | M4 |
@@ -27,16 +27,17 @@
 ## 一次页面加载的完整流程
 
 1. `shell` 收到 URL（CLI 参数或链接点击）。
-2. `net` 抓取它：字节、最终 URL、状态。
+2. `net` 通过本次页面加载的 `net::Client` 抓取它：字节（gzip 已解码）、最终 URL、状态；Client 为后续
+   资源复用 keep-alive 连接（M13）。
 3. 字节被解码成 UTF-8（MVP：假定 UTF-8，剥掉 BOM；其他编码以后再说）。
 4. `dom` 把 HTML 解析成 `Document`。
 5. `shell` 发现页面的作者样式表：文档自己的 `<style>` 元素（由 `css` 解析）以及每个适用的
-   `<link rel="stylesheet">`，其 `href` 相对页面最终 URL 解析、用 `net::Fetch` 抓取，失败时静默
-   跳过（M12）。
+   `<link rel="stylesheet">`，其 `href` 相对页面最终 URL 解析、经同一个 Client 抓取，失败时静默
+   跳过（M12/M13）。
 6. `style` 把层叠解析成样式树：先 UA 规则，再按文档顺序应用作者 `<style>` 与链接样式表，最后是
    内联 `style` 声明。
-7. `shell` 遍历 DOM 中的 `<img>` 元素，对每个首个 `src` 相对页面最终 URL 解析、抓取，并用
-   `render::DecodePng` 解码；失败被跳过（M8a）。
+7. `shell` 遍历 DOM 中的 `<img>` 元素，对每个首个 `src` 相对页面最终 URL 解析、经同一个 Client 抓取，
+   并用 `render::DecodePng` 解码；失败被跳过，页内 URL 缓存对重复图片 URL 去重（M8a/M13）。
 8. `layout` 把样式树变成带几何信息的盒树，replaced 元素使用 shell 提供的固有尺寸。
 9. `paint` 从盒树构建扁平显示列表（背景、图片、文本），`render` 把它光栅化成 `Surface`。
 10. `platform` 呈现该表面（窗口 blit，或在 headless 模式下输出 PPM dump）。
@@ -45,7 +46,9 @@ MVP 保持整条链路同步、单线程。每个阶段接收普通数据并返�
 
 网络（M2，TLS 在 M9）：`net` 拥有 URL、socket 和 HTTP。抓取是阻塞式 HTTP/1.1 GET——每个连接一个请求、连接与读取超时、`Content-Length` 或 chunked body、重定向（M9 起用 `net::ResolveUrl` 解析，因此相对与协议相对 `Location` 可用）与 `Connection: close`——封装在 `Fetch()` 之后，因此以后可以改成非阻塞而不改调用方。`net` 是唯一允许触碰 socket 的模块；页面代码永远看不到 socket。代理支持（先支持 HTTP 代理）计划为 M16，放在 `FetchOptions` 后面并保持在 `net` 内部；它不需要新依赖。
 
-TLS / HTTPS（M9）：`net` 接受 `https` URL（默认端口 443），通过已批准的 OpenSSL 库在保持不变的阻塞 `Fetch()` 之后抓取。纯 TCP 与 TLS 共享同一份 HTTP/1.1 实现：`src/net/http.cpp` 在一个私有的 `internal::Stream` 接口（“写入全部字节” + “读若干字节直到 EOF”）之上构建请求、解析响应，接口由纯 `SocketStream` 与 `TlsStream` 实现；传输层按 URL scheme 在一处选择（`src/net/stream_internal.h`、`socket_internal.h`、`tls_internal.h` 均为私有，公开头文件中没有 OpenSSL 类型）。进程级 `SSL_CTX` 在第一次 https 抓取时从 OpenSSL 默认校验路径惰性创建（标准 `SSL_CERT_FILE`/`SSL_CERT_DIR` 覆盖在该时刻生效），`SSL_VERIFY_PEER` 始终开启，DNS 主机每连接发送 SNI，证书链 + 主机名校验（DNS 名用 `SSL_set1_host`，IPv4 字面量用 IP SAN 校验）。没有 insecure 模式。TCP 连接用 `connect_timeout_ms`；TLS 握手与所有 TLS I/O 用 `read_timeout_ms`，运行在现有非阻塞 socket + `poll` 循环上；超时、证书与主机名失败都是普通可读的 `Fetch` 错误。干净的 `close_notify` 与非干净 EOF 都结束流（截断仍由 Content-Length/chunked 捕获），TLS 路径忽略一次 `SIGPIPE`，坏掉的对端无法杀死浏览器。未实现 ALPN/HTTP/2、压缩、cookie、HSTS、客户端证书、TLS 会话复用或缓存；由于 shell 已经全部经过 `ParseUrl`/`ResolveUrl`/`Fetch`，无需改动其 API 或 CLI。
+TLS / HTTPS（M9）：`net` 接受 `https` URL（默认端口 443），通过已批准的 OpenSSL 库在保持不变的阻塞 `Fetch()` 之后抓取。纯 TCP 与 TLS 共享同一份 HTTP/1.1 实现：`src/net/http.cpp` 在一个私有的 `internal::Stream` 接口（“写入全部字节” + “读若干字节直到 EOF”）之上构建请求、解析响应，接口由纯 `SocketStream` 与 `TlsStream` 实现；传输层按 URL scheme 在一处选择（`src/net/stream_internal.h`、`socket_internal.h`、`tls_internal.h` 均为私有，公开头文件中没有 OpenSSL 类型）。进程级 `SSL_CTX` 在第一次 https 抓取时从 OpenSSL 默认校验路径惰性创建（标准 `SSL_CERT_FILE`/`SSL_CERT_DIR` 覆盖在该时刻生效），`SSL_VERIFY_PEER` 始终开启，DNS 主机每连接发送 SNI，证书链 + 主机名校验（DNS 名用 `SSL_set1_host`，IPv4 字面量用 IP SAN 校验）。没有 insecure 模式。TCP 连接用 `connect_timeout_ms`；TLS 握手与所有 TLS I/O 用 `read_timeout_ms`，运行在现有非阻塞 socket + `poll` 循环上；超时、证书与主机名失败都是普通可读的 `Fetch` 错误。干净的 `close_notify` 与非干净 EOF 都结束流（截断仍由 Content-Length/chunked 捕获），TLS 路径忽略一次 `SIGPIPE`，坏掉的对端无法杀死浏览器。未实现 ALPN/HTTP/2、cookie、HSTS、客户端证书、TLS 会话复用或 HTTP 缓存；由于 shell 已经全部经过 `ParseUrl`/`ResolveUrl`/`Fetch`，M9 无需改动其 API 或 CLI（后来页面加载改用 M13 的 `Client`，它复用同样的 URL 与 TLS 机制）。
+
+资源加载（M13）：`net::Client`（`toy/net/http.h`，pimpl）是 shell 在页面加载时使用的 keep-alive HTTP/1.1 路径。它每个 origin（scheme/host/port）最多保留一条空闲连接，发送 `Connection: keep-alive` 与 `Accept-Encoding: gzip`，并在私有 `Stream` 上增量解析每个响应：有界读取 header，然后精确读取 Content-Length body 或完整 chunked body（含 trailer），读到的多余字节留在池化连接上供下一请求使用。持久连接遵循 HTTP/1.1 规则（无 `Connection: close`）或 HTTP/1.0（`Connection: keep-alive`）并要求长度定界；持久响应缺少长度定界是可读错误。gzip body 用已批准的 zlib 解压（identity 直接通过，其他编码是错误，原始与解码后 body 都受 `max_body_bytes` 限制，header 原样保留）。池化连接在收到任何响应字节前失败时会在新连接上重试一次；超时与新连接失败不重试。重定向与 `file://` 行为与 `Fetch()` 一致，而一次性 `Fetch()` 本身不变（请求字节保持 `Connection: close`、不协商压缩），仍是不需要池化的调用方的便捷 API。`shell` 每次 `LoadPage` 创建一个 `Client`，用于页面、其样式表与图片，并在本次加载内按解析后的 URL 去重图片（重复 `<img>` 共享一次抓取、解码与 `render::Image` 对象；失败 URL 被记住，重复项不会重试；无跨加载缓存）。
 
 HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM。解析是容错的，且总是产生一个带 `head` 和 `body` 子节点的 `html` 元素；tokenizer 覆盖支持的子集（元素与属性、注释、doctype、raw-text 与 RCDATA 元素、少量实体），遇到畸形输入也永不失败。`DumpDocument()` 是确定性的文本形式，供 `--dump-dom` 与解析器测试使用。节点用整数 id 寻址（没有持有指针、没有环）；DOM 完全不了解 CSS、布局或脚本。
 
@@ -60,9 +63,11 @@ HTML 与 DOM（M3）：`dom` 拥有 tokenizer、简化树构建器和 arena DOM�
 图片（M8a）：`render` 在 `render::DecodePng()` 之后拥有 PNG 解码：已批准的 libpng 依赖封装在
 `src/render/image.cpp` 中，像素转换成直通 alpha 的 ARGB `render::Image`，尺寸与像素数在分配前校验，
 公开头文件里不出现任何 libpng 类型。`shell` 通过私有加载器（`src/shell/page.h`）拥有页面级策略：
-在抓取、解析与样式之后、布局之前，把每个 `<img src>` 相对页面最终 URL 解析，用与页面相同的
-`net::Fetch` 抓取（http/https/file），解码，并维护按 img DOM 节点 id 索引的 `paint::ImageMap` 与
-`layout::ReplacedSizes` 映射。缺失或失败的图片被静默跳过，元素按空行内布局（MVP 限制）。
+在抓取、解析与样式之后、布局之前，把每个 `<img src>` 相对页面最终 URL 解析，经本次页面加载的
+`net::Client` 抓取（http/https/file；M13 之前用 `net::Fetch`），解码，并维护按 img DOM 节点 id 索引的
+`paint::ImageMap` 与 `layout::ReplacedSizes` 映射。M13 起加载器在单次页面加载内按 URL 去重图片：
+重复的 `<img src>` 共享一次抓取、一个解码后的图片对象与一个固有尺寸；失败的抓取/解码被记住，重复的
+坏图片不会重试（仍无跨加载缓存）。缺失或失败的图片被静默跳过，元素按空行内布局（MVP 限制）。
 `paint` 把有解码图片的行内 replaced 盒变成 `DrawImage` 命令；显示列表持有
 `shared_ptr<const Image>`，因此列表可以比构建它的页面数据活得更久。`render` 用冻结的最近邻整数
 源映射、与填充相同的 SrcOver 公式和裁剪栈执行图片。`shell::Browser` 随页面保存图片并绘制它们，
@@ -119,7 +124,7 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
 由 `layout::ContentHeight` 钳制在 `[0, content_height - viewport_height]`；`paint` 用视口裁剪
 包裹页面并按 `-scroll_y` 平移，`render` 执行冻结的裁剪栈。窗口事件循环把点击、滚轮格数与按键
 （Alt+Left/Right 前进后退，方向键/PageUp/PageDown/Home/End 滚动）转发给会话并按需重绘；窗口
-标题跟随第一个 `<title>` 文本，没有时回退到 URL。加载在处理函数内同步执行，保持单线程 MVP 模型。页面加载器、外部样式表发现/抓取与图片映射是 shell 的私有实现细节：`toy/shell/browser.h` 保持相同的公开方法，并用前向声明与 out-of-line 析构函数隐藏页面数据。
+标题跟随第一个 `<title>` 文本，没有时回退到 URL。加载在处理函数内同步执行，保持单线程 MVP 模型。页面加载器（M13 起每次加载一个 keep-alive `net::Client` 加页内图片 URL 去重）、外部样式表发现/抓取与图片映射是 shell 的私有实现细节：`toy/shell/browser.h` 保持相同的公开方法，并用前向声明与 out-of-line 析构函数隐藏页面数据。
 
 ## 数据模型
 
@@ -133,7 +138,7 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
 
 ## 线程与事件循环
 
-- 一个进程、一个线程、一个事件循环。MVP 中没有工作线程。`render::Font` 在度量/绘制之间缓存可变的 freetype face 字号，因此刻意只支持单线程；不要跨线程共享同一个 `Font`。
+- 一个进程、一个线程、一个事件循环。MVP 中没有工作线程。`render::Font` 在度量/绘制之间缓存可变的 freetype face 字号，因此刻意只支持单线程；不要跨线程共享同一个 `Font`。`net::Client` 同样单线程并拥有每次页面加载的连接池；不要跨线程共享 Client，也不要在其上流水线请求。
 - 页面加载在导航回调中同步执行；加载期间窗口无响应。对玩具项目来说可以接受，只有当真成为问题时才引入异步网络。
 - `net::Fetch` 是接口后面的阻塞调用，因此以后可以替换成非阻塞状态机而不触碰调用方。
 - 平台事件循环等待窗口事件，并把 close/resize/input/paint 请求转发给 `shell`；由 `shell` 决定重绘什么。重绘按需发生（expose、resize、scroll），不靠定时器。自 M11 起 Expose 只重绘（页面已布局）、resize 只有窗口尺寸真正变化才重排，X11 后端会先合并队列中的 Expose/ConfigureNotify burst 再交付一次重绘/重排请求；输入与 close 事件永不合并或乱序。
@@ -211,6 +216,16 @@ Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃�
   被过滤/失败/重复链接、无样式表与全被过滤页面，以及有文档的期望计算值、几何与像素），并加上
   header-only 进程内 loopback HTTP 服务器 `tests/support/http_server.h` 覆盖重定向、绝对 URL、
   相对最终 URL 解析、失败与不去重请求数等用例。`style.external_sheets` 直接覆盖级联 API，
+
+- M13 资源加载测试全部离线并断言计数、绝不断言耗时。`tests/support/http_server.h` 与
+  `tests/support/tls_server.h` 现在能让一条连接服务多个请求并暴露连接/请求计数（HTTP server 还能
+  强制关闭响应以模拟过期空闲连接）。`net.keep_alive` 覆盖同 origin 复用（Content-Length/chunked）、
+  `Connection: close`、两个 origin、过期连接重试、新连接失败、关闭空闲连接、`file://`、重定向、
+  HTTP/1.0 规则与缺少长度定界错误；`net.gzip` 覆盖 gzip 解码、identity、损坏/不支持编码、解码后大小
+  上限，以及一次性 `Fetch()` 仍不发送 `Accept-Encoding`；`net.tls_keep_alive` 证明两次 https 请求
+  复用一条 TLS 连接；`shell.resource_loading` 从 loopback server 提供页面 + 样式表 + 重复图片，断言
+  一条连接、每个唯一图片 URL 一次抓取、共享解码图片、重复坏图片只抓一次，以及被强制关闭的空闲连接后
+  的恢复。
   `shell.external_css` 覆盖 shell 端到端（含 `Browser`/绘制像素），CLI 检查覆盖带外部样式表的
   `--dump-style`。没有测试使用公网。
 

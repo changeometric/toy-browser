@@ -150,12 +150,14 @@ int RunDumpStyle(const Options& options) {
 
   // Same styled-document path as the normal page load: fetch the page, parse it
   // and apply its external author stylesheets (linked <link> sheets included).
+  // One Client covers the page and all sheet fetches and lives only for this dump.
   // Only a page fetch failure is reported; stylesheet failures are skipped by the
   // loader, so a page with broken links still dumps.
+  net::Client client;
   dom::Document document;
   style::StyleTree styles;
   net::Url final_url;
-  if (!LoadStyledDocument(*url, &document, &styles, &final_url, &error)) {
+  if (!LoadStyledDocument(client, *url, &document, &styles, &final_url, &error)) {
     std::fprintf(stderr, "toybrowser: cannot fetch '%s': %s\n", options.dump_style_url.c_str(),
                  error.c_str());
     return 1;

@@ -2,11 +2,13 @@
 
 // In-process loopback HTTP server for deterministic `http://` tests.
 //
-// It listens on 127.0.0.1 with an ephemeral port, serves one request per
-// connection and closes it, so no test ever contacts the public network. Tests
-// provide a handler that maps the raw request to a raw response; the server
-// records every request it received so tests can assert the request sequence
-// (for example a stylesheet redirect: GET /redirect.css then GET /real.css).
+// It listens on 127.0.0.1 with an ephemeral port and serves requests; tests
+// provide a handler that maps the raw request to a raw response. The server
+// records every request, counts accepted connections, and keeps a connection open
+// for further requests unless the response says `Connection: close` (the
+// `RawHttpResponse` helper always does) or the test enables
+// `SetForceCloseAfterResponse` — so it can exercise HTTP/1.1 keep-alive clients
+// (M13) without the public network.
 //
 // Usage:
 //   #include "support/http_server.h"
@@ -140,6 +142,17 @@ class HttpServer {
     return requests_;
   }
 
+  // Number of TCP connections accepted so far. A keep-alive client must keep this
+  // at 1 while reusing one connection across several requests.
+  int connection_count() const { return connections_.load(); }
+
+  // When enabled, the server closes each connection right after writing its next
+  // response without announcing it with `Connection: close` (used to simulate a
+  // server that drops an idle keep-alive connection).
+  void SetForceCloseAfterResponse(bool enabled) {
+    force_close_after_response_.store(enabled);
+  }
+
  private:
   static constexpr std::size_t kMaxRequestBytes = 64 * 1024;
   static constexpr int kPollTimeoutMs = 20;
@@ -199,10 +212,13 @@ class HttpServer {
       if (client < 0) {
         continue;
       }
+      connections_.fetch_add(1);
       Serve(client);
     }
   }
 
+  // Serves requests on one accepted connection until the client closes it, the
+  // response asks to close, the test forces a close, or the socket times out.
   void Serve(int client) {
     timeval socket_timeout{};
     socket_timeout.tv_sec = kSocketTimeoutSeconds;
@@ -210,27 +226,32 @@ class HttpServer {
     ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &socket_timeout, sizeof(socket_timeout));
     ::setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &socket_timeout, sizeof(socket_timeout));
 
-    std::string request;
-    char buffer[4096];
-    bool complete = false;
-    while (request.size() < kMaxRequestBytes && !stop_.load()) {
-      const ssize_t received = ::recv(client, buffer, sizeof(buffer), 0);
-      if (received <= 0) {
+    while (!stop_.load()) {
+      std::string request;
+      char buffer[4096];
+      bool complete = false;
+      while (request.size() < kMaxRequestBytes && !stop_.load()) {
+        const ssize_t received = ::recv(client, buffer, sizeof(buffer), 0);
+        if (received <= 0) {
+          break;
+        }
+        request.append(buffer, static_cast<std::size_t>(received));
+        if (request.find("\r\n\r\n") != std::string::npos) {
+          complete = true;
+          break;
+        }
+      }
+      if (!complete || !handler_) {
         break;
       }
-      request.append(buffer, static_cast<std::size_t>(received));
-      if (request.find("\r\n\r\n") != std::string::npos) {
-        complete = true;
-        break;
-      }
-    }
-
-    if (complete && handler_) {
       {
         std::lock_guard<std::mutex> lock(mutex_);
         requests_.push_back(request);
       }
       const std::string response = handler_(request);
+      if (response.empty()) {
+        break;
+      }
       std::size_t written = 0;
       while (written < response.size()) {
         const ssize_t sent =
@@ -240,13 +261,32 @@ class HttpServer {
         }
         written += static_cast<std::size_t>(sent);
       }
+      if (written < response.size() || force_close_after_response_.load() ||
+          WantsClose(response)) {
+        break;
+      }
     }
     ::close(client);
+  }
+
+  // True when a raw response carries a `Connection: close` header. The comparison
+  // is case-insensitive and deliberately simple: test handlers emit small,
+  // controlled responses.
+  static bool WantsClose(const std::string& response) {
+    std::string lowered = response;
+    for (char& character : lowered) {
+      if (character >= 'A' && character <= 'Z') {
+        character = static_cast<char>(character - 'A' + 'a');
+      }
+    }
+    return lowered.find("\nconnection: close") != std::string::npos;
   }
 
   int listen_fd_ = -1;
   std::uint16_t port_ = 0;
   std::atomic<bool> stop_{false};
+  std::atomic<bool> force_close_after_response_{false};
+  std::atomic<int> connections_{0};
   Handler handler_;
   std::thread thread_;
   mutable std::mutex mutex_;

@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -109,7 +110,7 @@ std::string ExtractPageLanguage(const dom::Document& document) {
 // loaded. Every skip below is deliberate and silent: the M12 contract skips
 // filtered, unresolvable, failed and non-2xx links without failing the page or
 // printing anything, exactly like missing images are skipped (M8a).
-std::optional<std::string> FetchLinkedStyleSheet(const dom::Node& link,
+std::optional<std::string> FetchLinkedStyleSheet(net::Client& client, const dom::Node& link,
                                                  const net::Url& page_url) {
   // rel: first occurrence, split on ASCII whitespace and ASCII-lowercased. A
   // "stylesheet" token applies the sheet unless an "alternate" token is present
@@ -164,7 +165,10 @@ std::optional<std::string> FetchLinkedStyleSheet(const dom::Node& link,
     return std::nullopt;
   }
   net::Response response;
-  if (!net::Fetch(*url, net::FetchOptions{}, &response, &error)) {
+  // Through the per-load Client: the stylesheet fetch shares the page's keep-alive
+  // connection where possible. Semantics (filter, one fetch per occurrence, silent
+  // skip) are the unchanged M12 ones.
+  if (!client.Fetch(*url, net::FetchOptions{}, &response, &error)) {
     return std::nullopt;
   }
   if (response.status < 200 || response.status > 299) {
@@ -177,8 +181,9 @@ std::optional<std::string> FetchLinkedStyleSheet(const dom::Node& link,
 // (documents may be deeply nested) over the whole tree, so <link> elements in the
 // head and in the body alike are candidates in document order; that is also the
 // fetch order. There is no deduplication or cache: every applicable <link>
-// occurrence is fetched once, like every <img> occurrence.
-std::vector<style::LinkedStyleSheet> LoadLinkedStyleSheets(const dom::Document& document,
+// occurrence is fetched once (through the page load's Client), like M12.
+std::vector<style::LinkedStyleSheet> LoadLinkedStyleSheets(net::Client& client,
+                                                           const dom::Document& document,
                                                            const net::Url& page_url) {
   std::vector<style::LinkedStyleSheet> sheets;
   std::vector<dom::NodeId> pending;
@@ -188,7 +193,7 @@ std::vector<style::LinkedStyleSheet> LoadLinkedStyleSheets(const dom::Document& 
     pending.pop_back();
     const dom::Node& node = document.Get(id);
     if (node.type == dom::NodeType::kElement && node.name == "link") {
-      std::optional<std::string> text = FetchLinkedStyleSheet(node, page_url);
+      std::optional<std::string> text = FetchLinkedStyleSheet(client, node, page_url);
       if (text) {
         sheets.push_back(style::LinkedStyleSheet{id, std::move(*text)});
       }
@@ -201,13 +206,52 @@ std::vector<style::LinkedStyleSheet> LoadLinkedStyleSheets(const dom::Document& 
   return sheets;
 }
 
-// Fetches and decodes one <img> and records it under its DOM node id. Every
-// failure below is an ordinary, silently skipped image: it leaves the page
-// load successful and only omits the map entries, so the element lays out as an
-// empty inline. That is the documented M8a MVP limit (no broken-image icon,
-// no stderr noise), not a hidden error.
-void LoadOneImage(const dom::Document& document, const net::Url& page_url, dom::NodeId id,
-                  Page* page) {
+// One per-page-load image cache entry. `image` is null when the URL's fetch or
+// decode failed; the entry then remembers the failure for the rest of the load,
+// so duplicate broken images are not fetched again. `size` is the decoded
+// intrinsic size in CSS px shared with every <img> that resolves to this URL.
+struct CachedImage {
+  std::shared_ptr<const render::Image> image;
+  layout::ReplacedSize size;
+};
+
+// Serialized resolved image URL -> decoded image (or remembered failure) for one
+// page load. Keying by the serialized absolute URL means two <img> elements that
+// resolve to the same resource share one fetch and one decoded render::Image
+// object; there is no cache beyond the load (RelayoutPage never refetches and a
+// later page load starts empty).
+using ImageCache = std::unordered_map<std::string, CachedImage>;
+
+// Returns the cache entry for `url`, fetching and decoding it on the first
+// occurrence. Every failure below is an ordinary, silently skipped image: it
+// leaves the page load successful and is remembered as a null image so a
+// duplicate broken image is not retried. That is the documented M8a MVP limit
+// (no broken-image icon, no stderr noise), not a hidden error.
+const CachedImage& LoadCachedImage(net::Client& client, const net::Url& url, ImageCache* cache) {
+  const std::string key = net::SerializeUrl(url);
+  const auto found = cache->find(key);
+  if (found != cache->end()) {
+    return found->second;
+  }
+  CachedImage entry;
+  std::string error;
+  net::Response response;
+  if (client.Fetch(url, net::FetchOptions{}, &response, &error)) {
+    render::Image image;
+    if (render::DecodePng(response.body, &image, &error)) {
+      entry.size = layout::ReplacedSize{static_cast<float>(image.width),
+                                        static_cast<float>(image.height)};
+      entry.image = std::make_shared<const render::Image>(std::move(image));
+    }
+  }
+  return cache->emplace(key, std::move(entry)).first->second;
+}
+
+// Fetches and decodes one <img> through the load's image cache and records it
+// under its DOM node id. The image source resolves against the page's final URL
+// and is fetched through the page load's Client.
+void LoadOneImage(net::Client& client, const dom::Document& document, const net::Url& page_url,
+                  dom::NodeId id, ImageCache* cache, Page* page) {
   const dom::Attribute* src = FindFirstAttribute(document.Get(id), "src");
   if (src == nullptr || src->value.empty()) {
     return;
@@ -219,25 +263,23 @@ void LoadOneImage(const dom::Document& document, const net::Url& page_url, dom::
   if (!resolved) {
     return;
   }
-  net::Response response;
-  if (!net::Fetch(*resolved, net::FetchOptions{}, &response, &error)) {
+  const CachedImage& cached = LoadCachedImage(client, *resolved, cache);
+  if (cached.image == nullptr) {
     return;
   }
-  render::Image image;
-  if (!render::DecodePng(response.body, &image, &error)) {
-    return;
-  }
-  // One fetch and decode per <img> occurrence: duplicate URLs are fetched twice
-  // on purpose (no image cache in this MVP).
-  page->replaced_sizes[id] =
-      layout::ReplacedSize{static_cast<float>(image.width), static_cast<float>(image.height)};
-  page->images[id] = std::make_shared<const render::Image>(std::move(image));
+  // Every occurrence gets its own map entries (layout/paint are keyed by DOM node
+  // id) but shares the cached decoded image object and intrinsic size.
+  page->replaced_sizes[id] = cached.size;
+  page->images[id] = cached.image;
 }
 
 // Walks the whole DOM iteratively (documents may be deeply nested) and loads
-// every <img> in document order. Iterative traversal keeps the shell free of
-// recursion, matching the DOM/layout conventions.
-void LoadImages(const dom::Document& document, const net::Url& page_url, Page* page) {
+// every <img> in document order through one per-load URL cache. Iterative
+// traversal keeps the shell free of recursion, matching the DOM/layout
+// conventions.
+void LoadImages(net::Client& client, const dom::Document& document, const net::Url& page_url,
+                Page* page) {
+  ImageCache cache;
   std::vector<dom::NodeId> pending;
   pending.push_back(document.root());
   while (!pending.empty()) {
@@ -245,7 +287,7 @@ void LoadImages(const dom::Document& document, const net::Url& page_url, Page* p
     pending.pop_back();
     const dom::Node& node = document.Get(id);
     if (node.type == dom::NodeType::kElement && node.name == "img") {
-      LoadOneImage(document, page_url, id, page);
+      LoadOneImage(client, document, page_url, id, &cache, page);
     }
     for (dom::NodeId child = node.last_child; child != dom::kInvalidNode;
          child = document.Get(child).prev_sibling) {
@@ -270,11 +312,11 @@ void RelayoutPage(Page* page, int viewport_width, const std::shared_ptr<const Fo
   page->boxes = layout::LayoutDocument(page->document, page->styles, options, measure);
 }
 
-bool LoadStyledDocument(const net::Url& url, dom::Document* document,
+bool LoadStyledDocument(net::Client& client, const net::Url& url, dom::Document* document,
                         style::StyleTree* styles, net::Url* final_url, std::string* error) {
   net::Response response;
   std::string fetch_error;
-  if (!net::Fetch(url, net::FetchOptions{}, &response, &fetch_error)) {
+  if (!client.Fetch(url, net::FetchOptions{}, &response, &fetch_error)) {
     if (error != nullptr) {
       *error = fetch_error;
     }
@@ -285,9 +327,10 @@ bool LoadStyledDocument(const net::Url& url, dom::Document* document,
   // fail. Build everything before writing the outs: on failure the caller's
   // outputs stay untouched.
   dom::Document parsed = dom::ParseDocument(response.body);
-  // Author sheets resolve against the response's final URL, i.e. after redirects.
+  // Author sheets resolve against the response's final URL, i.e. after redirects,
+  // and are fetched through the same Client as the page.
   const std::vector<style::LinkedStyleSheet> linked_sheets =
-      LoadLinkedStyleSheets(parsed, response.final_url);
+      LoadLinkedStyleSheets(client, parsed, response.final_url);
   style::StyleTree computed = style::ComputeStyles(parsed, linked_sheets);
 
   *document = std::move(parsed);
@@ -305,8 +348,13 @@ bool LoadPage(const net::Url& url, int viewport_width, const std::shared_ptr<con
   // (a page fetch failure) is detected first, so the caller's current page stays
   // untouched.
   Page loaded;
+  // One Client for the whole load: the page, its external stylesheets and its
+  // images reuse the same keep-alive connection(s). It lives only for this call,
+  // so no connection or image outlives the page load.
+  net::Client client;
   std::string fetch_error;
-  if (!LoadStyledDocument(url, &loaded.document, &loaded.styles, &loaded.final_url, &fetch_error)) {
+  if (!LoadStyledDocument(client, url, &loaded.document, &loaded.styles, &loaded.final_url,
+                          &fetch_error)) {
     if (error != nullptr) {
       *error = "cannot fetch '" + net::SerializeUrl(url) + "': " + fetch_error;
     }
@@ -315,8 +363,9 @@ bool LoadPage(const net::Url& url, int viewport_width, const std::shared_ptr<con
 
   loaded.language = ExtractPageLanguage(loaded.document);
   // Image sources resolve against the page's final URL (after redirects), like
-  // the other page-relative references the shell resolves.
-  LoadImages(loaded.document, loaded.final_url, &loaded);
+  // the other page-relative references the shell resolves, and are loaded through
+  // the same Client with the per-load image URL cache.
+  LoadImages(client, loaded.document, loaded.final_url, &loaded);
   RelayoutPage(&loaded, viewport_width, fonts);
 
   *page = std::move(loaded);

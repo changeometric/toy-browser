@@ -11,6 +11,12 @@
 #include "toy/shell/fonts.h"
 #include "toy/style/computed_style.h"
 
+namespace toy::net {
+// The reusable single-threaded HTTP/1.1 client (keep-alive, gzip) from
+// toy/net/http.h; page loads own one instance for the whole load.
+class Client;
+}  // namespace toy::net
+
 namespace toy::shell {
 
 // One loaded page: everything the shell keeps between loads. It is private to
@@ -22,7 +28,9 @@ namespace toy::shell {
 // each <img>. Layout reserves the replaced box from `replaced_sizes`, paint
 // draws the decoded pixels from `images`. A skipped image is absent from both
 // maps and lays out as an empty inline (M8a MVP limit: no broken-image icon and
-// no error output for image failures, see docs/roadmap.md).
+// no error output for image failures, see docs/roadmap.md). Since M13 one page
+// load caches decoded images per resolved URL, so <img> occurrences that resolve
+// to the same URL share one decoded `render::Image` object (and one fetch).
 //
 // `language` is the page language hint: the value of the first `lang` attribute
 // of the root <html> element in document order, ASCII-whitespace-trimmed, or
@@ -38,9 +46,14 @@ struct Page {
   paint::ImageMap images;
 };
 
-// Fetches `url` with the default FetchOptions, parses the HTML and computes its
-// styles, applying the page's external author stylesheets exactly like the
-// normal page load path does.
+// Fetches `url` through `client`, parses the HTML and computes its styles,
+// applying the page's external author stylesheets exactly like the normal page
+// load path does.
+//
+// `client` is the caller's reusable net::Client (keep-alive, gzip): the page
+// fetch and every stylesheet fetch go through it, so a page and its resources can
+// share one connection per origin. The request behavior itself is the M12 one;
+// only the transport is the client's.
 //
 // `url` is the requested page URL. The <link rel="stylesheet"> elements are
 // discovered by one iterative pre-order DOM walk (head or body alike) and fetched
@@ -51,9 +64,10 @@ struct Page {
 // `disabled`, on `media` (empty, "all" or "screen") and on `type` (empty or
 // "text/css"), all first occurrences and ASCII-lowercased after trimming. Every
 // applicable link is fetched once per occurrence: there is no deduplication or
-// cache, like images.
+// cache (that stays an M12 rule; M13 only changes the transport and dedups
+// images).
 //
-// Only a page fetch failure returns false, with *error set to the raw net::Fetch
+// Only a page fetch failure returns false, with *error set to the raw net::Client
 // error (callers add their own message/prefix); page parsing never fails.
 // Stylesheet problems are never errors: a link that is filtered out, whose href
 // is empty or cannot be resolved (for example an unsupported scheme), whose fetch
@@ -61,7 +75,7 @@ struct Page {
 // stderr output and no effect on the page load. On success every out parameter is
 // written (the out pointers must be non-null) and *error is cleared; on failure
 // all outs are left untouched.
-bool LoadStyledDocument(const net::Url& url, dom::Document* document,
+bool LoadStyledDocument(net::Client& client, const net::Url& url, dom::Document* document,
                         style::StyleTree* styles, net::Url* final_url, std::string* error);
 
 // Fetches `url`, parses and styles the HTML, fetches and decodes the page's
@@ -70,11 +84,19 @@ bool LoadStyledDocument(const net::Url& url, dom::Document* document,
 // layout always takes text metrics through the shell's MeasureText adapter, so
 // this is the only place the two metrics sources meet.
 //
+// One net::Client (keep-alive, gzip) is created for the whole load and used for
+// the page fetch, every external stylesheet fetch and every image fetch, so the
+// page and its resources reuse one connection per origin. Image loads are
+// deduplicated per resolved URL within the load: each unique URL is fetched and
+// decoded at most once, successful decodes are shared by all its <img>
+// occurrences, and a failed fetch/decode is remembered for the rest of the load
+// (duplicate broken images are not retried). There is no cross-load or session
+// cache: the Client lives only for this call.
+//
 // Returns false and sets *error to a ready-to-print message only when the page
 // itself cannot be fetched; parse, style and layout never fail, and an image
-// fetch or decode failure is skipped silently (one fetch attempt per <img>
-// occurrence, no image cache). On success *page owns the complete page and
-// *error is cleared; on failure *page is untouched.
+// fetch or decode failure is skipped silently. On success *page owns the complete
+// page and *error is cleared; on failure *page is untouched.
 bool LoadPage(const net::Url& url, int viewport_width, const std::shared_ptr<const Fonts>& fonts,
               Page* page, std::string* error);
 

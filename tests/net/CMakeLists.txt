@@ -2,6 +2,7 @@
 
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # Committed test-only TLS certificates (see tests/fixtures/tls/README.md).
 set(TLS_FIXTURES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/tls")
@@ -27,6 +28,16 @@ add_test(NAME net.http COMMAND net_http_test)
 set_tests_properties(net.http PROPERTIES ENVIRONMENT
                      "SSL_CERT_FILE=${TLS_FIXTURES_DIR}/test_ca.pem")
 
+add_executable(net_keep_alive_test keep_alive_test.cpp)
+toybrowser_set_warnings(net_keep_alive_test)
+target_link_libraries(net_keep_alive_test PRIVATE toy_net toy_test_support Threads::Threads)
+add_test(NAME net.keep_alive COMMAND net_keep_alive_test)
+
+add_executable(net_gzip_test gzip_test.cpp)
+toybrowser_set_warnings(net_gzip_test)
+target_link_libraries(net_gzip_test PRIVATE toy_net toy_test_support Threads::Threads ZLIB::ZLIB)
+add_test(NAME net.gzip COMMAND net_gzip_test)
+
 add_executable(net_tls_test tls_test.cpp)
 toybrowser_set_warnings(net_tls_test)
 target_link_libraries(net_tls_test PRIVATE toy_net toy_test_support Threads::Threads OpenSSL::SSL
@@ -37,6 +48,16 @@ add_test(NAME net.tls COMMAND net_tls_test)
 # The transport creates its SSL_CTX lazily from OpenSSL's default verify paths, so
 # pointing SSL_CERT_FILE at the test CA is enough to trust the loopback server.
 set_tests_properties(net.tls PROPERTIES ENVIRONMENT
+                     "SSL_CERT_FILE=${TLS_FIXTURES_DIR}/test_ca.pem")
+
+add_executable(net_tls_keep_alive_test tls_keep_alive_test.cpp)
+toybrowser_set_warnings(net_tls_keep_alive_test)
+target_link_libraries(net_tls_keep_alive_test PRIVATE toy_net toy_test_support Threads::Threads
+                                                      OpenSSL::SSL OpenSSL::Crypto)
+target_compile_definitions(net_tls_keep_alive_test PRIVATE
+                           "TOYBROWSER_TLS_FIXTURES=\"${TLS_FIXTURES_DIR}\"")
+add_test(NAME net.tls_keep_alive COMMAND net_tls_keep_alive_test)
+set_tests_properties(net.tls_keep_alive PROPERTIES ENVIRONMENT
                      "SSL_CERT_FILE=${TLS_FIXTURES_DIR}/test_ca.pem")
 
 add_executable(net_file_test file_test.cpp)

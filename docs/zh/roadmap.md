@@ -4,9 +4,8 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M12 已完成（M12 = 外部样式表）。M13（资源加载管线）是下一个计划里程碑；M14
-（CSS 兼容批次 1）与 M15（flexbox/position/float 子集）随后进行。HTTP 代理（M16）与
-JavaScript 子集已延后。**
+**当前状态：M0–M13 已完成（M13 = 资源加载管线）。M14（CSS 兼容批次 1）是下一个计划里程碑；
+M15（flexbox/position/float 子集）随后进行。HTTP 代理（M16）与 JavaScript 子集已延后。**
 快照与接管指南见 [handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
@@ -288,22 +287,50 @@ JavaScript 子集已延后。**
   （M14/M15）；所有样式表加载仍是串行的并使用默认超时（M13 的 keep-alive 会降低连接开销）；每次
   出现单独抓取，还没有样式表缓存。
 
-## M13 — 资源加载管线（计划中；下一个里程碑）
+## M13 — 资源加载管线 ✅（已完成）
 
-- 目标：让含大量资源的页面加载时间与字节数成正比，而不是与 TLS 握手次数成正比。本项目的实测起点：
-  图片较多的真实页面墙体时间约 20 s，而进程只用约 0.1 s CPU，因为每个 `<img>` 都用新连接串行抓取
-  （没有 keep-alive、压缩与图片缓存）。
-- 预期形态：一个 net session/client，按 host 复用 HTTP/1.1 连接（keep-alive、`Connection: close`/EOF
-  处理、chunked 与 `Content-Length` body、超时）；用已批准的 zlib 解码 gzip；按页面（可选跨 session）
-  对图片 URL 去重/缓存。公开 `Fetch` 保留为便捷包装；渲染像素与 dump 不得改变。
-- 测试：loopback HTTP/HTTPS server 断言连接复用、gzip body、body 上限、重定向与重复图片请求；不访问
-  公网；不断言耗时。
-- 验收：图片较多的真实页面有实测 before/after 加载时间下降；连接复用与请求数由测试断言；所有既有输出
-  逐字节不变。
-- 非目标：HTTP/2、cookie、HTTP 缓存头、代理（M16）；去重缓存之外的懒加载；是否增加有限并行图片预取
-  （以及因此引入线程）由 keep-alive 实测数据决定，而不是预先假设。
+- 目标已达成：含大量资源的页面加载时间现在与字节数成正比，而不再为每个资源付出新连接（与 TLS 握手）
+  成本。实测起点是图片较多的真实页面墙体时间约 20 s、CPU 仅约 0.1 s，因为每个 `<img>`（以及 M12
+  起的每个样式表）都在新连接上串行、未压缩、无缓存地抓取。
+- `net`：新增公开 `net::Client`（pimpl、单线程），每个 origin（scheme/host/port）最多保留一条空闲
+  HTTP/1.1 连接并跨请求复用。它增量地解析响应：有界读取 header，然后精确读取 `Content-Length` 或
+  完整 chunked body（含 trailer），读到的多余字节留在池化连接上供下一请求使用。持久连接遵循
+  HTTP/1.1（无 `Connection: close`）或 HTTP/1.0（`Connection: keep-alive`）规则并要求长度定界
+  （持久响应缺少长度定界是可读错误），遇到 `Connection: close` 则关闭。它发送
+  `Accept-Encoding: gzip`，用已批准的 zlib 透明解压 gzip body（`identity` 直接通过，其他编码是
+  错误；原始与解码后 body 都受限，header 原样保留）。池化连接在收到任何响应字节前失败时，会在新连接
+  上重试一次；超时、新连接失败以及已收到响应字节后的失败都不重试。重定向复用同一个池（同 origin
+  复用，跨 origin 为各自 origin 保留空闲连接），`file://` 与一次性抓取一致。公开的一次性
+  `net::Fetch()` 保持完全相同的可观察行为（同样的请求字节与 `Connection: close`、不协商压缩、同样的
+  body/超时/重定向/错误语义），仍是便捷 API。
+- `shell`：`LoadPage()` 保持签名，并为整个加载创建一个 `net::Client`；页面、所有外部样式表与所有
+  图片都经它抓取，因此页面及其资源按 origin 复用连接。按解析后序列化图片 URL 索引的页内图片缓存让
+  每个唯一 URL 最多抓取并解码一次：重复 `<img>` 共享同一个解码后的 `render::Image` 与固有尺寸，
+  失败结果在本次加载内被记住，重复的坏图片不会重试。样式表语义保持 M12（每个适用 `<link>` 出现
+  各抓取一次；样式表不去重/不缓存），`RelayoutPage` 仍不重新抓取，也没有跨加载/跨会话缓存。
+- 测试（全部离线、确定、不断言耗时）：`net.keep_alive` 覆盖同 origin 单连接复用（Content-Length
+  与 chunked body）、`Connection: close`、两个 origin、过期连接重试、新连接失败、
+  `CloseIdleConnections`/析构、`file://`、同 origin 重定向、HTTP/1.0 持久规则、缺少长度定界错误与
+  原始 body 上限；`net.gzip` 覆盖 Content-Length 与 chunked gzip、identity、损坏 gzip、不支持的
+  编码、解码后大小上限，并证明一次性 `Fetch` 仍不发送 `Accept-Encoding`、也不解码；`net.tls_keep_alive`
+  用一条 TLS 连接完成两次请求；`shell.resource_loading` 从 loopback server 提供页面、样式表与重复
+  图片，断言精确的连接/请求数（一条连接、每个唯一图片 URL 一次抓取）、共享的解码图片对象与像素、
+  重复缺失图片只抓一次、不同 URL 不会被过度共享，以及被强制关闭的空闲连接后的恢复。共享 loopback
+  HTTP/TLS 测试服务器增加了持久连接模式与连接/请求计数；共 74 个测试。
+- 已达成验收：所有 70 个 M13 之前测试加 4 个新测试在 GCC 与 Clang 下、警告视为错误时通过（共 74 个
+  测试）；所有 M13 之前的 dump、退出码与 PPM 与 M12 基线逐字节相同（23 个用例的 byte-compat 门禁，
+  包含 M12 的 `css_site` 页面）；GCC 与 Clang 输出相同；同一机器/网络实测 `https://www.python.org/`
+  在 800x600 下从 2.18/2.07/2.02 s（M12 三次）降到 0.99/1.28/0.99 s（M13 三次），
+  `https://www.w3.org/` 从 3.88 s 降到 1.79 s，前后截图逐字节相同；没有新依赖（zlib 早已批准，
+  现在也由 `net` 直接链接）。
+- 本轮之后的已知限制：只有 HTTP/1.1（无 HTTP/2/ALPN）、无 HTTP 缓存头、cookie、HSTS 或代理（M16）；
+  没有并行/线程预取——资源仍是串行的，只摊薄了连接建立与传输成本（有限并行是以后基于实测的决定）；
+  样式表 URL 不去重（每个适用 link 出现仍各抓一次；keep-alive 只省去每请求的连接成本）；图片去重只在
+  单次页面加载内，不跨加载或跨会话；持久响应缺少长度定界是错误（204/304 等无长度状态码未特殊处理）；
+  gzip 是唯一支持的内容编码；空闲池化连接不会主动探活（过期连接在下一次请求时被发现并最多重试一次），
+  也没有空闲超时（连接存活到 Client 销毁）；显式发送 `Connection: keep-alive`。
 
-## M14 — CSS 兼容批次 1（计划中）
+## M14 — CSS 兼容批次 1（计划中；下一个里程碑）
 
 - 目标：在 M12 让真实样式表可用之后，应用真实页面依赖的高频 CSS。代表性真实样式表目前会使用（而我们
   忽略）：`line-height`、`text-align`、`text-decoration`、`border` 与 `border-*` 颜色、`background`

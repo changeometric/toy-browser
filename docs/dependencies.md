@@ -8,8 +8,10 @@ what is still being requested.
 **Six third-party packages are linked:**
 
 - **libX11 (MIT/X11)**, used by the X11 window backend (M1).
-- **libpng + zlib (libpng license / zlib license)**, used by `render` to decode PNG images (M8a).
-  Discovered with CMake's `find_package(PNG REQUIRED)`; zlib is pulled in by libpng.
+- **libpng + zlib (libpng license / zlib license)**, used by `render` to decode PNG images (M8a)
+  and, since M13, by `net` to decode gzip `Content-Encoding` for keep-alive HTTP responses.
+  Discovered with CMake's `find_package(PNG REQUIRED)` in `render` and
+  `find_package(ZLIB REQUIRED)` in `net`; no vendoring.
 - **freetype (FreeType License)**, used by `render` for real-font metrics and glyph rasterization
   (M8b). Discovered with `find_package(Freetype REQUIRED)`.
 - **harfbuzz (MIT)**, used by `render` for OpenType text shaping (M8b). Discovered with
@@ -31,9 +33,10 @@ Approved by the user on 2026-10-31, when M1 started:
 
 - **libX11** — windowing, input and pixel presentation on Linux, used from M1. License: MIT/X11.
   Linked through CMake's `find_package(X11)`; no vendoring. Introduced in commit `0572b8b` (M1).
-- **libpng + zlib** — image decoding, used from M8a. Licenses: libpng license and zlib license.
-  Linked through `find_package(PNG REQUIRED)` in `src/render/CMakeLists.txt`; introduced in the
-  M8a round.
+- **libpng + zlib** — image decoding, used from M8a; since M13 zlib is also used directly by `net`
+  to decode gzip HTTP response bodies. Licenses: libpng license and zlib license. Linked through
+  `find_package(PNG REQUIRED)` in `src/render/CMakeLists.txt` and `find_package(ZLIB REQUIRED)` in
+  `src/net/CMakeLists.txt`; introduced in the M8a round (zlib direct use in M13).
 - **freetype** — font metrics and glyph rasterization for real TTF text, used from M8b. License:
   FreeType License. Linked through `find_package(Freetype REQUIRED)` in `src/render/CMakeLists.txt`.
 - **libxcb** — allowed as an alternative windowing library; currently unused.
@@ -78,7 +81,7 @@ without a display.
 | --- | --- | --- | --- | --- |
 | libX11 | Window, input, presenting pixels | Implement the X11 wire protocol ourselves | Medium; protocol quirks, XShm fallback | **Approved, in use from M1** (plain `XPutImage` first; XShm later if needed) |
 | libxcb | Same as above, more modern API | Same | Medium | **Approved, unused** (alternative to libX11) |
-| libpng + zlib | PNG decoding | Own inflate + PNG filters/decoder | ~600–900 lines | **Approved, linked since M8a** (used by `render::DecodePng`) |
+| libpng + zlib | PNG decoding; zlib also decodes gzip HTTP bodies since M13 | Own inflate + PNG filters/decoder; own gzip/deflate | ~600–900 lines | **Approved, linked since M8a** (used by `render::DecodePng`; zlib linked directly by `net` since M13) |
 | freetype | TTF glyph rasterization and metrics | Own subset TTF loader (cmap/glyf/hmtx, no hinting) | Medium | **Approved, linked since M8b** (used by `render::Font`) |
 | harfbuzz | OpenType shaping (ligatures, glyph selection, positioning) | Basic Latin shaping only | High | **Approved, linked since M8b** (used by `render::Font`) |
 | fontconfig | Installed-font discovery and matching, including automatic CSS/property matching since M10 | Hardcoded font path / no discovery | Medium | **Approved, linked since M8b** (used by `shell` for `--font-family` and the M10 automatic selection/fallback) |
@@ -114,6 +117,14 @@ be completed first.
   test fontconfig configs; the system font configuration is never used by tests), and the M9 TLS
   tests use committed self-signed test certificates (`tests/fixtures/tls/`), never public CAs or
   public sites.
+## M13 resource loading: no new dependency
+
+The resource-loading round (M13) added no new package. The keep-alive HTTP/1.1 client and per-page
+image deduplication are our own code; gzip decoding reuses the already-approved zlib, now linked
+directly by `net` (`find_package(ZLIB REQUIRED)` in `src/net/CMakeLists.txt`) instead of only being
+pulled in transitively by libpng. No version, path or vendoring was added; both `render` and `net`
+use CMake's standard discovery.
+
 ## M11 performance: no new dependency
 
 The performance round (M11) added no third-party dependency: the caches, viewport culling and

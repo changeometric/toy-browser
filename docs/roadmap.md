@@ -3,10 +3,10 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M12 are done (M12 = external stylesheets). M13 (resource loading pipeline) is
-the next planned milestone; M14 (CSS compatibility batch 1) and M15 (flexbox/position/float subset)
-follow it. The HTTP proxy (M16) and the JavaScript subset are deferred.** For a snapshot and
-takeover guide, read [handoff.md](handoff.md).
+**Current status: M0–M13 are done (M13 = resource loading pipeline). M14 (CSS compatibility batch 1)
+is the next planned milestone; M15 (flexbox/position/float subset) follows it. The HTTP proxy (M16)
+and the JavaScript subset are deferred.** For a snapshot and takeover guide, read
+[handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
 
@@ -403,26 +403,68 @@ takeover guide, read [handoff.md](handoff.md).
   all sheet loads are serial with the default timeouts (M13 keep-alive reduces connection overhead);
   each occurrence is fetched separately and there is no stylesheet cache yet.
 
-## M13 — Resource loading pipeline (planned; next milestone)
+## M13 — Resource loading pipeline ✅ (done)
 
-- Goal: make pages with many assets load in time proportional to bytes, not to the number of TLS
-  handshakes. Measured start point on this project: image-heavy real pages spend ~20 s wall while
-  the process uses ~0.1 s CPU, because every `<img>` is fetched serially with a new connection (no
-  keep-alive, no compression, no image cache).
-- Expected shape: a net session/client owning reusable HTTP/1.1 connections per host (keep-alive,
-  `Connection: close`/EOF handling, chunked and `Content-Length` bodies, timeouts), gzip decoding
-  with the already-approved zlib, and image-URL deduplication/caching for a page (optionally across
-  a session). Public `Fetch` stays as a convenience wrapper; rendered pixels and dumps must not
-  change.
-- Tests: loopback HTTP/HTTPS servers assert connection reuse, gzip bodies, body caps, redirects and
-  duplicate image requests; no public network; no wall-time assertions.
-- Acceptance: a measured before/after load-time drop on image-heavy real pages; connection reuse and
-  request counts asserted by tests; every existing output byte-identical.
-- Non-goals: HTTP/2, cookies, HTTP caching headers, proxy (M16), lazy loading beyond the dedup
-  cache; whether to add limited parallel image prefetch (and therefore threading) is decided from
-  the keep-alive measurements, not assumed.
+- Goal met: pages with many assets now load in time proportional to bytes instead of paying a fresh
+  connection (and TLS handshake) per resource. The measured start point was ~20 s wall with ~0.1 s
+  CPU on image-heavy real pages because every `<img>` — and since M12 every stylesheet — was fetched
+  serially on a new connection, uncompressed and without any cache.
+- `net`: new public `net::Client` (pimpl, single-threaded) that keeps at most one idle HTTP/1.1
+  connection per origin (scheme, host, port) and reuses it across requests. It frames responses
+  incrementally: a bounded header read, then exactly Content-Length bytes or the full chunked body
+  (including trailers), with read-ahead bytes carried on the pooled connection for the next
+  request. Persistence follows HTTP/1.1 rules (no `Connection: close`) or HTTP/1.0
+  (`Connection: keep-alive`), requires a length delimiter (a persistent response without one is a
+  readable error), and closes on `Connection: close`. It advertises `Accept-Encoding: gzip` and
+  transparently inflates gzip bodies with the already-approved zlib (`identity` passes through,
+  other codings are errors; both the raw and the decoded body stay bounded; headers are
+  preserved). One retry on a fresh connection handles a stale pooled connection that fails before
+  any response byte arrives — timeouts, fresh-connection failures and anything after received
+  response bytes are never retried. Redirects use the same pool (same-origin hops reuse,
+  cross-origin hops keep their own idle connection) and `file://` works like the one-shot fetch.
+  The public one-shot `net::Fetch()` keeps its exact observable behavior (same request bytes and
+  `Connection: close`, no compression negotiation, same body/timeout/redirect/error semantics) and
+  remains the convenience API.
+- `shell`: `LoadPage()` keeps its signature and creates one `net::Client` for the whole load; the
+  page, all external stylesheets and all images are fetched through it, so a page and its resources
+  reuse one connection per origin. A per-load image cache keyed by the serialized resolved image URL
+  fetches and decodes each unique URL at most once: duplicate `<img>` occurrences share one decoded
+  `render::Image` and intrinsic size, and a failed fetch/decode is remembered for the rest of the
+  load so duplicate broken images are not retried. Stylesheet semantics stay the M12 ones (every
+  applicable `<link>` occurrence is fetched once; no stylesheet dedup/cache), `RelayoutPage` never
+  refetches, and there is no cross-load or session cache.
+- Tests (all offline, deterministic, no wall-time assertions): `net.keep_alive` covers single-
+  connection reuse with Content-Length and chunked bodies, `Connection: close`, two origins, stale-
+  connection retry, fresh-connection failure, `CloseIdleConnections`/destructor, `file://`,
+  same-origin redirects, HTTP/1.0 persistence rules, the delimiter error and the raw body cap;
+  `net.gzip` covers gzip with Content-Length and chunked transfer encoding, identity, corrupt gzip,
+  an unsupported coding, the decoded-size cap, and proves the one-shot `Fetch` still sends no
+  `Accept-Encoding` and does not decode; `net.tls_keep_alive` reuses one TLS connection for two
+  requests; `shell.resource_loading` serves a page, a stylesheet and duplicate images from a
+  loopback server and asserts the exact connection/request counts (one connection, one fetch per
+  unique image URL), the shared decoded image object and pixels, one fetch for a duplicate missing
+  image, no over-broad sharing of distinct URLs, and recovery after a force-closed idle connection.
+  The shared loopback HTTP/TLS test servers gained persistent-connection modes and
+  connection/request counters; 74 tests total.
+- Acceptance reached: all 70 pre-M13 tests plus the 4 new tests pass under GCC and Clang with
+  warnings as errors (74 tests); every pre-M13 dump, exit status and PPM is byte-identical to the
+  M12 baseline (23-case byte-compat gate, including the M12 `css_site` pages); GCC and Clang outputs
+  are identical; measured on the same machine/network, `https://www.python.org/` at 800x600 dropped
+  from 2.18/2.07/2.02 s (three M12 runs) to 0.99/1.28/0.99 s (three M13 runs) and
+  `https://www.w3.org/` from 3.88 s to 1.79 s, with byte-identical screenshots before/after; no new
+  dependency (zlib was already approved and is now also linked directly by `net`).
+- Known limits after this round: HTTP/1.1 only (no HTTP/2/ALPN), no HTTP caching headers, cookies,
+  HSTS or proxy (M16); no parallel/threaded prefetch — resources are still serial, only connection
+  setup and transfer are amortized (limited parallelism is a later decision from measurements);
+  stylesheet URLs are not deduplicated (each applicable link occurrence is still fetched; keep-alive
+  only removes the per-request connection cost); image deduplication is per page load, not across
+  loads or a browser session; a persistent response without a length delimiter is an error (statuses
+  such as 204/304-without-length are not specially handled); gzip is the only supported content
+  coding; idle pooled connections are not proactively health-checked (a stale one is detected and
+  retried once, at most one retry) and have no idle timeout (they live until the Client is
+  destroyed); `Connection: keep-alive` is sent explicitly.
 
-## M14 — CSS compatibility batch 1 (planned)
+## M14 — CSS compatibility batch 1 (planned; next milestone)
 
 - Goal: apply the high-frequency CSS that real pages rely on once M12 makes their stylesheets
   available. Representative real stylesheets currently exercise (and we ignore): `line-height`,

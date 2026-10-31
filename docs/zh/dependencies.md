@@ -9,8 +9,9 @@
 **目前链接了六个第三方包：**
 
 - **libX11（MIT/X11）**，用于 X11 窗口后端（M1）。
-- **libpng + zlib（libpng 许可证 / zlib 许可证）**，由 `render` 用于解码 PNG 图片（M8a）。
-  通过 CMake 的 `find_package(PNG REQUIRED)` 发现；zlib 由 libpng 一并引入。
+- **libpng + zlib（libpng 许可证 / zlib 许可证）**，由 `render` 用于解码 PNG 图片（M8a），并自 M13
+  起由 `net` 用于解码 keep-alive HTTP 响应的 gzip `Content-Encoding`。通过 CMake 的
+  `find_package(PNG REQUIRED)`（render）与 `find_package(ZLIB REQUIRED)`（net）发现；无 vendoring。
 - **freetype（FreeType 许可证）**，由 `render` 用于真实字体的度量与字形光栅化（M8b）。通过
   `find_package(Freetype REQUIRED)` 发现。
 - **harfbuzz（MIT）**，由 `render` 用于 OpenType 文本整形（M8b）。通过
@@ -31,8 +32,10 @@
 
 - **libX11**——Linux 上的窗口、输入与像素呈现，自 M1 起使用。许可证：MIT/X11。通过 CMake 的
   `find_package(X11)` 链接；不做 vendoring。引入于提交 `0572b8b`（M1）。
-- **libpng + zlib**——图片解码，自 M8a 起使用。许可证：libpng 许可证与 zlib 许可证。通过
-  `src/render/CMakeLists.txt` 中的 `find_package(PNG REQUIRED)` 链接；引入于 M8a 轮。
+- **libpng + zlib**——图片解码，自 M8a 起使用；M13 起 zlib 还由 `net` 直接用于解码 gzip HTTP
+  响应 body。许可证：libpng 许可证与 zlib 许可证。通过 `find_package(PNG REQUIRED)` 在
+  `src/render/CMakeLists.txt`、`find_package(ZLIB REQUIRED)` 在 `src/net/CMakeLists.txt` 中链接；
+  M8a 轮引入（zlib 直接使用在 M13）。
 - **freetype**——真实 TTF 文本的字体度量与字形光栅化，自 M8b 起使用。许可证：FreeType 许可证。
   通过 `src/render/CMakeLists.txt` 中的 `find_package(Freetype REQUIRED)` 链接。
 - **libxcb**——允许作为替代窗口库；当前未使用。
@@ -72,7 +75,7 @@ JavaScript——而不包括底层编解码与字体机制。因此图片解码�
 | --- | --- | --- | --- | --- |
 | libX11 | 窗口、输入、呈现像素 | 自己实现 X11 线协议 | 中等；协议怪癖、XShm 回退 | **已批准，自 M1 起在用**（先用普通 `XPutImage`；需要时再上 XShm） |
 | libxcb | 同上，API 更现代 | 同上 | 中等 | **已批准，未使用**（libX11 的替代） |
-| libpng + zlib | PNG 解码 | 自写 inflate + PNG filters/decoder | 约 600–900 行 | **已批准，自 M8a 起链接**（由 `render::DecodePng` 使用） |
+| libpng + zlib | PNG 解码；M13 起 zlib 还用于解码 gzip HTTP body | 自写 inflate + PNG filters/decoder；自写 gzip/deflate | 约 600–900 行 | **已批准，自 M8a 起链接**（由 `render::DecodePng` 使用；zlib 自 M13 起由 `net` 直接链接） |
 | freetype | TTF 字形光栅化与度量 | 自写子集 TTF 加载器（cmap/glyf/hmtx，无 hinting） | 中等 | **已批准，自 M8b 起链接**（由 `render::Font` 使用） |
 | harfbuzz | OpenType 整形（连字、字形选择、定位） | 只做基础拉丁整形 | 高 | **已批准，自 M8b 起链接**（由 `render::Font` 使用） |
 | fontconfig | 已安装字体的发现与匹配 | 硬编码字体路径 / 不做发现 | 中等 | **已批准，自 M8b 起链接**（shell 的 `--font-family` 使用） |
@@ -108,3 +111,7 @@ M11 性能轮没有新增任何第三方依赖：缓存、视口裁剪与窗口�
 软件渲染是刻意保留的：实测填充率不是瓶颈，因此没有 GPU/OpenGL/Vulkan 后端。XShm/dirty-rect 呈现
 经过考虑但刻意延后；XShm 需要新依赖 libXext，目前未获批准。未来任何 GPU 或呈现扩展工作都必须走
 上面的审批流程，并保留可用的 headless 软件路径。
+
+## M13 资源加载：没有新依赖
+
+资源加载轮次（M13）没有新增包；gzip 解码复用已批准的 zlib，现在由 `net` 直接链接（`find_package(ZLIB REQUIRED)`），没有版本/路径/vendoring。

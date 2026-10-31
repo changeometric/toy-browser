@@ -26,21 +26,23 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M10 | Automatic font selection: CSS `font-family`/`font-weight`/`font-style` matched through the approved fontconfig library with initial family `serif`, per-code-point character-coverage fallback runs (Han text on Latin pages and vice versa), root `<html lang>` as a fontconfig language hint; a shared `shell::Fonts` object drives layout measurement and painting (`TextMetrics::ascent_px`, `Box::baseline_offset_px`, `paint::FontRunsProvider`); simplified CJK break units in layout so Chinese paragraphs wrap; committed regular/bold/italic/Han fixture fonts and deterministic fixture/empty fontconfig test configs; `--font`/`--font-family` overrides kept; bitmap path remains the byte-identical degradation path; 66 tests |
 | M11 | Performance: default RelWithDebInfo build with `-ffp-contract=off`; render text caches (one reusable hb_font/hb_buffer per font, bounded shaped-run and glyph-coverage LRU caches); shell font caches (allocation-free resolved-style fast path, metrics and run LRUs); paint viewport culling with a conservative text margin; window loop fixes (Expose without relayout, resize only on actual change, coalesced X11 Expose/ConfigureNotify bursts, reused surface); byte-identical rendering; 66 tests |
 | M12 | External stylesheets: public `style::LinkedStyleSheet` + two-arg `ComputeStyles(document, linked_sheets)` merging linked sheets and `<style>` elements by document order (one-arg overload byte-identical to M11); shell-private `LoadStyledDocument()` sharing one fetch/parse/discover/filter/fetch-sheets/style path between page loading and `--dump-style`; `rel`/`disabled`/`media`/`type` filtering, `href` resolved against the final page URL after redirects, 200..299 bodies only, failed/filtered sheets skipped silently, one fetch per `<link>` occurrence (no dedup); `--dump-dom`/`--dump-body` still fetch no sheets; committed `tests/fixtures/css_site/`, header-only `tests/support/http_server.h` loopback server, `style.external_sheets` + `shell.external_css` + CLI tests; 70 tests; byte-compat and GCC/Clang gates green |
+| M13 | Resource loading: public `net::Client` (pimpl, single-threaded) with one idle keep-alive HTTP/1.1 connection per origin, incremental Content-Length/chunked framing with read-ahead for the next request, HTTP/1.1/1.0 persistence rules, transparent gzip via the approved zlib (raw and decoded bodies bounded, other codings are errors), one stale-connection retry before any response byte, redirects and `file://` through the same client; the one-shot `Fetch()` keeps its exact request bytes/behavior. Shell `LoadPage` creates one Client per load for page + stylesheets + images and dedups image URLs per page load (duplicate URLs share one fetch/decode/image object; failed URLs remembered; every `<link>` occurrence still fetched; no cross-load cache). Shared loopback HTTP/TLS test servers gained persistent-connection modes and connection/request counters; `net.keep_alive`, `net.gzip`, `net.tls_keep_alive` and `shell.resource_loading`; 74 tests; byte-compat, GCC/Clang and measured real-page load-time gates |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-**Next planned milestone: M13 — Resource loading pipeline (planned, not started).**
-M12 (external stylesheets) shipped and real pages now apply their external CSS. M13 makes pages
-with many assets load in time proportional to bytes rather than to the number of connections:
-reusable HTTP/1.1 connections per host, gzip, and page-level resource deduplication/caching (image
-URLs first; serial stylesheet fetches benefit from keep-alive as well). M14 (CSS compatibility
-batch 1) and M15 (flexbox/position/float subset) follow; the HTTP proxy (M16) and the JavaScript
-subset remain deferred.
+**Next planned milestone: M14 — CSS compatibility batch 1 (planned, not started).**
+M13 (resource loading) shipped: keep-alive connections, gzip and per-page image deduplication cut
+the measured load wall time roughly in half (python.org at 800x600: 2.07 s -> 0.99 s median;
+w3.org: 3.88 s -> 1.79 s; identical screenshots), and real stylesheets are now fetched over reused
+connections. M14 applies the high-frequency CSS real pages rely on; M15 then covers the
+flexbox/position/float subset. The HTTP proxy (M16) and the JavaScript subset remain deferred.
 
-Not implemented yet: resource loading (keep-alive/gzip/parallel resource loading and image
-cache/lazy loading, M13), CSS compatibility and modern layout (M14/M15), proxies (M16), JavaScript
+Not implemented yet: parallel/threaded resource loading, cross-page image caching and lazy loading
+(M13 keeps serial reuse and per-page dedup only), CSS compatibility and modern layout (M14/M15),
+proxies (M16), JavaScript
 (deferred), borders, horizontal scrolling/scrollbars, hover/active link styling and form controls,
 `@font-face`/webfont downloads, XShm/dirty-rect presentation, and GPU rendering (a deliberate
-decision, see roadmap M11). External `<link rel="stylesheet">` sheets work since M12 (discovered in
+decision, see roadmap M11). Keep-alive HTTP/1.1, gzip decoding and per-page image deduplication
+work since M13; external `<link rel="stylesheet">` sheets work since M12 (discovered in
 document order, filtered, resolved against the final URL, fetched and cascaded with `<style>` and
 `style` attributes; no `@import`, media queries, alternate/disabled sheet selection or CSS images
 yet); pages without links are byte-identical to M11. Font selection works automatically since M10
@@ -73,7 +75,7 @@ ctest --test-dir "$BUILD" --output-on-failure
     "file://$PWD/README.md" && file /tmp/toybrowser-page.ppm
 ```
 
-Expected: 70/70 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
+Expected: 74/74 tests pass; building with `-DTOYBROWSER_WERROR=ON` is warning-free on GCC and
 Clang; dumps print deterministic trees; screenshots write a binary PPM (the URL form paints the
 real page, the URL-less form keeps the placeholder). All headless modes need no display. CMake 3.20
 or newer is required; building needs the X11, libpng, freetype, harfbuzz, fontconfig and OpenSSL
@@ -105,6 +107,23 @@ The tests are offline: committed `file://` fixtures plus an in-process loopback 
 (`tests/support/http_server.h`), never the public network. `style.external_sheets`,
 `shell.external_css`, `shell.dump_style_external` and `shell.dump_style_filtered_only` cover
 ordering, filtering, redirects, absolute URLs, failure skips and no-dedup request counts.
+
+```sh
+# Resource loading (M13): keep-alive reuse, gzip and per-page image dedup are
+# covered by offline loopback tests (no public network, no wall-time assertions).
+ctest --test-dir "$BUILD" -R '^(net\.keep_alive|net\.gzip|net\.tls_keep_alive|shell\.resource_loading)$' --output-on-failure
+
+# Manual real-page check (network-dependent, not part of the suite): the same
+# screenshot stays byte-identical to the pre-M13 binary while loading faster.
+"$BUILD"/toybrowser --size 800x600 --screenshot /tmp/toybrowser-m13.ppm https://www.python.org/
+```
+
+Expected: the four tests pass deterministically and assert the connection/request counts (one
+reused connection for a page + stylesheet + images, one fetch per unique image URL, one retry of a
+stale idle connection, gzip decoding); the one-shot `Fetch()` stayed byte-compatible and every
+pre-M13 dump/screenshot is unchanged. On the development machine the manual page dropped from
+~2.1 s to ~1.0 s with identical pixels (M13 round report); the exact numbers are machine/network
+dependent, so do not turn them into test assertions.
 
 ```sh
 # Images (M8a): the committed PNG fixtures render end to end.
@@ -182,31 +201,31 @@ Window demo (needs a display):
 # history; the title follows <title>.
 ```
 
-## Next round: M13 — Resource loading pipeline (planned; starts only on the maintainer's go-ahead)
+## Next round: M14 — CSS compatibility batch 1 (planned; starts only on the maintainer's go-ahead)
 
-**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M13 code exists. M12 is complete and
-green, so the starting point is the current HEAD. M14–M15 are the following planned rounds; the
-HTTP proxy stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when the round
-starts.
+**Status:** design sketch only (in [roadmap.md](roadmap.md)); no M14 code exists. M13 is complete and
+green, so the starting point is the current HEAD. M15 is the following planned round; the HTTP proxy
+stays at M16 and the JavaScript subset stays deferred. Contracts are frozen when the round starts.
 
-- Goal: make pages with many assets load in time proportional to bytes rather than to the number of
-  connections. Measured start point: image-heavy real pages spend ~20 s wall while the process uses
-  ~0.1 s CPU, because every `<img>` and stylesheet is fetched serially on a fresh connection (no
-  keep-alive, no compression, no image cache; external stylesheets since M12 are serial too).
-- Expected shape (freeze before spawning): a `net` session/client owning reusable HTTP/1.1
-  connections per host (keep-alive, `Connection: close`/EOF handling, chunked and Content-Length
-  bodies, timeouts), gzip decoding with the already-approved zlib, and per-page resource
-  deduplication/caching (image URLs first; stylesheet requests also reuse connections). The public
-  `net::Fetch` stays as the one-shot convenience wrapper; rendered pixels and dumps must not change.
-- Out of scope until re-scoped: HTTP/2, cookies, HTTP caching headers, the proxy (M16), lazy
-  loading beyond the dedup cache; whether to add limited parallel prefetch (and therefore threads)
-  is decided from measurements, not assumed.
-- Tests: loopback HTTP/HTTPS servers asserting connection reuse, gzip bodies, body caps, redirects
-  and duplicate resource requests; no public network and no wall-time assertions in CTest.
-- Acceptance: a measured before/after load-time drop on image-heavy real pages; connection/request
-  counts asserted by tests; every existing dump and screenshot byte-identical; GCC and Clang green.
-- After M13: M14 CSS compatibility batch 1 (line-height, text-align, borders, `rgb()`, units, ...),
-  then M15 the flexbox/position/float subset. The proxy (M16) and JavaScript stay deferred until
+- Goal: apply the high-frequency CSS that real pages rely on, now that their stylesheets are
+  discovered/fetched (M12) and loaded efficiently (M13). Representative real stylesheets currently
+  exercise and we ignore: `line-height`, `text-align`, `text-decoration`, `border`/`border-*`
+  colors, the color part of the `background` shorthand, `max-width`/`min-width`, `margin: auto`,
+  `box-sizing`, logical properties (`margin-block-*`, `inline-size`, ...), `overflow: hidden`
+  clipping, `rgb()`/`hsl()`, `%`/`rem` units, and `display: none`/`visibility`.
+- Expected shape (freeze before spawning): extend the property parser and computed style, and where
+  required layout/paint, in small separately tested slices; keep the cascade/specificity/
+  inheritance/`!important` invariants unchanged. Pages that do not use the new properties keep
+  byte-identical output. If the batch grows too large it is split (for example borders first, then
+  logical properties/units).
+- Out of scope until re-scoped: flexbox/grid/position/float (M15), CSS variables, other at-rules,
+  webfonts.
+- Tests: committed fixture pages for each property, deterministic dump/screenshot tests, no
+  regressions, and a manual real-site visual check; no public network in tests.
+- Acceptance: fixture coverage for each property, all tests green on GCC and Clang, no regressions,
+  a manual real-site check visibly improves typography/colors, and pages not using the new
+  properties stay byte-identical.
+- After M14: M15 flexbox/position/float subset. The proxy (M16) and JavaScript stay deferred until
   the maintainer prioritises them.
 
 ## Map of the repository
@@ -219,6 +238,8 @@ starts.
 - `src/shell/page.h` — shell-private page loader (final URL, DOM, styles, box tree, decoded images)
   plus the M12 `LoadStyledDocument()` path that fetches and filters the page's external
   `<link rel="stylesheet">` sheets before styling and is shared by `LoadPage` and `--dump-style`;
+  since M13 `LoadPage` creates one `net::Client` per load and passes it through page, stylesheet and
+  image fetches, and images are deduplicated per resolved URL within the load;
   `src/style/` matches selectors and resolves the wrapper cascade (UA, author `<style>` and linked
   sheets in document order, inline `style`), with `style::LinkedStyleSheet` entries supplied by the
   shell so `style` never fetches anything;
@@ -234,12 +255,14 @@ starts.
   automatic system default. `src/platform/window.cpp` coalesces X11 Expose/ConfigureNotify bursts
   (M11). `layout` consumes text metrics through a `shell`-supplied callback and has no `render`
   dependency; `src/layout/text_break.cpp` owns the break-unit tokenizer.
-- `src/net/` — URLs (`url.cpp`), shared HTTP/1.1 request/response code (`http.cpp`), and the M9
-  private transport split: `socket_internal.h`/`socket.cpp` (TCP connect + poll helpers),
+- `src/net/` — URLs (`url.cpp`), shared HTTP/1.1 request/response code and the M13 `net::Client`
+  keep-alive/gzip implementation (`http.cpp`), and the M9 private transport split:
+  `socket_internal.h`/`socket.cpp` (TCP connect + poll helpers),
   `stream_internal.h`/`stream.cpp` (the private `Stream` interface, plain `SocketStream` and
   `ReadUntilEof`), `tls_internal.h`/`tls.cpp` (the OpenSSL-backed `TlsStream`, process-wide
-  `SSL_CTX`, verification/handshake loop, SIGPIPE guard). OpenSSL types stay out of the public
-  `include/` headers; the only net public API is `toy/net/url.h` + `toy/net/http.h`.
+  `SSL_CTX`, verification/handshake loop, SIGPIPE guard). OpenSSL and zlib stay out of the public
+  `include/` headers; the only net public API is `toy/net/url.h` + `toy/net/http.h` (now including
+  `Client`, whose pimpl keeps the connection pool private).
 - `tests/<module>/` — one executable per subject, registered with CTest; new tests use the
   header-only `tests/support/check.h`. Committed fixtures: `tests/fixtures/nav_site/` (three-page
   navigation demo; its "Unsupported page" link is a deliberate unsupported-scheme case so no test
@@ -258,8 +281,10 @@ starts.
   deterministic; see the fixture READMEs).
   `tests/support/tls_server.h` is the header-only in-process TLS loopback server shared by
   `net.tls`/`net.http`/`shell.https`, and `tests/support/http_server.h` (M12) is the header-only
-  plain-HTTP loopback server (request recording, redirect/absolute-URL/failure cases for external
-  stylesheets); no test ever contacts the public network.
+  plain-HTTP loopback server; since M13 both can keep a connection open for multiple requests and
+  expose connection/request counters (the HTTP one also has `SetForceCloseAfterResponse` for stale
+  idle-connection tests), which is how keep-alive behavior is asserted without the public network.
+  No test ever contacts the public network.
 - Root public files — `README.md`/`README.zh.md` (user-facing entry points), `AI-DISCLOSURE.md`,
   `CONTRIBUTING.md`, `SECURITY.md`, `CMakePresets.json`, `.github/workflows/ci.yml` and
   `docs/assets/` screenshots.
@@ -436,6 +461,35 @@ starts.
   `--dump-dom` keep their old code paths and fetch no sheets. No CLI flags, exit codes or dump
   formats changed, and a page without `<link>` (or whose links are all skipped) keeps
   byte-identical dumps, exit status and PPM pixels to M11.
+- Resource loading contract (M13): public `net::Client` (`toy/net/http.h`, pimpl, single-threaded,
+  no concurrency/pipelining) is the keep-alive path. It keeps at most one idle HTTP/1.1 connection
+  per origin (`scheme://host:port`) and reuses it; requests carry `Connection: keep-alive` and
+  `Accept-Encoding: gzip`. Responses are framed incrementally on the private `Stream`: a bounded
+  header read (64 KiB), then exactly the Content-Length body or the full chunked body including
+  trailers, with read-ahead bytes kept on the pooled connection for the next request. A connection
+  is pooled only when the exchange is persistent (HTTP/1.1 without `Connection: close`, or HTTP/1.0
+  with `Connection: keep-alive`) and the body is delimited; a persistent response without a length
+  delimiter is a readable error and closes the connection. `Content-Encoding: gzip` is inflated
+  through the approved zlib (identity passes through, any other coding is an error), with both the
+  raw encoded body and the decoded body bounded by `FetchOptions::max_body_bytes`; headers are kept
+  as received. If a pooled connection fails before any response byte arrives it is closed and the
+  request is retried once on a fresh connection; timeouts, fresh-connection failures and failures
+  after received bytes are never retried. Redirects and `file://` behave like `Fetch()` and use the
+  same pool (same-origin hops reuse; cross-origin hops keep an idle connection for their own origin).
+  The one-shot free `Fetch()` keeps its exact observable behavior (same request bytes with
+  `Connection: close`, no `Accept-Encoding`, same body/timeout/redirect/error semantics and file
+  handling); only `Client` negotiates gzip and pools connections.
+- Shell page-load contract for M13: `LoadPage()` keeps its signature and creates exactly one
+  `net::Client` for the whole load, used for the page fetch, every external stylesheet fetch and
+  every image fetch; the Client dies with the call, so no connection or cache survives a page load
+  (and `RelayoutPage` still never refetches). Images are deduplicated per page load by the
+  serialized resolved URL: each unique URL is fetched and decoded at most once, duplicate `<img>`
+  occurrences share the same decoded `render::Image` object and intrinsic size, and a failed
+  fetch/decode is remembered for the rest of the load so duplicate broken images are not retried.
+  Stylesheet semantics stay the M12 ones (every applicable `<link>` occurrence fetched once; no
+  stylesheet dedup/cache). `--dump-style` creates its own Client for page + sheets; `--dump-dom` and
+  `--dump-body` keep their old one-shot `Fetch()` paths. No CLI, dump-format, shell-public-API or
+  pixel changes: every pre-M13 output is byte-identical.
 - Navigation/session contract (`toy/shell/browser.h`): one history entry per successful load,
   failed loads change nothing, every successful load resets the scroll offset to 0, a reference
   that only changes the fragment is a no-op, the title is the first `<title>` text (collapsed,
@@ -707,9 +761,34 @@ starts.
   rules or the style dump output means updating the fixture README, the style tests and the shell
   tests together (same rule as the nav/img/font fixtures). Keep one external sheet in a
   subdirectory, one `<link>` inside `<body>`, and the document-order ordering page when editing it.
-- `tests/support/http_server.h` is test-only header-only infrastructure (one request per
-  connection, requests recorded for sequence assertions). Keep production code out of it, never
-  use it from the browser, and assert request counts rather than wall time.
+- `tests/support/http_server.h` and `tests/support/tls_server.h` are test-only header-only
+  infrastructure. Since M13 they keep a connection open for multiple requests (the HTTP server
+  closes when the response says `Connection: close` or a test enables `SetForceCloseAfterResponse`)
+  and expose connection/request counters for deterministic keep-alive assertions. Keep production
+  code out of them, never use them from the browser, and assert counts rather than wall time.
+- M13 `net::Client` is single-threaded and owns the keep-alive pool: never share a Client across
+  threads, never pipeline requests, and keep the one-idle-connection-per-origin rule. `Client` must
+  frame responses incrementally (bounded head, then exactly Content-Length or chunked body with
+  trailers); never switch it back to read-until-EOF, because an unread body byte would corrupt the
+  next response on the pooled connection. A persistent response without a length delimiter is an
+  error by contract. Statuses such as 1xx/204/304 are not specially handled yet (documented limit).
+- The one-shot `Fetch()` must stay byte-compatible: same request bytes (`Connection: close`, no
+  `Accept-Encoding`), same read/parse/timeout/redirect/file semantics. Do not "upgrade" Fetch
+  callers to keep-alive or gzip behavior; use `Client` for that. The shell creates one Client per
+  `LoadPage` (page + stylesheets + images) and it dies with the load: do not cache connections,
+  Clients or images across page loads without a contract change.
+- M13 gzip support is deliberately narrow: only `Content-Encoding: gzip`/`identity` are accepted,
+  both raw and decoded bodies stay under `max_body_bytes`, headers are preserved, and the free
+  `Fetch()` never advertises or decodes gzip. Tests build gzip fixtures in memory with zlib; no
+  test may use the public network or assert wall time.
+- M13 image deduplication is per page load and keyed by the serialized resolved URL (one fetch and
+  decode per unique URL, failures remembered; no over-broad sharing of distinct URLs). Stylesheet
+  fetches intentionally stay one per applicable `<link>` occurrence (M12 semantics) — do not add
+  stylesheet dedup or cross-load lazy loading/caching without re-scoping the round.
+- Real-page performance checks are manual and machine/network dependent: measure before/after with
+  the same page and record numbers in the round report; never add wall-time assertions to CTest.
+  zlib is linked PRIVATE to `toy_net` through CMake (`find_package(ZLIB REQUIRED)`); keep zlib types
+  out of public headers and do not hardcode versions/paths.
 - Fixture generators are committed next to the fixtures they produce (`tests/fixtures/fonts/generate_toy_test.py`,
   `tests/fixtures/fonts/generate_variants.py`, `tests/fixtures/images/generate.py`). The font
   generators reproduce the committed TTFs byte for byte; the PNG generator reproduces the documented

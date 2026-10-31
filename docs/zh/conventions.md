@@ -44,7 +44,7 @@
 - 每个主题一个文件：`tests/<module>/<topic>_test.cpp`；CTest 名称 `<module>.<topic>`。
 - 确定性：无网络、无显示器、不依赖时间、locale、家目录或已安装字体。
 - 解析器和布局优先使用 golden dump 比较。新测试使用 header-only 的 `tests/support/check.h`（CMake 接口目标 `toy_test_support`），不再复制本地 `Check`/`g_failures` 测试支架；旧文件在被改动时迁移。不引入测试框架依赖。
-- 依赖网络的功能只用进程内 loopback 服务器测试：header-only 的纯 HTTP 服务器 `tests/support/http_server.h`（M12，记录请求以断言重定向/资源用例）、`net` 测试内部的纯 HTTP 服务器，以及 header-only 的 TLS 服务器 `tests/support/tls_server.h`（提交的仅测试用证书在 `tests/fixtures/tls/`，信任通过 CTest `ENVIRONMENT` 属性提供）。任何测试都不访问公网或使用已安装证书库。
+- 依赖网络的功能只用进程内 loopback 服务器测试：header-only 的纯 HTTP 服务器 `tests/support/http_server.h`（M12，记录请求以断言重定向/资源用例；M13 起支持持久连接与连接/请求计数）、`net` 测试内部的纯 HTTP 服务器，以及 header-only 的 TLS 服务器 `tests/support/tls_server.h`（提交的仅测试用证书在 `tests/fixtures/tls/`，信任通过 CTest `ENVIRONMENT` 属性提供）。任何测试都不访问公网或使用已安装证书库。
 - 二进制或不易理解的 fixture 要把生成器一起提交在它旁边（`tests/fixtures/<kind>/generate*.py`）：只用
   Python 标准库、英文、路径相对脚本目录、输出确定，并在 README 里记录重新生成命令与测试依赖的属性。
   重新生成必须复现已提交内容（字体 fixture 逐字节相同；PNG 字节可能随本地 zlib 变化），否则须在同一
@@ -55,7 +55,7 @@
 ## 构建
 
 ```sh
-# 快速构建浏览器本体：测试是 opt-in 的，因此不会编译 70 个测试可执行文件。
+# 快速构建浏览器本体：测试是 opt-in 的，因此不会编译 74 个测试可执行文件。
 # 未指定 CMAKE_BUILD_TYPE 时默认使用 RelWithDebInfo（M11）；调试时传
 # -DCMAKE_BUILD_TYPE=Debug。
 cmake -S . -B build

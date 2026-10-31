@@ -9,7 +9,8 @@ external stylesheet as untrusted input.
 
 The one deliberate security feature is HTTPS: certificate-chain and hostname verification are always
 on, there is no insecure mode and no way to disable verification. HTTP responses are bounded by a
-body size cap and timeouts.
+body size cap and timeouts, including after gzip decoding (M13); keep-alive connections
+do not change the trust model.
 
 ## Supported versions
 

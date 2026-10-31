@@ -62,7 +62,8 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
   `Check`/`g_failures` harness; older files migrate when they are touched. No test framework
   dependency.
 - Network-dependent code is tested against in-process loopback servers only: the header-only plain
-  HTTP server `tests/support/http_server.h` (M12, request recording for redirect/resource cases),
+  HTTP server `tests/support/http_server.h` (M12, request recording for redirect/resource cases;
+  since M13 persistent connections and connection/request counters),
   a plain HTTP server inside the `net` tests, and the header-only TLS server
   `tests/support/tls_server.h` (committed test-only certificates under `tests/fixtures/tls/`, trust
   supplied through the CTest `ENVIRONMENT` property). No test may contact the public network or use
@@ -88,7 +89,7 @@ Small, boring, consistent. Only rules that keep the codebase uniform — no styl
 ## Build
 
 ```sh
-# Fast browser-only build: tests are opt-in, so this does not compile 70 test executables.
+# Fast browser-only build: tests are opt-in, so this does not compile 74 test executables.
 # Without CMAKE_BUILD_TYPE the build defaults to RelWithDebInfo (M11); pass
 # -DCMAKE_BUILD_TYPE=Debug for unoptimised debugging.
 cmake -S . -B build

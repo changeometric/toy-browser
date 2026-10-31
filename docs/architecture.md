@@ -10,7 +10,7 @@ speculative — abstractions are added when a real slice needs them.
 | `base` | Small shared utilities (geometry, logging, UTF-8), only when a need appears | — | when first needed |
 | `platform` | Window, input events, event loop, presenting pixel surfaces | `base` | M1 |
 | `render` | Display list, software rasterizer, built-in bitmap font (metrics and glyphs), PNG image decoding (approved libpng), real-font engine (approved freetype + harfbuzz) | `base` | M1 |
-| `net` | URL parsing, sockets, HTTP/1.1 fetch over plain TCP or verified TLS (approved OpenSSL), `file://` reader | `base` | M2 |
+| `net` | URL parsing, sockets, HTTP/1.1 fetch over plain TCP or verified TLS (approved OpenSSL), keep-alive `Client` with gzip (approved zlib), `file://` reader | `base` | M2 |
 | `dom` | HTML tokenizer, tree builder, DOM arena | `base` | M3 |
 | `css` | CSS tokenizer, rule/declaration parser, selectors | `base` | M4 |
 | `style` | Cascade and computed styles, default stylesheet; author `<style>` rules plus caller-supplied external linked sheets (M12) in document order | `dom`, `css` | M4 |
@@ -32,16 +32,18 @@ frozen interfaces.
 ## One page load, end to end
 
 1. `shell` receives a URL (CLI argument or a link click).
-2. `net` fetches it: bytes, final URL, status.
+2. `net` fetches it through the page load's `net::Client`: bytes (gzip decoded), final URL, status;
+   the Client reuses a keep-alive connection for the resources that follow (M13).
 3. Bytes are decoded to UTF-8 (MVP: assume UTF-8, strip a BOM; other encodings later).
 4. `dom` parses the HTML into a `Document`.
 5. `shell` discovers the page's author stylesheets: the document's `<style>` elements (parsed by
    `css`) plus every applicable `<link rel="stylesheet">`, whose `href` is resolved against the
-   page's final URL, fetched with `net::Fetch` and skipped silently on failure (M12).
+   page's final URL, fetched through the same Client and skipped silently on failure (M12/M13).
 6. `style` resolves the cascade into a style tree: UA rules, then author `<style>` and linked
    sheets in document order, then inline `style` declarations.
 7. `shell` walks the DOM for `<img>` elements and, for each first `src`, resolves it against the
-   page's final URL, fetches it and decodes it with `render::DecodePng`; failures are skipped (M8a).
+   page's final URL, fetches it through the same Client and decodes it with `render::DecodePng`;
+   failures are skipped and a per-load URL cache deduplicates repeated image URLs (M8a/M13).
 8. `layout` turns the style tree into a box tree with geometry, using the shell-supplied intrinsic
    sizes for replaced elements.
 9. `paint` builds a flat display list from the box tree (backgrounds, images, text) and `render`
@@ -73,10 +75,28 @@ insecure mode. TCP connect uses `connect_timeout_ms`; the TLS handshake and all 
 `read_timeout_ms` and run over the existing non-blocking socket + `poll` loops; timeouts,
 certificate and hostname failures are ordinary readable `Fetch` errors. A clean `close_notify` and
 an unclean EOF both end the stream (truncation is still caught by Content-Length/chunked), and the
-TLS path ignores `SIGPIPE` once so a dead peer cannot kill the browser. No ALPN/HTTP/2,
-compression, cookies, HSTS, client certificates, TLS session reuse or caching is implemented; the
-shell needs no API or CLI change because it already goes through
-`ParseUrl`/`ResolveUrl`/`Fetch`.
+TLS path ignores `SIGPIPE` once so a dead peer cannot kill the browser. No ALPN/HTTP/2, cookies,
+HSTS, client certificates, TLS session reuse or HTTP caching is implemented; M9 needed no shell API
+or CLI change because the shell already went through `ParseUrl`/`ResolveUrl`/`Fetch` (page loads
+later switched to the M13 `Client`, which uses the same URL and TLS machinery).
+
+Resource loading (M13): `net::Client` (`toy/net/http.h`, pimpl) is the keep-alive HTTP/1.1 path the
+shell uses for a page load. It keeps at most one idle connection per origin (scheme, host, port),
+sends `Connection: keep-alive` and `Accept-Encoding: gzip`, and frames each response incrementally
+on the private `Stream`: a bounded header read, then exactly the Content-Length body or the full
+chunked body including trailers, leaving any read-ahead bytes on the pooled connection for the next
+request. Persistence follows HTTP/1.1 rules (no `Connection: close`) or HTTP/1.0
+(`Connection: keep-alive`) and needs a length delimiter; a persistent response without one is a
+readable error. gzip bodies are inflated with the approved zlib (identity passes through, other
+codings are errors, both raw and decoded bodies stay under `max_body_bytes`; headers are preserved).
+A stale pooled connection that fails before any response byte is retried once on a fresh
+connection; timeouts and fresh-connection failures are not retried. Redirects and `file://` behave
+like `Fetch()`, and the one-shot `Fetch()` itself is unchanged (its request bytes keep
+`Connection: close` and no compression negotiation) — it remains the convenience API for callers
+that do not need pooling. `shell` creates one `Client` per `LoadPage` and uses it for the page, its
+stylesheets and its images, deduplicating image URLs within that load (duplicate `<img>`s share one
+fetch, decode and `render::Image` object; failed URLs are remembered so duplicates are not retried;
+there is no cross-load cache).
 
 HTML and DOM (M3): `dom` owns the tokenizer, the simplified tree builder and the arena DOM. Parsing
 is error-tolerant and always produces one `html` element with `head` and `body` children; the
@@ -156,9 +176,12 @@ dependency is wrapped in `src/render/image.cpp`, pixels are converted to straigh
 `render::Image`, dimensions and pixel counts are validated before allocation, and no libpng type
 appears in a public header. `shell` owns the page-level policy in a private loader
 (`src/shell/page.h`): after fetching, parsing and styling the page and before layout, it resolves
-each `<img src>` against the page's final URL, fetches it with the same `net::Fetch` used for pages
-(http/https/file), decodes it, and keeps a `paint::ImageMap` plus a `layout::ReplacedSizes` map keyed
-by the img DOM node id.
+each `<img src>` against the page's final URL, fetches it through the page load's `net::Client`
+(http/https/file; `net::Fetch` before M13), decodes it, and keeps a `paint::ImageMap` plus a
+`layout::ReplacedSizes` map keyed by the img DOM node id. Since M13 the loader deduplicates image
+URLs within one page load: repeated `<img src>` values share one fetch, one decoded image object and
+one intrinsic size, and a failed fetch/decode is remembered so duplicate broken images are not
+retried (still no cross-load cache).
 Missing or failed images are skipped silently and the element lays out as an empty inline (MVP
 limit). `paint` turns an inline replaced box with a decoded image into a `DrawImage` command; the
 display list keeps a `shared_ptr<const Image>`, so a list may outlive the page data it was built
@@ -241,7 +264,8 @@ the page in a viewport clip and translates it by `-scroll_y`, and `render` execu
 stack. The window event loop forwards clicks, wheel notches and keys (Alt+Left/Right for
 back/forward, arrows/PageUp/PageDown/Home/End for scrolling) to the session and repaints on demand;
 the window title follows the first `<title>` text, falling back to the URL. Loading is synchronous
-inside the handler, keeping the single-threaded MVP model. The page loader, external-sheet
+inside the handler, keeping the single-threaded MVP model. The page loader (one keep-alive
+`net::Client` per load plus per-load image URL deduplication since M13), external-sheet
 discovery/fetching and image maps are private shell implementation details: `toy/shell/browser.h`
 keeps the same public methods and hides the page data behind a forward declaration and an
 out-of-line destructor.
@@ -269,7 +293,9 @@ can't form ownership cycles. Revisit only if it actually hurts.
 
 - One process, one thread, one event loop. No worker threads in the MVP. A `render::Font` caches a
   mutable freetype face size between measures/draws, so it is intentionally single-threaded; do not
-  share one `Font` across threads.
+  share one `Font` across threads. `net::Client` is likewise single-threaded and owns its own
+  connection pool per page load; do not share one Client across threads and do not pipeline
+  requests on it.
 - A page load runs synchronously inside a navigation callback; the window is unresponsive while
   loading. That is acceptable for the toy, and async networking only arrives if it becomes a real
   problem.
@@ -407,6 +433,18 @@ can't form ownership cycles. Revisit only if it actually hurts.
   `style.external_sheets` covers the cascade API directly, `shell.external_css` covers the shell
   end to end (including `Browser`/paint pixels), and CLI checks cover `--dump-style` with external
   sheets. No test uses the public network.
+- M13 resource-loading tests keep everything offline and assert counts, never wall time.
+  `tests/support/http_server.h` and `tests/support/tls_server.h` can now keep a connection open for
+  multiple requests and expose connection/request counters (the HTTP server can also force-close a
+  response as a stale idle connection). `net.keep_alive` covers same-origin reuse with
+  Content-Length/chunked bodies, `Connection: close`, two origins, stale-connection retry, fresh
+  failure, idle-connection closing, `file://`, redirects, HTTP/1.0 rules and the delimiter error;
+  `net.gzip` covers gzip decoding, identity, corrupt/unsupported encodings, the decoded body cap and
+  the fact that the one-shot `Fetch()` still sends no `Accept-Encoding`; `net.tls_keep_alive` proves
+  two https requests reuse one TLS connection; `shell.resource_loading` serves a page + stylesheet +
+  duplicate images from a loopback server and asserts one connection, one fetch per unique image
+  URL, shared decoded images, a single fetch for a duplicate broken image, and recovery after a
+  force-closed idle connection.
 
 ## Reference material
 

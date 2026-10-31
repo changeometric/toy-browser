@@ -43,13 +43,17 @@
 
 namespace toy_test {
 
-// One canned HTTP/1.1 response. The server adds `Content-Length`, `Connection: close` and the
-// status line, writes the body and closes the connection.
+// One canned HTTP/1.1 response. The server adds `Content-Length`, a `Connection`
+// header and the status line, writes the body and then either closes the connection
+// or (when `keep_alive` is true) waits for another request on the same TLS
+// connection. Set `keep_alive` in the handler to exercise persistent HTTPS clients.
 struct HttpResponse {
   int status = 200;
   // Extra response headers, written in order before Content-Length.
   std::vector<std::pair<std::string, std::string>> headers;
   std::string body;
+  // True to keep the TLS connection open for another request after this response.
+  bool keep_alive = false;
 };
 
 // A TLS server thread that answers requests until stopped. Every accepted connection is served
@@ -141,6 +145,13 @@ class TlsServer {
   // True while the listener is open.
   bool started() const { return listen_fd_ >= 0; }
 
+  // Number of TCP connections accepted so far (a keep-alive TLS client must keep
+  // this at 1 while reusing one connection across several requests).
+  int connection_count() const { return connections_.load(); }
+
+  // Number of complete request headers served so far.
+  int request_count() const { return request_count_.load(); }
+
   // The ephemeral port the server listens on, or 0 when stopped.
   std::uint16_t port() const { return port_; }
 
@@ -167,6 +178,7 @@ class TlsServer {
       if (fd < 0) {
         continue;
       }
+      connections_.fetch_add(1);
       if (!tls_) {
         // Hold the connection open without speaking TLS, then close on shutdown.
         while (!stop_.load()) {
@@ -200,26 +212,36 @@ class TlsServer {
 
     std::string request;
     char buffer[4096];
-    while (request.find("\r\n\r\n") == std::string::npos && request.size() < kMaxRequestBytes) {
-      const int received = SSL_read(ssl, buffer, static_cast<int>(sizeof(buffer)));
-      if (received <= 0) {
+    for (;;) {
+      request.clear();
+      while (request.find("\r\n\r\n") == std::string::npos && request.size() < kMaxRequestBytes) {
+        const int received = SSL_read(ssl, buffer, static_cast<int>(sizeof(buffer)));
+        if (received <= 0) {
+          break;
+        }
+        request.append(buffer, static_cast<std::size_t>(received));
+      }
+      if (stop_.load() || request.find("\r\n\r\n") == std::string::npos) {
         break;
       }
-      request.append(buffer, static_cast<std::size_t>(received));
-    }
+      request_count_.fetch_add(1);
 
-    const HttpResponse response =
-        handler_ != nullptr ? handler_(RequestTarget(request)) : HttpResponse{};
-    const std::string raw = BuildResponse(response);
-    std::size_t offset = 0;
-    while (offset < raw.size()) {
-      const std::size_t remaining = raw.size() - offset;
-      const std::size_t chunk = remaining < 16384 ? remaining : 16384;
-      const int written = SSL_write(ssl, raw.data() + offset, static_cast<int>(chunk));
-      if (written <= 0) {
+      const HttpResponse response =
+          handler_ != nullptr ? handler_(RequestTarget(request)) : HttpResponse{};
+      const std::string raw = BuildResponse(response);
+      std::size_t offset = 0;
+      while (offset < raw.size()) {
+        const std::size_t remaining = raw.size() - offset;
+        const std::size_t chunk = remaining < 16384 ? remaining : 16384;
+        const int written = SSL_write(ssl, raw.data() + offset, static_cast<int>(chunk));
+        if (written <= 0) {
+          break;
+        }
+        offset += static_cast<std::size_t>(written);
+      }
+      if (offset < raw.size() || !response.keep_alive) {
         break;
       }
-      offset += static_cast<std::size_t>(written);
     }
     // Send close_notify once (best effort) so a well-behaved client sees a clean EOF; clients must
     // still treat an unclean EOF as end of stream, because real servers vary.
@@ -277,7 +299,7 @@ class TlsServer {
       raw += name + ": " + value + "\r\n";
     }
     raw += "Content-Length: " + std::to_string(response.body.size()) + "\r\n";
-    raw += "Connection: close\r\n\r\n";
+    raw += response.keep_alive ? "Connection: keep-alive\r\n\r\n" : "Connection: close\r\n\r\n";
     raw += response.body;
     return raw;
   }
@@ -326,6 +348,8 @@ class TlsServer {
   bool tls_ = true;
   Handler handler_;
   std::atomic<bool> stop_{true};
+  std::atomic<int> connections_{0};
+  std::atomic<int> request_count_{0};
   std::thread thread_;
 };
 
