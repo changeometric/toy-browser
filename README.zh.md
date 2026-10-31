@@ -131,14 +131,15 @@ docs/               架构、路线图、决策、约定、接管笔记
 ## 状态与限制
 
 里程碑 M0–M11 已完成：浏览器能渲染真实页面、支持真实字体与图片、支持 HTTPS，并有可导航窗口。
-下一个计划里程碑是 HTTP 代理（M12，已延后）；JavaScript 子集也已延后。
+下一个计划里程碑是外部样式表（M12），随后是资源加载管线（M13）、CSS 兼容批次 1（M14）与
+flexbox/position/float 子集（M15）。HTTP 代理（M16）与 JavaScript 子集已延后。
 
 当前里程碑集刻意保留的限制：
 
-- HTML/CSS 只支持一个小子集：没有 JavaScript、表单、表格、float、flexbox/grid、外部样式表、
-  border、水平滚动或滚动条。
+- HTML/CSS 只支持一个小子集：外部样式表尚未支持（M12）；也没有 JavaScript、表单、表格、float、
+  flexbox/grid、border、水平滚动或滚动条。
 - 拉丁与中文之外的文字是尽力支持；没有 bidi/RTL 排序，也没有完整的 Unicode 断行。
-- 还没有代理、HTTP keep-alive、压缩、并行资源加载或图片缓存。
+- 还没有代理（M16），也没有 HTTP keep-alive、压缩、并行资源加载或图片缓存（M13）。
 - 渲染是纯软件、单线程；没有 GPU 后端，呈现时整帧发送给 X server。
 - 没有做安全加固：把抓取到的页面当作不可信输入，不要在其中输入敏感信息。
 

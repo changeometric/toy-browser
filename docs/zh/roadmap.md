@@ -4,7 +4,9 @@
 
 每个里程碑都是一个最小垂直切片：小、可构建、可演示、可测试。一个里程碑在其演示命令可用、新逻辑有测试、文档仍然准确时才算完成。
 
-**当前状态：M0–M11 已完成（M11 = 性能）。M12（HTTP 代理）被用户延后；JavaScript 子集已暂缓。**
+**当前状态：M0–M11 已完成（M11 = 性能）。M12（外部样式表）是下一个计划里程碑；M13（资源加载
+管线）、M14（CSS 兼容批次 1）与 M15（flexbox/position/float 子集）随后进行。HTTP 代理（M16）与
+JavaScript 子集已延后。**
 快照与接管指南见 [handoff.md](handoff.md)。
 
 ## M0 — 设计与骨架 ✅（已完成）
@@ -40,7 +42,7 @@
 - `style` 模块：由我们自己的 CSS 解析器解析内置 UA 样式表、选择器匹配、按 specificity（优先级）与 `!important` 做 UA/作者/行内层叠、继承，以及支持的属性集（display、color、background-color、font-size 的 px/em、font-weight、font-style、margin/padding 长写属性与 1-4 值简写、width/height 的 auto 或 px/em）。
 - `--dump-style <url>`：把逐元素的确定性计算样式树输出到 stdout，完全 headless。
 - 已达成验收：`css.parser`、`style.cascade`、`style.dump`、`shell.dump_style_file` 和 `shell.dump_style_missing_file` 在 GCC 和 Clang 下、警告视为错误时通过（共 20 个测试）。
-- M4 已知限制：没有外部 `<link>` 样式表（需要 URL 解析与抓取；以后再做），没有 at-rule 内容，没有伪类/伪元素，没有属性选择器，没有 `rgb()`/`hsl()`/`calc()`、`inherit`/`initial` 关键字或 CSS 变量，没有 `%`/`pt`/`rem` 单位，没有 `margin: auto`，命名颜色使用标准值（例如 green = #008000）。
+- M4 已知限制：没有外部 `<link>` 样式表（计划为 M12），没有 at-rule 内容，没有伪类/伪元素，没有属性选择器，没有 `rgb()`/`hsl()`/`calc()`、`inherit`/`initial` 关键字或 CSS 变量，没有 `%`/`pt`/`rem` 单位，没有 `margin: auto`，命名颜色使用标准值（例如 green = #008000）。
 
 ## M5 — 布局 ✅（已完成）
 
@@ -172,9 +174,9 @@
   （共 57 个测试）；本地 HTTPS 页面（含图片）可 headless 渲染；证书、主机名与超时失败给出明确错误；
   所有 M9 之前的 `http`/`file` dump 与截图与 M8b 基线逐字节相同，GCC/Clang 的 PPM 也逐字节相同；
   手工公网站点检查（原始 body、DOM dump、截图）可用。真实站点检查是手动的、依赖网络；受限网络仍需
-  M12 代理。
+  M16 代理。
 - M9 已知限制：只有 HTTP/1.1（无 ALPN/HTTP/2）、无压缩（不发送 `Accept-Encoding`）、无
-  cookie/会话、HSTS、混合内容拦截、客户端证书、TLS 会话复用或 HTTP 缓存；无代理（M12）；IPv6 字面量
+  cookie/会话、HSTS、混合内容拦截、客户端证书、TLS 会话复用或 HTTP 缓存；无代理（M16）；IPv6 字面量
   https URL 仍不被 URL 解析器支持；信任策略就是 OpenSSL 默认信任库加标准环境变量覆盖（无 pinning，
   也没有 insecure 模式）；TLS context 每个进程惰性创建一次；真实站点渲染仍受现有 HTML/CSS 子集限制；
   公网细节从不提交，真实站点检查保持手工。
@@ -252,19 +254,79 @@
   （XShm/dirty-rect 留待后续，需要新依赖审批）；GPU 渲染刻意不使用（实测填充率不是瓶颈，成本在
   CPU 算法；是否重新评估见 decisions）。
 
-## M12 — HTTP 代理（计划中；用户要求 M9 之后延后）
+## M12 — 外部样式表（计划中；下一个里程碑）
 
-（与英文原版相同的代理计划：`http://` absolute-form、`https://` `CONNECT`、`--proxy` 与环境变量回退、
-进程内假代理测试；范围与契约在该轮开始时冻结。）
+- 目标：通过 `<link rel="stylesheet" href="...">` 引用 CSS 的页面，能把这些规则与内联 `<style>`、
+  `style` 属性放进同一套级联后应用。这是当前引擎与真实页面之间最大的功能性缺口：M4 刻意留下它，
+  而大多数真实站点把样式放在外部文件里。
+- 为什么现在做：它是真实页面样式的最小功能前提，不需要新依赖或架构改动，也能让 M14/M15 的工作在
+  真实站点上得到验证。2026-10-31 的真实站点实测表明：外部 CSS 目前被忽略，而加载时间另受串行图片
+  抓取支配，后者由 M13 解决。
+- 预期形态（契约在该轮开始时冻结）：按文档顺序发现 `<link>`，按 `rel`/`href`/`media`/`type`/
+  `disabled` 过滤，`href` 相对重定向后的最终 URL 解析，用现有 `net::Fetch` 抓取（16 MiB body 上限；
+  测试使用 `file://` 与 loopback server），用现有 CSS parser 解析，并按文档顺序把 author 样式表与
+  `<style>` 交错应用。缺失、失败或不支持的样式表像今天的图片一样静默跳过。预计不需要新依赖。
+- 在重新划范围之前不做：`@import`、alternate/disabled 样式表、media queries、`url(...)` 资源、CSS
+  `@charset` 处理与跨域限制。
+- 测试必须离线且确定：fixture 站点包含子目录中的外部样式表、相对与绝对 `href`、`link`/`style` 顺序、
+  重复与失败链接、由 loopback server 提供的重定向样式表 URL，以及不带 link 的页面逐字节兼容。
+- 验收：所有 M12 之前测试加新的 style/shell 测试在 GCC 与 Clang 下通过；手工真实站点检查（一个不依赖
+  JavaScript 的标准/文档页面）能明显应用其排版与颜色；任何不带 `<link>` 的页面像素或 dump 不变。
+- 本轮之后的已知限制：许多真实样式表仍使用不支持的 selector/属性与布局特性（M14/M15）；样式表抓取
+  仍是串行的（M13）；没有 `@import`、media queries、webfont 或 CSS 图片。
+
+## M13 — 资源加载管线（计划中）
+
+- 目标：让含大量资源的页面加载时间与字节数成正比，而不是与 TLS 握手次数成正比。本项目的实测起点：
+  图片较多的真实页面墙体时间约 20 s，而进程只用约 0.1 s CPU，因为每个 `<img>` 都用新连接串行抓取
+  （没有 keep-alive、压缩与图片缓存）。
+- 预期形态：一个 net session/client，按 host 复用 HTTP/1.1 连接（keep-alive、`Connection: close`/EOF
+  处理、chunked 与 `Content-Length` body、超时）；用已批准的 zlib 解码 gzip；按页面（可选跨 session）
+  对图片 URL 去重/缓存。公开 `Fetch` 保留为便捷包装；渲染像素与 dump 不得改变。
+- 测试：loopback HTTP/HTTPS server 断言连接复用、gzip body、body 上限、重定向与重复图片请求；不访问
+  公网；不断言耗时。
+- 验收：图片较多的真实页面有实测 before/after 加载时间下降；连接复用与请求数由测试断言；所有既有输出
+  逐字节不变。
+- 非目标：HTTP/2、cookie、HTTP 缓存头、代理（M16）；去重缓存之外的懒加载；是否增加有限并行图片预取
+  （以及因此引入线程）由 keep-alive 实测数据决定，而不是预先假设。
+
+## M14 — CSS 兼容批次 1（计划中）
+
+- 目标：在 M12 让真实样式表可用之后，应用真实页面依赖的高频 CSS。代表性真实样式表目前会使用（而我们
+  忽略）：`line-height`、`text-align`、`text-decoration`、`border` 与 `border-*` 颜色、`background`
+  简写（颜色部分）、`max-width`/`min-width`、`margin: auto`、`box-sizing`、逻辑属性
+  （`margin-block-*`、`inline-size` 等）、`overflow: hidden` 裁剪、`rgb()`/`hsl()`、`%`/`rem` 单位，
+  以及 `display: none`/`visibility`。
+- 预期形态：扩展属性 parser、计算样式，并在需要处扩展 layout/paint，拆成小的、分别测试的切片；保持
+  级联/特异性/继承/`!important` 不变量；不使用新属性的页面保持逐字节输出不变。
+- 验收：每个属性都有 fixture 页面、dump/截图测试、无回归，并做手工真实站点视觉检查。批次过大时拆分
+  （例如先 border，随后逻辑属性与单位）。
+- 非目标：flexbox/grid/position/float（M15）、CSS 变量、其他 at-rule、webfont。
+
+## M15 — Flexbox / position / float 子集（计划中；开始前重新确认范围）
+
+- 目标：支持现代静态页面最常用的布局机制：flexbox 的实用子集（row/column 方向、`justify-content`、
+  `align-items`、`gap`、`flex-grow`/`shrink`/`basis`、换行）和/或基础 `position`/`float`。具体拆分由
+  M14 的实测决定；flexbox 本身足够大，可以单独成为一个垂直切片。
+- 验收：支持子集的 fixture 页面加真实站点视觉检查；确定性盒 dump 与截图；无回归。
+- 在重新划范围之前不做：grid、表格、表单、动画/transform、完整规范符合性。
+
+## M16 — HTTP 代理（计划中；用户要求 M9 之后延后）
+
+- `http://` 通过 HTTP 代理以 absolute-form 请求目标抓取；`https://` 通过代理 `CONNECT` 隧道后再做
+  正常的 TLS 握手。
+- CLI `--proxy host:port` 加标准 `http_proxy`/`https_proxy` 环境变量回退；进程内假代理测试。这是在
+  直接出网受限的网络上让真实站点测试变得实用的能力。
+- 范围与契约在该轮开始时冻结；预计不需要新依赖。
 
 ## 暂缓 —— JavaScript 子集
 
 - 用户于 2026-10-31 暂缓 JavaScript 子集；它不是下一个里程碑。它仍是一个大的可选里程碑（词法
   分析器、解析器、小型解释器、DOM 绑定与事件处理器）；没有用户明确的优先级决定不要开始。
 
-## M13+ — 机会性工作
+## M17+ — 机会性工作
 
-更多 CSS（flex、表格）、表单、更好的文本处理、性能、一致性测试套件。每一项都只在前一个切片干净、且用户同意优先级之后才开始。
+更多 CSS（补充 flex/grid、表格）、表单、更多图片格式、更好的文本处理、一致性测试套件与进一步性能。每一项都只在前一个切片干净、且维护者同意优先级之后才开始。
 
 ## Backlog — 计划中的后续工作
 

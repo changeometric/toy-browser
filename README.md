@@ -140,16 +140,19 @@ nothing about HTML/CSS and the platform layer knows nothing about page content.
 ## Status and limitations
 
 Milestones M0–M11 are complete: the browser renders real pages, supports real fonts and images,
-speaks HTTPS and has a navigable window. The next planned milestone is HTTP proxy support (M12),
-which is deferred; the JavaScript subset is deferred as well.
+speaks HTTPS and has a navigable window. The next planned milestone is external stylesheet support
+(M12), followed by a resource loading pipeline (M13), CSS compatibility batch 1 (M14) and a
+flexbox/position/float subset (M15). HTTP proxy support (M16) and the JavaScript subset are
+deferred.
 
 Known limits, by design of the current milestone set:
 
-- HTML/CSS support is a small subset: no JavaScript, forms, tables, floats, flexbox/grid, external
-  stylesheets, borders, horizontal scrolling or scrollbars.
+- HTML/CSS support is a small subset: no external stylesheets yet (M12), no JavaScript, forms,
+  tables, floats, flexbox/grid, borders, horizontal scrolling or scrollbars.
 - Text support is best-effort for scripts beyond Latin and Chinese; no bidi/RTL ordering and no
   full Unicode line breaking.
-- No proxy support, HTTP keep-alive, compression, parallel resource loading or image cache yet.
+- No proxy support (M16) and no HTTP keep-alive, compression, parallel resource loading or image
+  cache yet (M13).
 - Rendering is software-only and single-threaded; there is no GPU backend, and presentation sends
   the whole frame to the X server.
 - Not security-hardened: treat fetched pages as untrusted input, do not enter secrets into it.

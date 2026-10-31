@@ -3,9 +3,10 @@
 Each milestone is a minimal vertical slice: small, buildable, demoable and tested. A milestone is
 done when its demo command works, new logic has tests, and the docs are still accurate.
 
-**Current status: M0–M11 are done (M11 = performance). M12 (HTTP proxy) is deferred by the user;
-the JavaScript subset is deferred.** For a snapshot and takeover guide, read
-[handoff.md](handoff.md).
+**Current status: M0–M11 are done (M11 = performance). M12 (external stylesheets) is the next
+planned milestone; M13 (resource loading pipeline), M14 (CSS compatibility batch 1) and M15
+(flexbox/position/float subset) follow it. The HTTP proxy (M16) and the JavaScript subset are
+deferred.** For a snapshot and takeover guide, read [handoff.md](handoff.md).
 
 ## M0 — Design and skeleton ✅ (done)
 
@@ -67,7 +68,7 @@ the JavaScript subset is deferred.** For a snapshot and takeover guide, read
 - Acceptance reached: `css.parser`, `style.cascade`, `style.dump`, `shell.dump_style_file` and
   `shell.dump_style_missing_file` pass under GCC and Clang with warnings as errors (20 tests
   total).
-- Known M4 limits: no external `<link>` stylesheets (needs URL resolution and fetching; later), no
+- Known M4 limits: no external `<link>` stylesheets (planned as M12), no
   at-rule contents, no pseudo-classes/elements, no attribute selectors, no `rgb()`/`hsl()`/`calc()`,
   `inherit`/`initial` keywords or CSS variables, no `%`/`pt`/`rem` units, no `margin: auto`, and
   named colors use the standard values (e.g. green = #008000).
@@ -259,10 +260,10 @@ the JavaScript subset is deferred.** For a snapshot and takeover guide, read
   certificate, hostname and timeout failures are explicit errors; every pre-M9 `http`/`file` dump
   and screenshot is byte-identical to the M8b baseline and GCC/Clang PPMs are identical; manual
   public-site checks (raw body, DOM dump, screenshot) work. Real-site checking is manual and
-  network-dependent; restricted networks still need the M12 proxy.
+  network-dependent; restricted networks still need the M16 proxy.
 - Known M9 limits: HTTP/1.1 only (no ALPN/HTTP/2), no compression (no `Accept-Encoding` is sent), no
   cookies/sessions, HSTS, mixed-content blocking, client certificates, TLS session reuse or HTTP
-  caching; no proxy (M12); IPv6 literal https URLs are still unsupported by the URL parser; the
+  caching; no proxy (M16); IPv6 literal https URLs are still unsupported by the URL parser; the
   trust policy is exactly OpenSSL's default store plus the standard env overrides (no pinning, no
   insecure mode); the TLS context is created lazily once per process; real-world rendering stays
   limited by the existing HTML/CSS subset; public-network details are never committed and real-site
@@ -360,7 +361,81 @@ the JavaScript subset is deferred.** For a snapshot and takeover guide, read
   deliberately not used (measurements show fill rate is not the bottleneck; the costs are
   algorithmic CPU work).
 
-## M12 — HTTP proxy (planned; deferred by the user after M9)
+## M12 — External stylesheets (planned; next milestone)
+
+- Goal: a page that references its CSS with `<link rel="stylesheet" href="...">` renders with those
+  rules applied, in the same cascade as inline `<style>` and `style` attributes. This is the single
+  largest functional gap between the current engine and real pages: M4 deliberately left it out and
+  most real sites ship their styling as external files.
+- Why now: it is the smallest functional prerequisite for real-page styling, needs no new dependency
+  or architecture change, and lets the M14/M15 work be validated against real sites. Real-site
+  measurements on 2026-10-31 showed external CSS is ignored today while load time is separately
+  dominated by serial image fetches, which M13 addresses.
+- Expected shape (contracts are frozen at the start of the round): discover `<link>` elements in
+  document order, filter on `rel`/`href`/`media`/`type`/`disabled`, resolve `href` against the
+  page's final URL after redirects, fetch with the existing `net::Fetch` (16 MiB body cap; tests use
+  `file://` and the loopback server), parse with the existing CSS parser, and apply author sheets in
+  document order interleaved with `<style>`. Missing, failed or unsupported sheets are skipped
+  silently, like images today. No new dependency is expected.
+- Out of scope until re-scoped: `@import`, alternate/disabled stylesheets, media queries,
+  `url(...)` resources, CSS `@charset` handling and cross-origin restrictions.
+- Tests must be offline and deterministic: a fixture site with an external sheet in a
+  subdirectory, relative and absolute `href`s, `link`/`style` ordering, duplicate and failing
+  links, a redirecting stylesheet URL served by the loopback server, and byte-compatibility for
+  pages without links.
+- Acceptance: all pre-M12 tests plus the new style/shell tests pass on GCC and Clang; a manual
+  real-site check (a standards/documentation page that does not require JavaScript) visibly applies
+  its typography and colors; no page without `<link>` changes a pixel or a dump.
+- Known limits after this round: many real stylesheets still use unsupported selectors/properties
+  and layout features (M14/M15); stylesheet fetches are still serial (M13); no `@import`, media
+  queries, webfonts or CSS images.
+
+## M13 — Resource loading pipeline (planned)
+
+- Goal: make pages with many assets load in time proportional to bytes, not to the number of TLS
+  handshakes. Measured start point on this project: image-heavy real pages spend ~20 s wall while
+  the process uses ~0.1 s CPU, because every `<img>` is fetched serially with a new connection (no
+  keep-alive, no compression, no image cache).
+- Expected shape: a net session/client owning reusable HTTP/1.1 connections per host (keep-alive,
+  `Connection: close`/EOF handling, chunked and `Content-Length` bodies, timeouts), gzip decoding
+  with the already-approved zlib, and image-URL deduplication/caching for a page (optionally across
+  a session). Public `Fetch` stays as a convenience wrapper; rendered pixels and dumps must not
+  change.
+- Tests: loopback HTTP/HTTPS servers assert connection reuse, gzip bodies, body caps, redirects and
+  duplicate image requests; no public network; no wall-time assertions.
+- Acceptance: a measured before/after load-time drop on image-heavy real pages; connection reuse and
+  request counts asserted by tests; every existing output byte-identical.
+- Non-goals: HTTP/2, cookies, HTTP caching headers, proxy (M16), lazy loading beyond the dedup
+  cache; whether to add limited parallel image prefetch (and therefore threading) is decided from
+  the keep-alive measurements, not assumed.
+
+## M14 — CSS compatibility batch 1 (planned)
+
+- Goal: apply the high-frequency CSS that real pages rely on once M12 makes their stylesheets
+  available. Representative real stylesheets currently exercise (and we ignore): `line-height`,
+  `text-align`, `text-decoration`, `border` and `border-*` colors, `background` shorthand (the
+  color part), `max-width`/`min-width`, `margin: auto`, `box-sizing`, logical properties
+  (`margin-block-*`, `inline-size`, ...), `overflow: hidden` clipping, `rgb()`/`hsl()`, `%`/`rem`
+  units, and `display: none`/`visibility`.
+- Expected shape: extend the property parser, computed style and — where required — layout/paint in
+  small, separately tested slices; keep the cascade/specificity/inheritance/`!important` invariants;
+  pages that do not use the new properties keep byte-identical output.
+- Acceptance: fixture pages for each property, dump/screenshot tests, no regressions, and a manual
+  real-site visual check. If the batch grows too large it is split (for example borders first,
+  logical properties and units as a follow-up).
+- Non-goals: flexbox/grid/position/float (M15), CSS variables, other at-rules, webfonts.
+
+## M15 — Flexbox / position / float subset (planned; scope re-confirmed before starting)
+
+- Goal: support the layout mechanisms modern static pages use most: a practical subset of flexbox
+  (row/column direction, `justify-content`, `align-items`, `gap`, `flex-grow`/`shrink`/`basis`,
+  wrapping) and/or basic `position`/`float`. The exact split is decided from the M14 measurements;
+  flexbox alone is large enough to be its own vertical slice.
+- Acceptance: fixture pages for the supported subset plus real-site visual checks; deterministic box
+  dumps and screenshots; no regressions.
+- Non-goals until re-scoped: grid, tables, forms, animations/transforms, full spec compliance.
+
+## M16 — HTTP proxy (planned; deferred by the user after M9)
 
 - Fetch `http://` through an HTTP proxy with absolute-form request targets, and `https://` through
   a proxy `CONNECT` tunnel followed by the TLS handshake.
@@ -375,10 +450,11 @@ the JavaScript subset is deferred.** For a snapshot and takeover guide, read
   large optional milestone (lexer, parser, small interpreter, DOM bindings and event handlers);
   do not start it without an explicit user priority decision.
 
-## M13+ — Opportunistic
+## M17+ — Opportunistic
 
-More CSS (flex, tables), forms, better text handling, performance, conformance suites. Each item
-starts only after the previous slice is clean and the user agrees on priority.
+More CSS (additional flex/grid, tables), forms, more image formats, better text handling,
+conformance suites and further performance. Each item starts only after the previous slice is clean
+and the maintainer agrees on priority.
 
 ## Backlog — planned follow-ups
 

@@ -25,12 +25,15 @@
 | M11 | 性能：默认 RelWithDebInfo 构建 + `-ffp-contract=off`；render 文本缓存（每个字体复用一个 hb_font/hb_buffer，有界 shaped-run 与 glyph 覆盖率 LRU）；shell 字体缓存（无分配的解析样式快速路径、度量与 run LRU）；paint 视口裁剪（文本保守余量）；窗口循环修正（Expose 不重排、resize 仅尺寸变化时重排、合并 X11 Expose/ConfigureNotify burst、复用 surface）；渲染逐字节不变；66 个测试 |
 | 审阅轮 | 修复无上限的 `--size`、文件 body 上限、dump 缩进；20 个 CTest 测试 |
 
-**下一计划里程碑：M12 —— HTTP 代理（已计划，尚未开始；用户已降低优先级）。** M11（性能）已
-交付。M12 通过 `FetchOptions` 支持 HTTP 代理（`http` 用 absolute-form，`https`
-用 `CONNECT`）；用户表示代理目前不重要，后续工作按其优先级安排。JavaScript 子集已暂缓。
+**下一计划里程碑：M12 —— 外部样式表（已计划，尚未开始）。** M11（性能）已交付，仓库已做好公开
+分享准备。M12 让 `<link rel="stylesheet">` 生效：按文档顺序发现样式表，相对最终 URL 解析、抓取、
+解析，并与内联 `<style>`、`style` 属性一起级联。随后是 M13（资源加载管线）、M14（CSS 兼容批次 1）
+与 M15（flexbox/position/float 子集）；HTTP 代理（M16）与 JavaScript 子集保持延后。
 
-尚未实现：代理（计划 M11）、JavaScript（已暂缓）、外部样式表、border、水平滚动/滚动条、
-hover/active 链接样式与表单控件，以及 `@font-face`/webfont 下载。字体选择自 M10 起自动完成
+尚未实现：外部样式表（下一步 M12）、资源加载（keep-alive/gzip/并行资源加载与图片缓存/懒加载，
+M13）、CSS 兼容与现代布局（M14/M15）、代理（M16）、JavaScript（已延后）、border、水平滚动/滚动条、
+hover/active 链接样式与表单控件、`@font-face`/webfont 下载、XShm/dirty-rect 呈现与 GPU 渲染
+（刻意决策，见 roadmap M11）。字体选择自 M10 起自动完成
 （CSS 字体族/weight/style 经 fontconfig、字符覆盖回退、CJK 断行）；其他语言尽力支持，bidi/RTL 与
 完整 Unicode 断行尚未实现。PNG 图片自 M8a 起可用、真实字体自 M8b 起可用、`https://` 自 M9 起可用
 （已知限制见 [roadmap.md](roadmap.md)）；`http://` 与 `file://` 仍受支持。窗口与 `--screenshot` 在
@@ -127,22 +130,30 @@ ctest --test-dir "$BUILD" -R '^(style\.parser|layout\.baseline|layout\.cjk_line_
 # 方向键/PageUp/PageDown/Home/End 滚动，Alt+Left/Right 前进后退；窗口标题跟随 <title>。
 ```
 
-## 下一轮：M12 —— HTTP 代理（已计划；等用户确认后开始）
+## 下一轮：M12 —— 外部样式表（已计划；等维护者确认后开始）
 
-**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M11 代码。M10 已完成且全绿，因此
-起点就是当前 HEAD；用户降低了代理优先级，开始前先确认。
+**状态：** 只有设计草案（见 [roadmap.md](roadmap.md)）；还没有 M12 代码。M11 已完成且全绿，因此
+起点就是当前 HEAD。M13–M15 是后续计划轮次；HTTP 代理移到 M16，JavaScript 子集保持延后。契约在该轮
+开始时冻结。
 
-- 目标：`http://` 通过 HTTP 代理以 absolute-form 请求目标抓取；`https://` 通过代理 `CONNECT` 隧道后
-  再做正常的 TLS 握手。浏览器自身的代理支持是在受限网络上让真实站点测试变得实用的能力。
-- 预期形态（契约在该轮开始时冻结）：`--proxy host:port` 加标准 `http_proxy`/`https_proxy` 环境变量
-  回退，全部留在 `net` 内、位于 `FetchOptions` 之后；预计不需要新的第三方依赖；进程内假代理测试
-  （不访问公网），未配置代理时输出逐字节不变。
-- 在重新划范围之前不做：SOCKS 代理、代理认证、bypass 列表、PAC。
+- 目标：渲染把样式放在外部文件里的页面。按文档顺序发现 `<link rel="stylesheet" href="...">`，
+  `href` 相对重定向后的最终 URL 解析，用现有 `net::Fetch` 抓取（16 MiB body 上限），用现有 CSS
+  parser 解析，并按文档顺序把 author 样式表与 `<style>`、`style` 属性交错应用。缺失、失败与不支持的
+  样式表像今天的图片一样静默跳过。
+- 预期形态（spawn 前冻结）：按 `rel`/`href`/`media`/`type`/`disabled` 过滤；只应用空/`all`/`screen`
+  media 与空/`text/css` type；沿用当前的 specificity/继承/`!important` 级联规则；不带 `<link>` 的
+  页面保持逐字节相同的 dump 与像素。不引入新依赖。
+- 在重新划范围之前不做：`@import`、alternate/disabled 样式表、media queries、`url(...)` 资源、
+  CSS `@charset`、跨域限制。
+- 测试：离线 fixture 站点（子目录中的外部样式表、相对/绝对 `href`、`link`/`style` 顺序、重复/失败
+  链接、loopback server 上的重定向样式表 URL），以及 M12 之前的字节兼容；测试不访问公网。
+- 验收：所有测试在 GCC 与 Clang 下通过；fixture 证明顺序与失败行为；手工真实站点检查（一个不依赖
+  JavaScript 的标准/文档页面）能明显应用其排版与颜色；文档更新。
+- M12 之后：M13 资源加载（keep-alive、gzip、图片缓存/去重；只有实测需要时才并行），然后 M14 CSS
+  兼容批次 1 与 M15 flexbox/position/float 子集。代理（M16）与 JavaScript 在维护者重新确认优先级
+  之前保持延后。
 
-M11 之后总路线图就全部变绿；剩余工作是已记录的 backlog（webfont、更多图片格式、外部样式表、
-bidi/RTL 与完整 Unicode 断行等）以及用户的新优先级。
-
-## 仓库地图
+## 仓库地图## 仓库地图
 
 - `src/<module>/` —— 每个模块一个 CMake 库目标（`base` 尚不存在；模块图与依赖方向见 [architecture.md](architecture.md)）。
 - `src/main.cpp` —— 只做 CLI 解析；`shell` 编排 fetch → parse → style → images → layout → paint →

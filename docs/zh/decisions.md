@@ -30,7 +30,7 @@
 | 手写位图字形表靠肉眼复核；不保留冻结的字形位图/指纹测试 | 冻结位图/指纹测试脆弱且不值得维护；real-font 测试同样断言着墨区域与 AA 存在性，而不是依赖库版本、会变化的覆盖率字节 | `src/render/font.cpp`, [handoff.md](handoff.md) |
 | HTML/CSS 支持是显式子集，已知限制有文档 | 这是浏览器玩具，不是规范符合性项目 | [roadmap.md](roadmap.md) |
 | M10：文本默认使用自动系统字体选择。计算出的 CSS `font-family` 列表、`font-weight`、`font-style` 通过已批准的 fontconfig 库匹配（初始字体族 `serif`），文本按字符覆盖切成 run，缺失字符回退到覆盖它的其他已安装字体，根 `<html lang>` 作为 fontconfig 语言提示传入。`--font PATH` 强制单一 face，`--font-family NAME` 强制首选字体族（仍保留字符回退）；没有可用字体时退化到内置位图字体而不是让页面加载失败 | 用户要求不手动传参、像普通浏览器一样选字体（先支持英文与中文）；把位图路径保留为退化路径既让 headless 环境可用，也让测试能逐字节固定所有 M10 之前输出 | [roadmap.md](roadmap.md), [handoff.md](handoff.md), `src/shell/include/toy/shell/fonts.h` |
-| 只支持 HTTP/1.1；TLS 使用已批准的 OpenSSL（自 M9 起链接）；HTTP 代理计划为 M12 但已被用户降低优先级；JavaScript 子集已暂缓 | 用户 2026-10-31 的优先级：需要 HTTPS 来测试真实站点，但从零实现 TLS 不合比例，因此使用已批准库；代理是独立的小轮次；JS 暂缓 | [roadmap.md](roadmap.md), [dependencies.md](dependencies.md), [open-questions.md](open-questions.md) |
+| 只支持 HTTP/1.1；TLS 使用已批准的 OpenSSL（自 M9 起链接）；HTTP 代理计划为 M16 但已被用户降低优先级；JavaScript 子集已暂缓 | 用户 2026-10-31 的优先级：需要 HTTPS 来测试真实站点，但从零实现 TLS 不合比例，因此使用已批准库；代理是计划中的外部样式表/资源加载/CSS 兼容弧之后的独立小轮次；JS 暂缓 | [roadmap.md](roadmap.md), [dependencies.md](dependencies.md), [open-questions.md](open-questions.md) |
 | 假定输入为 UTF-8（剥离 BOM）；无编码检测 | 让 M2–M4 保持小；编码以后再加 | [roadmap.md](roadmap.md) |
 | 每轮一个合并提交；仓库文件用英语，`README.zh.md` / `docs/zh/**` 除外 | 历史可读、仓库统一 | [AGENTS.md](../../AGENTS.md), [conventions.md](conventions.md) |
 
@@ -54,5 +54,6 @@
 | M11（已完成）修正窗口循环：Expose 只重绘不重排（仅当窗口尺寸与已布局视口不同才 SetViewport），resize 只有尺寸真正变化才重排，X11 后端合并连续的 Expose/ConfigureNotify 队列事件（输入/close 事件永不合并、丢弃或乱序；尺寸未变的 configure burst 不产生事件），每个窗口尺寸复用一个 `render::Surface` | 打开窗口会布局两次，resize 拖拽的每个 ConfigureNotify 都会重排并重绘；这些改动去掉冗余工作并防止事件队列堆积，且不改变任何渲染输出 | `src/platform/window.cpp`, `src/platform/include/toy/platform/window.h`, `src/shell/application.cpp`, [handoff.md](handoff.md) |
 | M11（已完成）刻意保留软件渲染，不添加 GPU 后端；窗口仍用 XPutImage 呈现整个 surface（XShm/dirty-rect 是后续工作，需要新依赖审批） | 实测表明填充率不是瓶颈（系统字体光栅化在 800×600 与 1600×1000 下耗时相同，瓶颈是 shaping/字形处理而不是像素），而 GPU 后端会增加平台/依赖/headless 回退复杂度且无法解决实测的 CPU 问题。只有在本轮缓存/裁剪后目标尺寸/DPI 下光栅化仍超帧预算时才重新评估 | [roadmap.md](roadmap.md), [handoff.md](handoff.md) |
 | fixture 生成器与它们生成的 fixture 一起提交（`tests/fixtures/fonts/generate_toy_test.py`、`tests/fixtures/fonts/generate_variants.py`、`tests/fixtures/images/generate.py`），只用 Python 标准库、相对脚本所在目录写文件且输出确定；fixture README 记录重新生成方法与测试依赖的属性 | fixture 是测试依赖的已提交二进制产物；把生成器纳入版本控制使其可复现、可审计，而不是依赖一次性脚本。重新生成必须复现已提交内容（字体生成器逐字节相同；PNG 字节可能随本地 zlib 变化），改动 fixture 仍须在同一改动中更新 README 与测试 | `tests/fixtures/fonts/README.md`, `tests/fixtures/images/README.md`, [conventions.md](conventions.md) |
+| M12–M15 的顺序是外部样式表（M12）→ 资源加载管线（M13）→ CSS 兼容批次 1（M14）→ flexbox/position/float 子集（M15）；HTTP 代理移到 M16，JavaScript 保持延后 | 2026-10-31 的真实站点实测表明：页面没有样式是因为外部 CSS 被忽略；图片较多的页面大部分墙体时间花在逐资源的新 TLS 连接上，而 CPU 很低。外部 CSS 是真实页面样式的最小功能前提，且不需要新依赖；资源管线是一个有限、可度量的收益，也会加速后续 CSS 工作；布局/CSS 兼容弧更大，拆成多轮以保持每次可审查 | [roadmap.md](roadmap.md), [handoff.md](handoff.md) |
 
 如果某个决策变得不合适，不要悄悄偏离：在 [open-questions.md](open-questions.md) 中提出，或与用户讨论，然后在同一轮更新本文件、受影响的文档与代码。

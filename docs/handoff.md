@@ -24,16 +24,18 @@ Milestones done (details and acceptance in [roadmap.md](roadmap.md)):
 | M11 | Performance: default RelWithDebInfo build with `-ffp-contract=off`; render text caches (one reusable hb_font/hb_buffer per font, bounded shaped-run and glyph-coverage LRU caches); shell font caches (allocation-free resolved-style fast path, metrics and run LRUs); paint viewport culling with a conservative text margin; window loop fixes (Expose without relayout, resize only on actual change, coalesced X11 Expose/ConfigureNotify bursts, reused surface); byte-identical rendering; 66 tests |
 | Review round | Fixed unbounded `--size`, file body cap, dump indentation; 20 CTest tests |
 
-**Next planned milestone: M12 — HTTP proxy (planned, not started; deprioritized by the user).**
-M11 (performance) shipped. M12 adds an HTTP proxy (absolute-form for `http`, `CONNECT` for
-`https`) behind `FetchOptions`; the user said the proxy is not important right now, so the
-remaining work is prioritised by them. The JavaScript subset is deferred.
+**Next planned milestone: M12 — External stylesheets (planned, not started).**
+M11 (performance) shipped and the repository is prepared for public sharing. M12 makes
+`<link rel="stylesheet">` work: sheets are discovered in document order, resolved against the page's
+final URL, fetched, parsed and cascaded with inline `<style>` and `style` attributes. M13 (resource
+loading pipeline), M14 (CSS compatibility batch 1) and M15 (flexbox/position/float subset) follow;
+the HTTP proxy (M16) and the JavaScript subset remain deferred.
 
-Not implemented yet: proxies (planned M12), JavaScript (deferred), external stylesheets, borders,
-horizontal scrolling/scrollbars, hover/active link styling and form controls, `@font-face`/webfont
-downloads, HTTP connection reuse/compression/parallel resource loading and image cache/lazy
-loading (real-site network performance), XShm/dirty-rect presentation, and GPU rendering (a
-deliberate decision, see roadmap M11). Font selection works automatically since M10 (CSS
+Not implemented yet: external stylesheets (next, M12), resource loading (keep-alive/gzip/parallel
+resource loading and image cache/lazy loading, M13), CSS compatibility and modern layout (M14/M15),
+proxies (M16), JavaScript (deferred), borders, horizontal scrolling/scrollbars, hover/active link
+styling and form controls, `@font-face`/webfont downloads, XShm/dirty-rect presentation, and GPU
+rendering (a deliberate decision, see roadmap M11). Font selection works automatically since M10 (CSS
 families/weight/style through fontconfig, character-coverage fallback, CJK line breaking); other
 scripts are best-effort and bidi/RTL plus full Unicode line breaking are not implemented. PNG
 images work since M8a, real fonts since M8b and `https://` since M9 (see the known limits in
@@ -149,26 +151,35 @@ Window demo (needs a display):
 # history; the title follows <title>.
 ```
 
-## Next round: M12 — HTTP proxy (planned; starts only on the user's go-ahead)
+## Next round: M12 — External stylesheets (planned; starts only on the maintainer's go-ahead)
 
 **Status:** design sketch only (in [roadmap.md](roadmap.md)); no M12 code exists. M11 is complete and
-green, so the starting point is the current HEAD; the user deprioritized the proxy, so confirm the
-priority before starting it.
+green, so the starting point is the current HEAD. M13–M15 are the following planned rounds; the
+HTTP proxy moved to M16 and the JavaScript subset stays deferred. Contracts are frozen when the
+round starts.
 
-- Goal: fetch `http://` through an HTTP proxy using absolute-form request targets, and `https://`
-  through a proxy `CONNECT` tunnel followed by the normal TLS handshake. The browser's own proxy
-  support is what makes real-site testing practical on restricted networks.
-- Expected shape (contracts are frozen at the start of that round): `--proxy host:port` plus the
-  standard `http_proxy`/`https_proxy` environment fallback, kept inside `net` behind
-  `FetchOptions`; no new third-party dependency is expected; in-process fake-proxy tests (no
-  public network) and byte-identical output when no proxy is configured.
-- Non-goals until re-scoped: SOCKS proxies, proxy authentication, bypass lists, PAC.
+- Goal: render pages that ship their styling as external files. Discover `<link rel="stylesheet"
+  href="...">` in document order, resolve `href` against the page's final URL after redirects,
+  fetch with the existing `net::Fetch` (16 MiB body cap), parse with the existing CSS parser and
+  apply the author sheets in document order interleaved with `<style>` and `style` attributes.
+  Missing, failed and unsupported sheets are skipped silently, like images today.
+- Expected shape (freeze before spawning): filter on `rel`/`href`/`media`/`type`/`disabled`;
+  only empty/`all`/`screen` media and empty/`text/css` types apply; document-order cascade with the
+  current specificity/inheritance/`!important` rules; pages without `<link>` keep byte-identical
+  dumps and pixels. No new dependency.
+- Out of scope until re-scoped: `@import`, alternate/disabled sheets, media queries, `url(...)`
+  resources, CSS `@charset`, cross-origin restrictions.
+- Tests: offline fixture site with an external sheet in a subdirectory, relative/absolute `href`s,
+  `link`/`style` ordering, duplicate/failing links, a redirecting stylesheet URL on the loopback
+  server, and pre-M12 byte-compatibility; no public network in tests.
+- Acceptance: all tests pass on GCC and Clang; the fixture proves ordering and failure behavior; a
+  manual real-site check (a standards/documentation page that needs no JavaScript) visibly applies
+  its typography and colors; docs updated.
+- After M12: M13 resource loading (keep-alive, gzip, image cache/dedup; measured parallelism only if
+  needed), then M14 CSS compatibility batch 1 and M15 the flexbox/position/float subset. The proxy
+  (M16) and JavaScript stay deferred until the maintainer prioritises them.
 
-After M12 the umbrella roadmap is green; the remaining work is the documented backlog (webfonts,
-more image formats, external stylesheets, bidi/RTL and full Unicode line breaking, etc.) and any new
-user priorities.
-
-## Map of the repository
+## Map of the repository## Map of the repository
 
 - `src/<module>/` — one CMake library target per module (`base` does not exist yet; see
   [architecture.md](architecture.md) for the module map and dependency direction).
